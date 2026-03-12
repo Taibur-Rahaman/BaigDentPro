@@ -1,14 +1,21 @@
 # Dependencies
 node_modules/
+server/node_modules/
 
 # Build
 dist/
+server/dist/
 *.local
+
+# Database
+*.db
+server/prisma/*.db
 
 # Env
 .env
 .env.local
 .env.*.local
+server/.env
 
 # Editor
 .vscode/

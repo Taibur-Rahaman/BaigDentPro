@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import api from './api';
 
 const PATIENTS_STORAGE_KEY = 'baigmed:patients';
 const MEDICAL_HISTORY_KEY = (patientId: string) => `baigmed:medicalHistory:${patientId}`;
@@ -135,6 +136,66 @@ const QUICK_ACTIONS = [
   { icon: 'fa-file-invoice', label: 'New Invoice', color: '#22c55e' },
 ];
 
+const PRODUCT_CATEGORIES = [
+  { id: 'TOOTHBRUSH', name: 'Toothbrush', icon: '🪥' },
+  { id: 'TOOTHPASTE', name: 'Toothpaste', icon: '🦷' },
+  { id: 'MOUTHWASH', name: 'Mouthwash', icon: '🧴' },
+  { id: 'DENTAL_FLOSS', name: 'Dental Floss', icon: '🧵' },
+  { id: 'WHITENING', name: 'Whitening Kits', icon: '✨' },
+  { id: 'DENTAL_TOOLS', name: 'Dental Tools', icon: '🔧' },
+  { id: 'CLINIC_SUPPLIES', name: 'Clinic Supplies', icon: '🏥' },
+  { id: 'ORTHODONTIC', name: 'Orthodontic', icon: '😁' },
+  { id: 'KIDS_DENTAL', name: 'Kids Dental', icon: '👶' },
+  { id: 'OTHER', name: 'Other', icon: '📦' },
+];
+
+const ORDER_STATUSES = [
+  { id: 'PENDING', name: 'Pending', color: '#f59e0b' },
+  { id: 'CONFIRMED', name: 'Confirmed', color: '#3b82f6' },
+  { id: 'PROCESSING', name: 'Processing', color: '#8b5cf6' },
+  { id: 'SHIPPED', name: 'Shipped', color: '#0284c7' },
+  { id: 'DELIVERED', name: 'Delivered', color: '#22c55e' },
+  { id: 'CANCELLED', name: 'Cancelled', color: '#ef4444' },
+  { id: 'RETURNED', name: 'Returned', color: '#64748b' },
+];
+
+interface ShopProduct {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  price: number;
+  comparePrice?: number;
+  category: string;
+  stock: number;
+  isActive: boolean;
+  isFeatured: boolean;
+  sku?: string;
+  images: string[];
+  createdAt: string;
+}
+
+interface ShopOrder {
+  id: string;
+  orderNo: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  shippingAddress: string;
+  shippingCity: string;
+  total: number;
+  status: string;
+  paymentMethod: string;
+  createdAt: string;
+  items: { name: string; quantity: number; price: number }[];
+}
+
+interface ShopStats {
+  products: { total: number; active: number; lowStock: number };
+  orders: { total: number; pending: number; today: number };
+  revenue: { total: number; today: number };
+}
+
 const STATS = [
   { label: 'Total Patients', value: '1,234', icon: 'fa-users', color: '#0d9488' },
   { label: 'Today Appointments', value: '12', icon: 'fa-calendar-check', color: '#0284c7' },
@@ -214,7 +275,20 @@ export const RecordsPage: React.FC<Props> = ({ onBackToLogin, userName = 'User' 
   const [searchQuery, setSearchQuery] = useState('');
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [showEarningModal, setShowEarningModal] = useState(false);
-  const [recordsView, setRecordsView] = useState<'home' | 'inventory' | 'patients' | 'appointment' | 'subscription' | 'patient-profile'>('home');
+  const [recordsView, setRecordsView] = useState<'home' | 'inventory' | 'patients' | 'appointment' | 'subscription' | 'patient-profile' | 'shop'>('home');
+  
+  // Shop state
+  const [shopTab, setShopTab] = useState<'overview' | 'products' | 'orders'>('overview');
+  const [shopProducts, setShopProducts] = useState<ShopProduct[]>([]);
+  const [shopOrders, setShopOrders] = useState<ShopOrder[]>([]);
+  const [shopStats, setShopStats] = useState<ShopStats | null>(null);
+  const [shopLoading, setShopLoading] = useState(false);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<ShopProduct | null>(null);
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [viewingOrder, setViewingOrder] = useState<ShopOrder | null>(null);
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('');
   const [patients, setPatients] = useState<SavedPatient[]>(() => loadPatients());
   const [profilePatient, setProfilePatient] = useState<SavedPatient | null>(null);
   const [viewingPatient, setViewingPatient] = useState<SavedPatient | null>(null);
@@ -253,6 +327,112 @@ export const RecordsPage: React.FC<Props> = ({ onBackToLogin, userName = 'User' 
 
 
   const showNotice = (msg: string) => { setNotice(msg); setTimeout(() => setNotice(null), 3000); };
+
+  // Shop functions
+  const loadShopData = async () => {
+    setShopLoading(true);
+    try {
+      const [statsRes, productsRes, ordersRes] = await Promise.all([
+        api.shopAdmin.stats(),
+        api.shopAdmin.products({ search: productSearchQuery || undefined }),
+        api.shopAdmin.orders({ status: orderStatusFilter || undefined }),
+      ]);
+      setShopStats(statsRes);
+      setShopProducts(productsRes.products);
+      setShopOrders(ordersRes.orders);
+    } catch (error) {
+      console.log('Shop API not available, using demo data');
+      setShopStats({
+        products: { total: 24, active: 20, lowStock: 3 },
+        orders: { total: 156, pending: 8, today: 3 },
+        revenue: { total: 125000, today: 4500 },
+      });
+      setShopProducts([
+        { id: '1', name: 'Oral-B Electric Toothbrush Pro', slug: 'oral-b-pro', description: 'Advanced electric toothbrush with 3D cleaning', price: 2500, category: 'TOOTHBRUSH', stock: 25, isActive: true, isFeatured: true, sku: 'TB-001', images: [], createdAt: new Date().toISOString() },
+        { id: '2', name: 'Colgate Total Toothpaste 150g', slug: 'colgate-total', description: '12-hour protection', price: 180, category: 'TOOTHPASTE', stock: 100, isActive: true, isFeatured: false, sku: 'TP-001', images: [], createdAt: new Date().toISOString() },
+        { id: '3', name: 'Listerine Mouthwash 500ml', slug: 'listerine-500', description: 'Antiseptic mouthwash', price: 350, category: 'MOUTHWASH', stock: 3, isActive: true, isFeatured: true, sku: 'MW-001', images: [], createdAt: new Date().toISOString() },
+        { id: '4', name: 'Crest Whitening Strips', slug: 'crest-white', description: 'Professional whitening at home', price: 3500, category: 'WHITENING', stock: 15, isActive: true, isFeatured: true, sku: 'WK-001', images: [], createdAt: new Date().toISOString() },
+        { id: '5', name: 'Dental Floss Premium', slug: 'floss-premium', description: 'Waxed dental floss 50m', price: 120, category: 'DENTAL_FLOSS', stock: 50, isActive: true, isFeatured: false, sku: 'DF-001', images: [], createdAt: new Date().toISOString() },
+      ]);
+      setShopOrders([
+        { id: '1', orderNo: 'ORD202603001', customerName: 'Ahmed Rahman', customerPhone: '01711234567', shippingAddress: 'House 12, Road 5, Dhanmondi', shippingCity: 'Dhaka', total: 2850, status: 'PENDING', paymentMethod: 'COD', createdAt: new Date().toISOString(), items: [{ name: 'Oral-B Electric Toothbrush', quantity: 1, price: 2500 }, { name: 'Listerine Mouthwash', quantity: 1, price: 350 }] },
+        { id: '2', orderNo: 'ORD202603002', customerName: 'Fatima Begum', customerPhone: '01812345678', shippingAddress: 'Flat 5B, Green Tower, Gulshan', shippingCity: 'Dhaka', total: 3680, status: 'CONFIRMED', paymentMethod: 'ONLINE', createdAt: new Date(Date.now() - 86400000).toISOString(), items: [{ name: 'Crest Whitening Strips', quantity: 1, price: 3500 }, { name: 'Colgate Total', quantity: 1, price: 180 }] },
+        { id: '3', orderNo: 'ORD202603003', customerName: 'Karim Miah', customerPhone: '01912345678', shippingAddress: 'Shop 22, Newmarket', shippingCity: 'Chittagong', total: 720, status: 'DELIVERED', paymentMethod: 'COD', createdAt: new Date(Date.now() - 172800000).toISOString(), items: [{ name: 'Colgate Total', quantity: 4, price: 180 }] },
+      ]);
+    } finally {
+      setShopLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (recordsView === 'shop') {
+      loadShopData();
+    }
+  }, [recordsView, productSearchQuery, orderStatusFilter]);
+
+  const handleSaveProduct = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const productData = {
+      name: String(fd.get('name') ?? ''),
+      description: String(fd.get('description') ?? ''),
+      price: parseFloat(String(fd.get('price') ?? '0')),
+      comparePrice: fd.get('comparePrice') ? parseFloat(String(fd.get('comparePrice'))) : undefined,
+      category: String(fd.get('category') ?? 'OTHER'),
+      stock: parseInt(String(fd.get('stock') ?? '0')),
+      sku: String(fd.get('sku') ?? ''),
+      isFeatured: fd.get('isFeatured') === 'on',
+    };
+
+    try {
+      if (editingProduct) {
+        await api.shopAdmin.updateProduct(editingProduct.id, productData);
+        showNotice('Product updated successfully!');
+      } else {
+        await api.shopAdmin.createProduct(productData);
+        showNotice('Product created successfully!');
+      }
+      setShowProductModal(false);
+      setEditingProduct(null);
+      loadShopData();
+    } catch (error: any) {
+      showNotice(error.message || 'Failed to save product');
+    }
+  };
+
+  const handleDeleteProduct = async (product: ShopProduct) => {
+    if (!confirm(`Delete "${product.name}"?`)) return;
+    try {
+      await api.shopAdmin.deleteProduct(product.id);
+      showNotice('Product deleted!');
+      loadShopData();
+    } catch (error: any) {
+      showNotice(error.message || 'Failed to delete product');
+    }
+  };
+
+  const handleUpdateOrderStatus = async (order: ShopOrder, newStatus: string) => {
+    try {
+      await api.shopAdmin.updateOrderStatus(order.id, newStatus);
+      showNotice(`Order ${order.orderNo} updated to ${newStatus}`);
+      loadShopData();
+    } catch (error: any) {
+      showNotice(error.message || 'Failed to update order');
+    }
+  };
+
+  const getCategoryName = (categoryId: string) => {
+    return PRODUCT_CATEGORIES.find(c => c.id === categoryId)?.name || categoryId;
+  };
+
+  const getCategoryIcon = (categoryId: string) => {
+    return PRODUCT_CATEGORIES.find(c => c.id === categoryId)?.icon || '📦';
+  };
+
+  const getStatusColor = (status: string) => {
+    return ORDER_STATUSES.find(s => s.id === status)?.color || '#64748b';
+  };
 
   const filteredPatients = useMemo(() => {
     if (!searchQuery.trim()) return patients;
@@ -488,7 +668,9 @@ export const RecordsPage: React.FC<Props> = ({ onBackToLogin, userName = 'User' 
             <button type="button" className={`records-nav-link ${recordsView === 'inventory' ? 'active' : ''}`} onClick={() => setRecordsView('inventory')}>
               <i className="fa-solid fa-boxes-stacked"></i> Inventory
             </button>
-            <a className="records-nav-link" href="https://baigmed.com/shop" target="_blank" rel="noopener noreferrer"><i className="fa-solid fa-shop"></i> Shop</a>
+            <button type="button" className={`records-nav-link ${recordsView === 'shop' ? 'active' : ''}`} onClick={() => setRecordsView('shop')}>
+              <i className="fa-solid fa-store"></i> Shop
+            </button>
             <a className="records-nav-link" href="https://baigmed.com/forum" target="_blank" rel="noopener noreferrer"><i className="fa-solid fa-comments"></i> Forum</a>
           </nav>
         </div>
@@ -885,6 +1067,259 @@ export const RecordsPage: React.FC<Props> = ({ onBackToLogin, userName = 'User' 
           )}
           {recordsView === 'inventory' && (<div className="records-view-panel"><h6 className="records-section-title"><i className="fa-solid fa-boxes-stacked"></i> Inventory</h6><div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}><i className="fa-solid fa-boxes-stacked" style={{ fontSize: '4rem', marginBottom: '16px', opacity: 0.3 }}></i><p>Inventory management module. Connect to API for full functionality.</p></div></div>)}
           {recordsView === 'appointment' && (<div className="records-view-panel"><h6 className="records-section-title"><i className="fa-solid fa-calendar-check"></i> Appointments</h6><div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}><i className="fa-solid fa-calendar-check" style={{ fontSize: '4rem', marginBottom: '16px', opacity: 0.3 }}></i><p>Today we have {todayAppointments} appointment(s).</p></div></div>)}
+          {recordsView === 'shop' && (
+            <div className="records-view-panel shop-management">
+              <div className="shop-header-row">
+                <h6 className="records-section-title"><i className="fa-solid fa-store"></i> Shop Management</h6>
+                <div className="shop-tabs">
+                  <button type="button" className={`shop-tab ${shopTab === 'overview' ? 'active' : ''}`} onClick={() => setShopTab('overview')}>
+                    <i className="fa-solid fa-chart-pie"></i> Overview
+                  </button>
+                  <button type="button" className={`shop-tab ${shopTab === 'products' ? 'active' : ''}`} onClick={() => setShopTab('products')}>
+                    <i className="fa-solid fa-box"></i> Products
+                  </button>
+                  <button type="button" className={`shop-tab ${shopTab === 'orders' ? 'active' : ''}`} onClick={() => setShopTab('orders')}>
+                    <i className="fa-solid fa-shopping-bag"></i> Orders
+                  </button>
+                </div>
+              </div>
+
+              {shopLoading ? (
+                <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+                  <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '2rem', marginBottom: '16px' }}></i>
+                  <p>Loading shop data...</p>
+                </div>
+              ) : (
+                <>
+                  {shopTab === 'overview' && shopStats && (
+                    <div className="shop-overview">
+                      <div className="shop-stats-grid">
+                        <div className="shop-stat-card">
+                          <div className="shop-stat-icon" style={{ background: '#0d9488' }}><i className="fa-solid fa-box"></i></div>
+                          <div className="shop-stat-info">
+                            <span className="shop-stat-value">{shopStats.products.total}</span>
+                            <span className="shop-stat-label">Total Products</span>
+                          </div>
+                        </div>
+                        <div className="shop-stat-card">
+                          <div className="shop-stat-icon" style={{ background: '#22c55e' }}><i className="fa-solid fa-check-circle"></i></div>
+                          <div className="shop-stat-info">
+                            <span className="shop-stat-value">{shopStats.products.active}</span>
+                            <span className="shop-stat-label">Active Products</span>
+                          </div>
+                        </div>
+                        <div className="shop-stat-card">
+                          <div className="shop-stat-icon" style={{ background: '#f59e0b' }}><i className="fa-solid fa-exclamation-triangle"></i></div>
+                          <div className="shop-stat-info">
+                            <span className="shop-stat-value">{shopStats.products.lowStock}</span>
+                            <span className="shop-stat-label">Low Stock</span>
+                          </div>
+                        </div>
+                        <div className="shop-stat-card">
+                          <div className="shop-stat-icon" style={{ background: '#3b82f6' }}><i className="fa-solid fa-shopping-cart"></i></div>
+                          <div className="shop-stat-info">
+                            <span className="shop-stat-value">{shopStats.orders.total}</span>
+                            <span className="shop-stat-label">Total Orders</span>
+                          </div>
+                        </div>
+                        <div className="shop-stat-card">
+                          <div className="shop-stat-icon" style={{ background: '#ef4444' }}><i className="fa-solid fa-clock"></i></div>
+                          <div className="shop-stat-info">
+                            <span className="shop-stat-value">{shopStats.orders.pending}</span>
+                            <span className="shop-stat-label">Pending Orders</span>
+                          </div>
+                        </div>
+                        <div className="shop-stat-card">
+                          <div className="shop-stat-icon" style={{ background: '#8b5cf6' }}><i className="fa-solid fa-calendar-day"></i></div>
+                          <div className="shop-stat-info">
+                            <span className="shop-stat-value">{shopStats.orders.today}</span>
+                            <span className="shop-stat-label">Today's Orders</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="shop-revenue-cards">
+                        <div className="shop-revenue-card">
+                          <i className="fa-solid fa-coins"></i>
+                          <div className="revenue-info">
+                            <span className="revenue-value">৳{shopStats.revenue.total.toLocaleString()}</span>
+                            <span className="revenue-label">Total Revenue</span>
+                          </div>
+                        </div>
+                        <div className="shop-revenue-card today">
+                          <i className="fa-solid fa-chart-line"></i>
+                          <div className="revenue-info">
+                            <span className="revenue-value">৳{shopStats.revenue.today.toLocaleString()}</span>
+                            <span className="revenue-label">Today's Revenue</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="shop-quick-actions">
+                        <button type="button" className="btn-primary" onClick={() => { setEditingProduct(null); setShowProductModal(true); }}>
+                          <i className="fa-solid fa-plus"></i> Add New Product
+                        </button>
+                        <button type="button" className="btn-primary" onClick={() => setShopTab('orders')}>
+                          <i className="fa-solid fa-list"></i> View All Orders
+                        </button>
+                        <a href="/" target="_blank" rel="noopener noreferrer" className="btn-primary" style={{ textDecoration: 'none' }}>
+                          <i className="fa-solid fa-external-link"></i> View Public Shop
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  {shopTab === 'products' && (
+                    <div className="shop-products">
+                      <div className="shop-toolbar">
+                        <div className="records-search-box">
+                          <input 
+                            className="input" 
+                            type="text" 
+                            placeholder="Search products..." 
+                            value={productSearchQuery} 
+                            onChange={e => setProductSearchQuery(e.target.value)} 
+                          />
+                        </div>
+                        <button type="button" className="btn-primary" onClick={() => { setEditingProduct(null); setShowProductModal(true); }}>
+                          <i className="fa-solid fa-plus"></i> Add Product
+                        </button>
+                      </div>
+                      {shopProducts.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <i className="fa-solid fa-box-open" style={{ fontSize: '3rem', marginBottom: '16px', opacity: 0.3 }}></i>
+                          <p>No products found. Add your first product!</p>
+                        </div>
+                      ) : (
+                        <div className="shop-products-table-wrap">
+                          <table className="records-patient-table shop-products-table">
+                            <thead>
+                              <tr>
+                                <th>Product</th>
+                                <th>Category</th>
+                                <th>Price</th>
+                                <th>Stock</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {shopProducts.map(product => (
+                                <tr key={product.id}>
+                                  <td>
+                                    <div className="product-cell">
+                                      <span className="product-icon">{getCategoryIcon(product.category)}</span>
+                                      <div className="product-info">
+                                        <strong>{product.name}</strong>
+                                        {product.sku && <span className="product-sku">SKU: {product.sku}</span>}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td>{getCategoryName(product.category)}</td>
+                                  <td>
+                                    <span className="product-price">৳{product.price}</span>
+                                    {product.comparePrice && <span className="product-compare-price">৳{product.comparePrice}</span>}
+                                  </td>
+                                  <td>
+                                    <span className={`stock-badge ${product.stock <= 5 ? 'low' : ''}`}>
+                                      {product.stock}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span className={`status-badge ${product.isActive ? 'active' : 'inactive'}`}>
+                                      {product.isActive ? 'Active' : 'Inactive'}
+                                    </span>
+                                    {product.isFeatured && <span className="featured-badge">Featured</span>}
+                                  </td>
+                                  <td>
+                                    <button type="button" className="records-table-btn records-table-btn-edit" onClick={() => { setEditingProduct(product); setShowProductModal(true); }}>
+                                      <i className="fa-solid fa-edit"></i>
+                                    </button>
+                                    <button type="button" className="records-table-btn records-table-btn-delete" onClick={() => handleDeleteProduct(product)}>
+                                      <i className="fa-solid fa-trash"></i>
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {shopTab === 'orders' && (
+                    <div className="shop-orders">
+                      <div className="shop-toolbar">
+                        <select className="select" value={orderStatusFilter} onChange={e => setOrderStatusFilter(e.target.value)} style={{ maxWidth: '200px' }}>
+                          <option value="">All Orders</option>
+                          {ORDER_STATUSES.map(status => (
+                            <option key={status.id} value={status.id}>{status.name}</option>
+                          ))}
+                        </select>
+                        <button type="button" className="btn-ghost" onClick={loadShopData}>
+                          <i className="fa-solid fa-refresh"></i> Refresh
+                        </button>
+                      </div>
+                      {shopOrders.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <i className="fa-solid fa-shopping-bag" style={{ fontSize: '3rem', marginBottom: '16px', opacity: 0.3 }}></i>
+                          <p>No orders found.</p>
+                        </div>
+                      ) : (
+                        <div className="shop-orders-table-wrap">
+                          <table className="records-patient-table shop-orders-table">
+                            <thead>
+                              <tr>
+                                <th>Order #</th>
+                                <th>Customer</th>
+                                <th>Items</th>
+                                <th>Total</th>
+                                <th>Status</th>
+                                <th>Date</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {shopOrders.map(order => (
+                                <tr key={order.id}>
+                                  <td><strong>{order.orderNo}</strong></td>
+                                  <td>
+                                    <div className="customer-cell">
+                                      <span className="customer-name">{order.customerName}</span>
+                                      <span className="customer-phone">{order.customerPhone}</span>
+                                    </div>
+                                  </td>
+                                  <td>{order.items.length} item(s)</td>
+                                  <td><strong>৳{order.total.toLocaleString()}</strong></td>
+                                  <td>
+                                    <select 
+                                      className="select order-status-select" 
+                                      value={order.status} 
+                                      onChange={e => handleUpdateOrderStatus(order, e.target.value)}
+                                      style={{ borderColor: getStatusColor(order.status), color: getStatusColor(order.status) }}
+                                    >
+                                      {ORDER_STATUSES.map(status => (
+                                        <option key={status.id} value={status.id}>{status.name}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td>{new Date(order.createdAt).toLocaleDateString()}</td>
+                                  <td>
+                                    <button type="button" className="records-table-btn records-table-btn-view" onClick={() => { setViewingOrder(order); setShowOrderModal(true); }}>
+                                      <i className="fa-solid fa-eye"></i>
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           {recordsView === 'subscription' && (
             <div className="records-view-panel">
               <h6 className="records-section-title"><i className="fa-solid fa-crown"></i> Subscription & Credit</h6>
@@ -1154,6 +1589,156 @@ export const RecordsPage: React.FC<Props> = ({ onBackToLogin, userName = 'User' 
                 </tbody>
               </table>
               <p className="records-modal-note">By Month of February — Total Paid 0</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showProductModal && (
+        <div className="records-modal-overlay" onClick={() => { setShowProductModal(false); setEditingProduct(null); }}>
+          <div className="records-modal records-modal-lg" onClick={e => e.stopPropagation()}>
+            <div className="records-modal-header">
+              <h5><i className="fa-solid fa-box"></i> {editingProduct ? 'Edit Product' : 'Add New Product'}</h5>
+              <button type="button" className="records-modal-close" onClick={() => { setShowProductModal(false); setEditingProduct(null); }}>×</button>
+            </div>
+            <div className="records-modal-body">
+              <form onSubmit={handleSaveProduct} key={editingProduct?.id ?? 'new'}>
+                <div className="records-form-row">
+                  <div className="form-group" style={{ flex: 2 }}>
+                    <label className="label">Product Name <span className="required">*</span></label>
+                    <input type="text" className="input" name="name" placeholder="e.g. Oral-B Electric Toothbrush" defaultValue={editingProduct?.name} required />
+                  </div>
+                  <div className="form-group">
+                    <label className="label">SKU</label>
+                    <input type="text" className="input" name="sku" placeholder="e.g. TB-001" defaultValue={editingProduct?.sku} />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="label">Description</label>
+                  <textarea className="input" name="description" rows={3} placeholder="Product description..." defaultValue={editingProduct?.description} />
+                </div>
+                <div className="records-form-row">
+                  <div className="form-group">
+                    <label className="label">Category <span className="required">*</span></label>
+                    <select className="select" name="category" defaultValue={editingProduct?.category ?? 'OTHER'} required>
+                      {PRODUCT_CATEGORIES.map(cat => (
+                        <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="label">Price (৳) <span className="required">*</span></label>
+                    <input type="number" className="input" name="price" placeholder="0" defaultValue={editingProduct?.price} required min="0" step="0.01" />
+                  </div>
+                  <div className="form-group">
+                    <label className="label">Compare Price (৳)</label>
+                    <input type="number" className="input" name="comparePrice" placeholder="Original price" defaultValue={editingProduct?.comparePrice} min="0" step="0.01" />
+                  </div>
+                </div>
+                <div className="records-form-row">
+                  <div className="form-group">
+                    <label className="label">Stock Quantity</label>
+                    <input type="number" className="input" name="stock" placeholder="0" defaultValue={editingProduct?.stock ?? 0} min="0" />
+                  </div>
+                  <div className="form-group" style={{ display: 'flex', alignItems: 'center', paddingTop: '28px' }}>
+                    <label className="records-checkbox">
+                      <input type="checkbox" name="isFeatured" defaultChecked={editingProduct?.isFeatured} />
+                      <span>Featured Product</span>
+                    </label>
+                  </div>
+                </div>
+                <div className="records-modal-footer">
+                  <button type="button" className="btn-ghost" onClick={() => { setShowProductModal(false); setEditingProduct(null); }}>Cancel</button>
+                  <button type="submit" className="btn-primary">{editingProduct ? 'Update Product' : 'Add Product'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOrderModal && viewingOrder && (
+        <div className="records-modal-overlay" onClick={() => { setShowOrderModal(false); setViewingOrder(null); }}>
+          <div className="records-modal records-modal-lg" onClick={e => e.stopPropagation()}>
+            <div className="records-modal-header">
+              <h5><i className="fa-solid fa-shopping-bag"></i> Order Details - {viewingOrder.orderNo}</h5>
+              <button type="button" className="records-modal-close" onClick={() => { setShowOrderModal(false); setViewingOrder(null); }}>×</button>
+            </div>
+            <div className="records-modal-body">
+              <div className="order-details-grid">
+                <div className="order-section">
+                  <h6 className="order-section-title">Customer Information</h6>
+                  <dl className="records-dl">
+                    <dt>Name</dt><dd>{viewingOrder.customerName}</dd>
+                    <dt>Phone</dt><dd>{viewingOrder.customerPhone}</dd>
+                    {viewingOrder.customerEmail && <><dt>Email</dt><dd>{viewingOrder.customerEmail}</dd></>}
+                  </dl>
+                </div>
+                <div className="order-section">
+                  <h6 className="order-section-title">Shipping Address</h6>
+                  <p>{viewingOrder.shippingAddress}</p>
+                  <p>{viewingOrder.shippingCity}</p>
+                </div>
+                <div className="order-section">
+                  <h6 className="order-section-title">Order Info</h6>
+                  <dl className="records-dl">
+                    <dt>Date</dt><dd>{new Date(viewingOrder.createdAt).toLocaleString()}</dd>
+                    <dt>Payment</dt><dd>{viewingOrder.paymentMethod}</dd>
+                    <dt>Status</dt>
+                    <dd>
+                      <span className="status-badge" style={{ background: getStatusColor(viewingOrder.status), color: 'white' }}>
+                        {ORDER_STATUSES.find(s => s.id === viewingOrder.status)?.name || viewingOrder.status}
+                      </span>
+                    </dd>
+                  </dl>
+                </div>
+              </div>
+              <div className="order-items-section">
+                <h6 className="order-section-title">Order Items</h6>
+                <table className="records-table">
+                  <thead>
+                    <tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr>
+                  </thead>
+                  <tbody>
+                    {viewingOrder.items.map((item, i) => (
+                      <tr key={i}>
+                        <td>{item.name}</td>
+                        <td>{item.quantity}</td>
+                        <td>৳{item.price}</td>
+                        <td>৳{(item.price * item.quantity).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={3}><strong>Total</strong></td>
+                      <td><strong>৳{viewingOrder.total.toLocaleString()}</strong></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div className="order-actions">
+                <h6 className="order-section-title">Update Status</h6>
+                <div className="order-status-buttons">
+                  {ORDER_STATUSES.map(status => (
+                    <button
+                      key={status.id}
+                      type="button"
+                      className={`btn-status ${viewingOrder.status === status.id ? 'active' : ''}`}
+                      style={{ borderColor: status.color, color: viewingOrder.status === status.id ? 'white' : status.color, background: viewingOrder.status === status.id ? status.color : 'transparent' }}
+                      onClick={() => { handleUpdateOrderStatus(viewingOrder, status.id); setViewingOrder({ ...viewingOrder, status: status.id }); }}
+                    >
+                      {status.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="records-modal-footer">
+                <button type="button" className="btn-ghost" onClick={() => { setShowOrderModal(false); setViewingOrder(null); }}>Close</button>
+                <a href={`https://wa.me/${viewingOrder.customerPhone.replace(/[^0-9]/g, '')}`} target="_blank" rel="noopener noreferrer" className="btn-primary">
+                  <i className="fa-brands fa-whatsapp"></i> Contact Customer
+                </a>
+              </div>
             </div>
           </div>
         </div>
