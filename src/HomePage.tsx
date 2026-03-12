@@ -79,12 +79,12 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
         { id: 'DENTAL_TOOLS', name: 'Dental Tools', icon: '🔧', count: 10 },
       ]);
       setProducts([
-        { id: '1', name: 'Oral-B Electric Toothbrush', slug: 'oral-b', description: 'Advanced electric toothbrush', price: 2500, images: [], category: 'TOOTHBRUSH', stock: 50, isFeatured: true },
-        { id: '2', name: 'Colgate Total Toothpaste', slug: 'colgate', description: '12-hour protection', price: 180, images: [], category: 'TOOTHPASTE', stock: 100, isFeatured: false },
-        { id: '3', name: 'Listerine Mouthwash 500ml', slug: 'listerine', description: 'Antiseptic mouthwash', price: 350, images: [], category: 'MOUTHWASH', stock: 75, isFeatured: true },
-        { id: '4', name: 'Crest Whitening Strips', slug: 'crest', description: 'Professional whitening', price: 3500, images: [], category: 'WHITENING', stock: 30, isFeatured: true },
-        { id: '5', name: 'Waterpik Water Flosser', slug: 'waterpik', description: 'Deep cleaning', price: 5500, images: [], category: 'DENTAL_TOOLS', stock: 25, isFeatured: true },
-        { id: '6', name: 'Sensodyne Repair', slug: 'sensodyne', description: 'For sensitive teeth', price: 220, images: [], category: 'TOOTHPASTE', stock: 90, isFeatured: false },
+        { id: '1', name: 'Oral-B Electric Toothbrush', slug: 'oral-b', description: 'Advanced electric toothbrush with smart sensors', price: 2500, images: [], category: 'TOOTHBRUSH', stock: 50, isFeatured: true },
+        { id: '2', name: 'Colgate Total Toothpaste', slug: 'colgate', description: '12-hour antibacterial protection', price: 180, images: [], category: 'TOOTHPASTE', stock: 100, isFeatured: false },
+        { id: '3', name: 'Listerine Mouthwash 500ml', slug: 'listerine', description: 'Advanced antiseptic formula', price: 350, images: [], category: 'MOUTHWASH', stock: 75, isFeatured: true },
+        { id: '4', name: 'Crest Whitening Strips', slug: 'crest', description: 'Professional-grade whitening', price: 3500, images: [], category: 'WHITENING', stock: 30, isFeatured: true },
+        { id: '5', name: 'Waterpik Water Flosser', slug: 'waterpik', description: 'Advanced water flossing technology', price: 5500, images: [], category: 'DENTAL_TOOLS', stock: 25, isFeatured: true },
+        { id: '6', name: 'Sensodyne Repair', slug: 'sensodyne', description: 'For sensitive teeth protection', price: 220, images: [], category: 'TOOTHPASTE', stock: 90, isFeatured: false },
       ]);
     } finally {
       setLoading(false);
@@ -147,85 +147,148 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
   };
 
   return (
-    <div className="home-page">
-      <header className="home-header">
-        <div className="home-header-content">
-          <div className="home-logo">
-            <i className="fa-solid fa-tooth"></i>
-            <span>BaigDentPro</span>
+    <div className="neo-home">
+      {/* Animated Background */}
+      <div className="neo-bg-grid"></div>
+      <div className="neo-bg-glow neo-bg-glow-1"></div>
+      <div className="neo-bg-glow neo-bg-glow-2"></div>
+      <div className="neo-bg-glow neo-bg-glow-3"></div>
+
+      {/* Header */}
+      <header className="neo-header">
+        <div className="neo-header-content">
+          <div className="neo-logo">
+            <div className="neo-logo-icon">
+              <i className="fa-solid fa-tooth"></i>
+            </div>
+            <span className="neo-logo-text">BaigDentPro</span>
           </div>
-          <nav className="home-nav">
-            <a href="#shop" className="nav-link">Shop</a>
-            <a href="#features" className="nav-link">Features</a>
-            <a href="#contact" className="nav-link">Contact</a>
+          <nav className="neo-nav">
+            <a href="#hero" className="neo-nav-link">Home</a>
+            <a href="#shop" className="neo-nav-link">Shop</a>
+            <a href="#features" className="neo-nav-link">Features</a>
+            <a href="#contact" className="neo-nav-link">Contact</a>
           </nav>
-          <div className="home-actions">
-            <button className="cart-btn" onClick={() => setShowCart(true)}>
+          <div className="neo-header-actions">
+            <button className="neo-cart-btn" onClick={() => setShowCart(true)}>
               <i className="fa-solid fa-shopping-cart"></i>
-              {cart.items.length > 0 && <span className="cart-count">{cart.items.length}</span>}
+              {cart.items.length > 0 && <span className="neo-cart-badge">{cart.items.length}</span>}
             </button>
-            <button className="btn-primary" onClick={onLoginClick}>
-              <i className="fa-solid fa-user-doctor"></i> Dentist Login
+            <button className="neo-btn neo-btn-primary" onClick={onLoginClick}>
+              <i className="fa-solid fa-user-doctor"></i>
+              <span>Dentist Portal</span>
             </button>
           </div>
         </div>
       </header>
 
-      <section className="hero-section">
-        <div className="hero-content">
-          <h1>Professional Dental Management System</h1>
-          <p>Complete clinic management with patient records, appointments, prescriptions, billing, and more. Plus, shop quality dental products online!</p>
-          <div className="hero-buttons">
-            <button className="btn-primary btn-lg" onClick={onLoginClick}>
-              <i className="fa-solid fa-sign-in-alt"></i> Login to Dentist Panel
+      {/* Hero Section */}
+      <section id="hero" className="neo-hero">
+        <div className="neo-hero-content">
+          <div className="neo-hero-badge">
+            <i className="fa-solid fa-sparkles"></i>
+            <span>Next-Gen Dental Management</span>
+          </div>
+          <h1 className="neo-hero-title">
+            <span className="neo-gradient-text">Revolutionary</span> Dental
+            <br />Practice Management
+          </h1>
+          <p className="neo-hero-subtitle">
+            Experience the future of dental clinic operations. AI-powered scheduling, 
+            seamless patient management, and integrated e-commerce — all in one beautiful platform.
+          </p>
+          <div className="neo-hero-buttons">
+            <button className="neo-btn neo-btn-primary neo-btn-lg" onClick={onLoginClick}>
+              <i className="fa-solid fa-rocket"></i>
+              <span>Launch Dashboard</span>
             </button>
-            <a href="#shop" className="btn-secondary btn-lg">
-              <i className="fa-solid fa-shopping-bag"></i> Browse Shop
+            <a href="#shop" className="neo-btn neo-btn-secondary neo-btn-lg">
+              <i className="fa-solid fa-store"></i>
+              <span>Explore Shop</span>
             </a>
           </div>
+          <div className="neo-hero-stats">
+            <div className="neo-hero-stat">
+              <span className="neo-hero-stat-value">500+</span>
+              <span className="neo-hero-stat-label">Clinics Trust Us</span>
+            </div>
+            <div className="neo-hero-stat-divider"></div>
+            <div className="neo-hero-stat">
+              <span className="neo-hero-stat-value">50K+</span>
+              <span className="neo-hero-stat-label">Patients Served</span>
+            </div>
+            <div className="neo-hero-stat-divider"></div>
+            <div className="neo-hero-stat">
+              <span className="neo-hero-stat-value">99.9%</span>
+              <span className="neo-hero-stat-label">Uptime</span>
+            </div>
+          </div>
         </div>
-        <div className="hero-features-grid">
-          <div className="hero-feature-card">
-            <i className="fa-solid fa-users"></i>
+
+        {/* Feature Cards */}
+        <div className="neo-features-orbit">
+          <div className="neo-feature-card neo-feature-card-1">
+            <div className="neo-feature-icon">
+              <i className="fa-solid fa-user-group"></i>
+            </div>
             <h3>Patient Management</h3>
-            <p>Complete patient records, history, and dental charts</p>
+            <p>Complete records & dental charts</p>
           </div>
-          <div className="hero-feature-card">
-            <i className="fa-solid fa-calendar-check"></i>
-            <h3>Appointments</h3>
-            <p>Schedule with SMS & WhatsApp reminders</p>
+          <div className="neo-feature-card neo-feature-card-2">
+            <div className="neo-feature-icon">
+              <i className="fa-solid fa-calendar-check"></i>
+            </div>
+            <h3>Smart Scheduling</h3>
+            <p>AI-powered appointments</p>
           </div>
-          <div className="hero-feature-card">
-            <i className="fa-solid fa-prescription"></i>
-            <h3>Prescriptions</h3>
-            <p>Digital prescriptions with PDF & email delivery</p>
+          <div className="neo-feature-card neo-feature-card-3">
+            <div className="neo-feature-icon">
+              <i className="fa-solid fa-prescription"></i>
+            </div>
+            <h3>Digital Rx</h3>
+            <p>E-prescriptions & PDF delivery</p>
           </div>
-          <div className="hero-feature-card">
-            <i className="fa-solid fa-file-invoice-dollar"></i>
-            <h3>Billing</h3>
-            <p>Invoices, payments, and financial tracking</p>
+          <div className="neo-feature-card neo-feature-card-4">
+            <div className="neo-feature-icon">
+              <i className="fa-solid fa-credit-card"></i>
+            </div>
+            <h3>Smart Billing</h3>
+            <p>Invoices & payment tracking</p>
           </div>
-          <div className="hero-feature-card">
-            <i className="fa-solid fa-flask"></i>
+          <div className="neo-feature-card neo-feature-card-5">
+            <div className="neo-feature-icon">
+              <i className="fa-solid fa-flask-vial"></i>
+            </div>
             <h3>Lab Tracking</h3>
-            <p>Track crowns, bridges, dentures, and more</p>
+            <p>Crown, bridge & denture orders</p>
           </div>
-          <div className="hero-feature-card">
-            <i className="fa-solid fa-store"></i>
-            <h3>Online Shop</h3>
-            <p>Sell dental products directly to patients</p>
+          <div className="neo-feature-card neo-feature-card-6">
+            <div className="neo-feature-icon">
+              <i className="fa-solid fa-store"></i>
+            </div>
+            <h3>E-Commerce</h3>
+            <p>Sell products online</p>
           </div>
         </div>
       </section>
 
-      <section id="shop" className="shop-section">
-        <div className="shop-header">
-          <h2><i className="fa-solid fa-store"></i> Dental Shop</h2>
-          <p>Quality dental products delivered to your doorstep - no account required!</p>
+      {/* Shop Section */}
+      <section id="shop" className="neo-shop">
+        <div className="neo-section-header">
+          <div className="neo-section-badge">
+            <i className="fa-solid fa-shopping-bag"></i>
+            <span>Premium Products</span>
+          </div>
+          <h2 className="neo-section-title">
+            <span className="neo-gradient-text">Dental</span> Shop
+          </h2>
+          <p className="neo-section-subtitle">
+            Quality dental products delivered to your doorstep — no account required
+          </p>
         </div>
 
-        <div className="shop-toolbar">
-          <div className="search-box">
+        <div className="neo-shop-toolbar">
+          <div className="neo-search-box">
             <i className="fa-solid fa-search"></i>
             <input
               type="text"
@@ -234,57 +297,78 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <div className="category-filters">
+          <div className="neo-category-filters">
             <button
-              className={`category-btn ${!selectedCategory ? 'active' : ''}`}
+              className={`neo-category-btn ${!selectedCategory ? 'active' : ''}`}
               onClick={() => setSelectedCategory(null)}
             >
-              All
+              <i className="fa-solid fa-grid-2"></i>
+              <span>All</span>
             </button>
             {categories.map((cat) => (
               <button
                 key={cat.id}
-                className={`category-btn ${selectedCategory === cat.id ? 'active' : ''}`}
+                className={`neo-category-btn ${selectedCategory === cat.id ? 'active' : ''}`}
                 onClick={() => setSelectedCategory(cat.id)}
               >
-                {cat.icon} {cat.name}
+                <span className="neo-category-icon">{cat.icon}</span>
+                <span>{cat.name}</span>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="products-grid">
+        <div className="neo-products-grid">
           {loading ? (
-            <div className="loading">Loading products...</div>
+            <div className="neo-loading">
+              <div className="neo-loading-spinner"></div>
+              <p>Loading products...</p>
+            </div>
           ) : products.length === 0 ? (
-            <div className="no-products">No products found</div>
+            <div className="neo-empty">
+              <i className="fa-solid fa-box-open"></i>
+              <p>No products found</p>
+            </div>
           ) : (
             products.map((product) => (
-              <div key={product.id} className="product-card">
-                {product.isFeatured && <span className="featured-badge">Featured</span>}
-                <div className="product-image">
-                  {product.images ? (
-                    <img src={product.images} alt={product.name} />
-                  ) : (
-                    <div className="product-placeholder">{getCategoryIcon(product.category)}</div>
-                  )}
-                </div>
-                <div className="product-info">
-                  <h3>{product.name}</h3>
-                  <p>{product.description}</p>
-                  <div className="product-price">
-                    <span className="price">৳{product.price}</span>
-                    {product.comparePrice && (
-                      <span className="compare-price">৳{product.comparePrice}</span>
-                    )}
+              <div key={product.id} className="neo-product-card">
+                {product.isFeatured && (
+                  <div className="neo-featured-badge">
+                    <i className="fa-solid fa-star"></i> Featured
                   </div>
-                  <button
-                    className="btn-primary add-to-cart"
-                    onClick={() => addToCart(product)}
-                    disabled={product.stock === 0}
-                  >
-                    {product.stock === 0 ? 'Out of Stock' : 'Add to Cart'}
-                  </button>
+                )}
+                <div className="neo-product-image">
+                  <div className="neo-product-placeholder">
+                    <span>{getCategoryIcon(product.category)}</span>
+                  </div>
+                  <div className="neo-product-overlay">
+                    <button 
+                      className="neo-quick-add"
+                      onClick={() => addToCart(product)}
+                      disabled={product.stock === 0}
+                    >
+                      <i className="fa-solid fa-plus"></i>
+                    </button>
+                  </div>
+                </div>
+                <div className="neo-product-info">
+                  <h3 className="neo-product-name">{product.name}</h3>
+                  <p className="neo-product-desc">{product.description}</p>
+                  <div className="neo-product-footer">
+                    <div className="neo-product-price">
+                      <span className="neo-price">৳{product.price.toLocaleString()}</span>
+                      {product.comparePrice && (
+                        <span className="neo-compare-price">৳{product.comparePrice.toLocaleString()}</span>
+                      )}
+                    </div>
+                    <button
+                      className="neo-btn neo-btn-primary neo-btn-sm"
+                      onClick={() => addToCart(product)}
+                      disabled={product.stock === 0}
+                    >
+                      {product.stock === 0 ? 'Sold Out' : 'Add to Cart'}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))
@@ -292,103 +376,164 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
         </div>
       </section>
 
-      <section id="features" className="features-section">
-        <h2>Why Choose BaigDentPro?</h2>
-        <div className="features-grid">
-          <div className="feature-item">
-            <i className="fa-solid fa-shield-check"></i>
-            <h3>Secure & Reliable</h3>
-            <p>Your patient data is encrypted and stored securely</p>
+      {/* Features Section */}
+      <section id="features" className="neo-why">
+        <div className="neo-section-header">
+          <div className="neo-section-badge">
+            <i className="fa-solid fa-gem"></i>
+            <span>Why Choose Us</span>
           </div>
-          <div className="feature-item">
-            <i className="fa-solid fa-mobile-alt"></i>
-            <h3>SMS & WhatsApp</h3>
-            <p>Automated reminders and prescription delivery</p>
+          <h2 className="neo-section-title">
+            Built for <span className="neo-gradient-text">Excellence</span>
+          </h2>
+        </div>
+
+        <div className="neo-why-grid">
+          <div className="neo-why-card">
+            <div className="neo-why-icon">
+              <i className="fa-solid fa-shield-check"></i>
+            </div>
+            <h3>Bank-Level Security</h3>
+            <p>Your patient data is encrypted with AES-256 and stored securely in the cloud</p>
           </div>
-          <div className="feature-item">
-            <i className="fa-solid fa-file-pdf"></i>
+          <div className="neo-why-card">
+            <div className="neo-why-icon">
+              <i className="fa-brands fa-whatsapp"></i>
+            </div>
+            <h3>WhatsApp & SMS</h3>
+            <p>Automated appointment reminders and prescription delivery via messaging</p>
+          </div>
+          <div className="neo-why-card">
+            <div className="neo-why-icon">
+              <i className="fa-solid fa-file-pdf"></i>
+            </div>
             <h3>PDF Generation</h3>
-            <p>Professional prescriptions and invoices</p>
+            <p>Professional prescriptions and invoices generated instantly</p>
           </div>
-          <div className="feature-item">
-            <i className="fa-solid fa-chart-bar"></i>
-            <h3>Analytics</h3>
-            <p>Track revenue, appointments, and patient growth</p>
+          <div className="neo-why-card">
+            <div className="neo-why-icon">
+              <i className="fa-solid fa-chart-line"></i>
+            </div>
+            <h3>Smart Analytics</h3>
+            <p>Track revenue, appointments, and patient growth with visual dashboards</p>
           </div>
         </div>
       </section>
 
-      <section id="contact" className="contact-section">
-        <h2>Get Started Today</h2>
-        <p>Join hundreds of dental clinics using BaigDentPro</p>
-        <button className="btn-primary btn-lg" onClick={onLoginClick}>
-          <i className="fa-solid fa-rocket"></i> Start Free Trial
-        </button>
+      {/* CTA Section */}
+      <section id="contact" className="neo-cta">
+        <div className="neo-cta-content">
+          <h2 className="neo-cta-title">
+            Ready to Transform Your Practice?
+          </h2>
+          <p className="neo-cta-subtitle">
+            Join hundreds of dental clinics already using BaigDentPro
+          </p>
+          <button className="neo-btn neo-btn-primary neo-btn-lg neo-btn-glow" onClick={onLoginClick}>
+            <i className="fa-solid fa-rocket"></i>
+            <span>Start Free Trial</span>
+          </button>
+        </div>
       </section>
 
-      <footer className="home-footer">
-        <p>© 2024 BaigDentPro • Omix Solutions • All Rights Reserved</p>
-        <div className="footer-links">
-          <a href="https://wa.me/8801617180711" target="_blank" rel="noopener noreferrer">
-            <i className="fa-brands fa-whatsapp"></i> WhatsApp
-          </a>
-          <a href="mailto:info@baigdentpro.com">
-            <i className="fa-solid fa-envelope"></i> Email
-          </a>
+      {/* Footer */}
+      <footer className="neo-footer">
+        <div className="neo-footer-content">
+          <div className="neo-footer-brand">
+            <div className="neo-logo">
+              <div className="neo-logo-icon">
+                <i className="fa-solid fa-tooth"></i>
+              </div>
+              <span className="neo-logo-text">BaigDentPro</span>
+            </div>
+            <p>Next-generation dental practice management</p>
+          </div>
+          <div className="neo-footer-links">
+            <a href="https://wa.me/8801617180711" target="_blank" rel="noopener noreferrer">
+              <i className="fa-brands fa-whatsapp"></i>
+              <span>WhatsApp</span>
+            </a>
+            <a href="mailto:info@baigdentpro.com">
+              <i className="fa-solid fa-envelope"></i>
+              <span>Email</span>
+            </a>
+          </div>
+        </div>
+        <div className="neo-footer-bottom">
+          <p>© 2026 BaigDentPro • Omix Solutions • All Rights Reserved</p>
         </div>
       </footer>
 
+      {/* Cart Modal */}
       {showCart && (
-        <div className="modal-overlay" onClick={() => setShowCart(false)}>
-          <div className="cart-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className="neo-modal-overlay" onClick={() => setShowCart(false)}>
+          <div className="neo-modal neo-cart-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="neo-modal-header">
               <h3><i className="fa-solid fa-shopping-cart"></i> Your Cart</h3>
-              <button className="close-btn" onClick={() => setShowCart(false)}>×</button>
+              <button className="neo-modal-close" onClick={() => setShowCart(false)}>
+                <i className="fa-solid fa-times"></i>
+              </button>
             </div>
-            <div className="cart-items">
+            <div className="neo-modal-body">
               {cart.items.length === 0 ? (
-                <p className="empty-cart">Your cart is empty</p>
+                <div className="neo-cart-empty">
+                  <i className="fa-solid fa-cart-shopping"></i>
+                  <p>Your cart is empty</p>
+                </div>
               ) : (
-                cart.items.map((item) => (
-                  <div key={item.id} className="cart-item">
-                    <div className="cart-item-info">
-                      <span className="cart-item-name">{item.product.name}</span>
-                      <span className="cart-item-price">৳{item.product.price}</span>
+                <div className="neo-cart-items">
+                  {cart.items.map((item) => (
+                    <div key={item.id} className="neo-cart-item">
+                      <div className="neo-cart-item-info">
+                        <span className="neo-cart-item-name">{item.product.name}</span>
+                        <span className="neo-cart-item-price">৳{item.product.price.toLocaleString()}</span>
+                      </div>
+                      <div className="neo-cart-item-qty">
+                        <button onClick={() => updateCartQuantity(item.product.id, item.quantity - 1)}>
+                          <i className="fa-solid fa-minus"></i>
+                        </button>
+                        <span>{item.quantity}</span>
+                        <button onClick={() => updateCartQuantity(item.product.id, item.quantity + 1)}>
+                          <i className="fa-solid fa-plus"></i>
+                        </button>
+                      </div>
                     </div>
-                    <div className="cart-item-qty">
-                      <button onClick={() => updateCartQuantity(item.product.id, item.quantity - 1)}>-</button>
-                      <span>{item.quantity}</span>
-                      <button onClick={() => updateCartQuantity(item.product.id, item.quantity + 1)}>+</button>
-                    </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
             {cart.items.length > 0 && (
-              <>
-                <div className="cart-total">
-                  <span>Total:</span>
-                  <span>৳{cart.total}</span>
+              <div className="neo-modal-footer">
+                <div className="neo-cart-total">
+                  <span>Total</span>
+                  <span className="neo-cart-total-value">৳{cart.total.toLocaleString()}</span>
                 </div>
-                <button className="btn-primary checkout-btn" onClick={() => { setShowCart(false); setShowCheckout(true); }}>
-                  Proceed to Checkout
+                <button 
+                  className="neo-btn neo-btn-primary neo-btn-block"
+                  onClick={() => { setShowCart(false); setShowCheckout(true); }}
+                >
+                  <i className="fa-solid fa-arrow-right"></i>
+                  <span>Proceed to Checkout</span>
                 </button>
-              </>
+              </div>
             )}
           </div>
         </div>
       )}
 
+      {/* Checkout Modal */}
       {showCheckout && (
-        <div className="modal-overlay" onClick={() => setShowCheckout(false)}>
-          <div className="checkout-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className="neo-modal-overlay" onClick={() => setShowCheckout(false)}>
+          <div className="neo-modal neo-checkout-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="neo-modal-header">
               <h3><i className="fa-solid fa-credit-card"></i> Checkout</h3>
-              <button className="close-btn" onClick={() => setShowCheckout(false)}>×</button>
+              <button className="neo-modal-close" onClick={() => setShowCheckout(false)}>
+                <i className="fa-solid fa-times"></i>
+              </button>
             </div>
-            <form onSubmit={handleCheckout} className="checkout-form">
-              <div className="form-row">
-                <div className="form-group">
+            <form onSubmit={handleCheckout} className="neo-checkout-form">
+              <div className="neo-form-row">
+                <div className="neo-form-group">
                   <label>Full Name *</label>
                   <input
                     type="text"
@@ -397,7 +542,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
                     required
                   />
                 </div>
-                <div className="form-group">
+                <div className="neo-form-group">
                   <label>Phone Number *</label>
                   <input
                     type="tel"
@@ -407,7 +552,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
                   />
                 </div>
               </div>
-              <div className="form-group">
+              <div className="neo-form-group">
                 <label>Email (Optional)</label>
                 <input
                   type="email"
@@ -415,7 +560,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
                   onChange={(e) => setCheckoutData({ ...checkoutData, customerEmail: e.target.value })}
                 />
               </div>
-              <div className="form-group">
+              <div className="neo-form-group">
                 <label>Shipping Address *</label>
                 <textarea
                   value={checkoutData.shippingAddress}
@@ -423,8 +568,8 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
                   required
                 />
               </div>
-              <div className="form-row">
-                <div className="form-group">
+              <div className="neo-form-row">
+                <div className="neo-form-group">
                   <label>City *</label>
                   <input
                     type="text"
@@ -433,7 +578,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
                     required
                   />
                 </div>
-                <div className="form-group">
+                <div className="neo-form-group">
                   <label>Zip Code</label>
                   <input
                     type="text"
@@ -442,7 +587,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
                   />
                 </div>
               </div>
-              <div className="form-group">
+              <div className="neo-form-group">
                 <label>Payment Method</label>
                 <select
                   value={checkoutData.paymentMethod}
@@ -453,35 +598,42 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
                   <option value="BANK_TRANSFER">Bank Transfer</option>
                 </select>
               </div>
-              <div className="order-summary">
+              <div className="neo-order-summary">
                 <h4>Order Summary</h4>
                 {cart.items.map((item) => (
-                  <div key={item.id} className="summary-item">
+                  <div key={item.id} className="neo-summary-item">
                     <span>{item.product.name} × {item.quantity}</span>
-                    <span>৳{item.product.price * item.quantity}</span>
+                    <span>৳{(item.product.price * item.quantity).toLocaleString()}</span>
                   </div>
                 ))}
-                <div className="summary-total">
-                  <span>Total:</span>
-                  <span>৳{cart.total}</span>
+                <div className="neo-summary-total">
+                  <span>Total</span>
+                  <span>৳{cart.total.toLocaleString()}</span>
                 </div>
               </div>
-              <button type="submit" className="btn-primary place-order-btn">
-                <i className="fa-solid fa-check"></i> Place Order
+              <button type="submit" className="neo-btn neo-btn-primary neo-btn-block neo-btn-lg">
+                <i className="fa-solid fa-check"></i>
+                <span>Place Order</span>
               </button>
             </form>
           </div>
         </div>
       )}
 
+      {/* Success Modal */}
       {orderSuccess && (
-        <div className="modal-overlay" onClick={() => setOrderSuccess(null)}>
-          <div className="success-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="success-icon">✓</div>
+        <div className="neo-modal-overlay" onClick={() => setOrderSuccess(null)}>
+          <div className="neo-modal neo-success-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="neo-success-icon">
+              <i className="fa-solid fa-check"></i>
+            </div>
             <h3>Order Placed Successfully!</h3>
-            <p>Your order number is: <strong>{orderSuccess}</strong></p>
+            <p className="neo-success-order">Order #<strong>{orderSuccess}</strong></p>
             <p>We'll contact you shortly to confirm your order.</p>
-            <button className="btn-primary" onClick={() => setOrderSuccess(null)}>Continue Shopping</button>
+            <button className="neo-btn neo-btn-primary" onClick={() => setOrderSuccess(null)}>
+              <i className="fa-solid fa-shopping-bag"></i>
+              <span>Continue Shopping</span>
+            </button>
           </div>
         </div>
       )}

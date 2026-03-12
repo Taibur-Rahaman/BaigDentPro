@@ -89,164 +89,234 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="app-shell">
-      <main className="auth-shell">
-        <section className="hero-panel">
-          <div className="hero-logo" onClick={() => setView('home')} style={{ cursor: 'pointer' }}>
-            <i className="fa-solid fa-tooth"></i>
-            BaigDentPro
+    <div className="neo-auth">
+      {/* Animated Background */}
+      <div className="neo-bg-grid"></div>
+      <div className="neo-bg-glow neo-bg-glow-1"></div>
+      <div className="neo-bg-glow neo-bg-glow-2"></div>
+      
+      <div className="neo-auth-container">
+        {/* Left Panel - Branding */}
+        <div className="neo-auth-brand">
+          <div className="neo-auth-brand-content">
+            <div className="neo-logo neo-logo-lg" onClick={() => setView('home')} style={{ cursor: 'pointer' }}>
+              <div className="neo-logo-icon">
+                <i className="fa-solid fa-tooth"></i>
+              </div>
+              <span className="neo-logo-text">BaigDentPro</span>
+            </div>
+            
+            <h1 className="neo-auth-title">
+              <span className="neo-gradient-text">Next-Gen</span> Dental
+              <br />Practice Management
+            </h1>
+            
+            <p className="neo-auth-subtitle">
+              One powerful dashboard for everything. Prescriptions, patient records, 
+              appointments, billing, and lab orders — all in one place.
+            </p>
+
+            <div className="neo-auth-features">
+              <div className="neo-auth-feature">
+                <div className="neo-auth-feature-icon">
+                  <i className="fa-solid fa-prescription"></i>
+                </div>
+                <span>Digital Prescriptions with Drug Database</span>
+              </div>
+              <div className="neo-auth-feature">
+                <div className="neo-auth-feature-icon">
+                  <i className="fa-solid fa-user-group"></i>
+                </div>
+                <span>Complete Patient Records & Dental Charts</span>
+              </div>
+              <div className="neo-auth-feature">
+                <div className="neo-auth-feature-icon">
+                  <i className="fa-solid fa-calendar-check"></i>
+                </div>
+                <span>Smart Appointment Scheduling with SMS</span>
+              </div>
+              <div className="neo-auth-feature">
+                <div className="neo-auth-feature-icon">
+                  <i className="fa-solid fa-credit-card"></i>
+                </div>
+                <span>Billing, Invoices & Payment Tracking</span>
+              </div>
+              <div className="neo-auth-feature">
+                <div className="neo-auth-feature-icon">
+                  <i className="fa-solid fa-flask-vial"></i>
+                </div>
+                <span>Lab Order Tracking (Crown, Bridge, Denture)</span>
+              </div>
+              <div className="neo-auth-feature">
+                <div className="neo-auth-feature-icon">
+                  <i className="fa-brands fa-whatsapp"></i>
+                </div>
+                <span>WhatsApp & Email Integration</span>
+              </div>
+            </div>
+
+            <button className="neo-btn neo-btn-secondary" onClick={() => setView('home')}>
+              <i className="fa-solid fa-arrow-left"></i>
+              <span>Back to Home</span>
+            </button>
           </div>
-          <h1 className="hero-title">All-in-One Dental Practice Management</h1>
-          <p className="hero-subtitle">
-            One powerful dashboard for everything. Prescriptions, patient records, 
-            appointments, billing, and lab orders — all in one place.
-          </p>
-          <div className="hero-features">
-            <div className="hero-feature">
-              <i className="fa-solid fa-prescription-bottle-medical"></i>
-              <span>Digital Prescriptions with Drug Database</span>
-            </div>
-            <div className="hero-feature">
-              <i className="fa-solid fa-users"></i>
-              <span>Complete Patient Records & Dental Charts</span>
-            </div>
-            <div className="hero-feature">
-              <i className="fa-solid fa-calendar-check"></i>
-              <span>Smart Appointment Scheduling with SMS</span>
-            </div>
-            <div className="hero-feature">
-              <i className="fa-solid fa-file-invoice-dollar"></i>
-              <span>Billing, Invoices & Payment Tracking</span>
-            </div>
-            <div className="hero-feature">
-              <i className="fa-solid fa-flask"></i>
-              <span>Lab Order Tracking (Crown, Bridge, Denture)</span>
-            </div>
-            <div className="hero-feature">
-              <i className="fa-brands fa-whatsapp"></i>
-              <span>WhatsApp & Email Integration</span>
-            </div>
-          </div>
-          <button className="btn-secondary" onClick={() => setView('home')} style={{ marginTop: '20px' }}>
-            <i className="fa-solid fa-arrow-left"></i> Back to Home
-          </button>
-        </section>
-        <section className="form-panel">
-          <div className="card login-card">
-            <div className="card-header">
-              <div className="card-title">{isRegister ? 'Create Account' : 'Welcome Back'}</div>
-              <div className="card-subtitle">{isRegister ? 'Register to get started' : 'Sign in to your unified dashboard'}</div>
+        </div>
+
+        {/* Right Panel - Form */}
+        <div className="neo-auth-form-panel">
+          <div className="neo-auth-card">
+            <div className="neo-auth-card-header">
+              <h2>{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
+              <p>{isRegister ? 'Register to get started' : 'Sign in to your command center'}</p>
             </div>
 
             {!isRegister && (
-              <div className="unified-panel-info">
-                <div className="panel-icon">
-                  <i className="fa-solid fa-chart-pie"></i>
+              <div className="neo-auth-info-box">
+                <div className="neo-auth-info-icon">
+                  <i className="fa-solid fa-grid-2"></i>
                 </div>
-                <div className="panel-details">
+                <div className="neo-auth-info-content">
                   <h4>Unified Dashboard</h4>
                   <p>Access all features in one place: Prescriptions, Patients, Appointments, Billing, Lab Orders & more</p>
                 </div>
               </div>
             )}
 
-            {error && <div className="error-message"><i className="fa-solid fa-exclamation-circle"></i> {error}</div>}
+            {error && (
+              <div className="neo-auth-error">
+                <i className="fa-solid fa-circle-exclamation"></i>
+                <span>{error}</span>
+              </div>
+            )}
 
             {isRegister ? (
-              <form onSubmit={handleRegister}>
-                <div className="form-group">
-                  <label className="label">Full Name</label>
-                  <input
-                    className="input"
-                    value={registerData.name}
-                    onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })}
-                    placeholder="Dr. John Doe"
-                    required
-                  />
+              <form onSubmit={handleRegister} className="neo-auth-form">
+                <div className="neo-form-group">
+                  <label>Full Name</label>
+                  <div className="neo-input-wrapper">
+                    <i className="fa-solid fa-user"></i>
+                    <input
+                      type="text"
+                      value={registerData.name}
+                      onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })}
+                      placeholder="Dr. John Doe"
+                      required
+                    />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="label">Email</label>
-                  <input
-                    className="input"
-                    type="email"
-                    value={registerData.email}
-                    onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                    placeholder="doctor@clinic.com"
-                    required
-                  />
+                <div className="neo-form-group">
+                  <label>Email</label>
+                  <div className="neo-input-wrapper">
+                    <i className="fa-solid fa-envelope"></i>
+                    <input
+                      type="email"
+                      value={registerData.email}
+                      onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
+                      placeholder="doctor@clinic.com"
+                      required
+                    />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="label">Password</label>
-                  <input
-                    className="input"
-                    type="password"
-                    value={registerData.password}
-                    onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                    placeholder="Create a password"
-                    required
-                  />
+                <div className="neo-form-group">
+                  <label>Password</label>
+                  <div className="neo-input-wrapper">
+                    <i className="fa-solid fa-lock"></i>
+                    <input
+                      type="password"
+                      value={registerData.password}
+                      onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
+                      placeholder="Create a password"
+                      required
+                    />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="label">Clinic Name (Optional)</label>
-                  <input
-                    className="input"
-                    value={registerData.clinicName}
-                    onChange={(e) => setRegisterData({ ...registerData, clinicName: e.target.value })}
-                    placeholder="Your Dental Clinic"
-                  />
+                <div className="neo-form-row">
+                  <div className="neo-form-group">
+                    <label>Clinic Name</label>
+                    <div className="neo-input-wrapper">
+                      <i className="fa-solid fa-hospital"></i>
+                      <input
+                        type="text"
+                        value={registerData.clinicName}
+                        onChange={(e) => setRegisterData({ ...registerData, clinicName: e.target.value })}
+                        placeholder="Your Dental Clinic"
+                      />
+                    </div>
+                  </div>
+                  <div className="neo-form-group">
+                    <label>Phone</label>
+                    <div className="neo-input-wrapper">
+                      <i className="fa-solid fa-phone"></i>
+                      <input
+                        type="tel"
+                        value={registerData.phone}
+                        onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })}
+                        placeholder="+880 1XXXXXXXXX"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="label">Phone (Optional)</label>
-                  <input
-                    className="input"
-                    value={registerData.phone}
-                    onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })}
-                    placeholder="+880 1XXXXXXXXX"
-                  />
-                </div>
-                <div className="actions-row">
-                  <button type="submit" className="btn-primary" disabled={isLoading}>
-                    {isLoading ? <><i className="fa-solid fa-spinner fa-spin"></i> Creating...</> : <><i className="fa-solid fa-user-plus"></i> Create Account</>}
-                  </button>
-                </div>
-                <p style={{ textAlign: 'center', marginTop: '15px', fontSize: '0.9rem' }}>
+                <button type="submit" className="neo-btn neo-btn-primary neo-btn-block neo-btn-lg" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                      <span>Creating Account...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-user-plus"></i>
+                      <span>Create Account</span>
+                    </>
+                  )}
+                </button>
+                <p className="neo-auth-switch">
                   Already have an account?{' '}
-                  <button type="button" className="link-btn" onClick={() => setIsRegister(false)}>
-                    Sign In
-                  </button>
+                  <button type="button" onClick={() => setIsRegister(false)}>Sign In</button>
                 </p>
               </form>
             ) : (
-              <form onSubmit={handleLogin}>
-                <div className="form-group">
-                  <label className="label">Email</label>
-                  <input className="input" name="email" type="email" placeholder="doctor@clinic.com" required />
+              <form onSubmit={handleLogin} className="neo-auth-form">
+                <div className="neo-form-group">
+                  <label>Email</label>
+                  <div className="neo-input-wrapper">
+                    <i className="fa-solid fa-envelope"></i>
+                    <input name="email" type="email" placeholder="doctor@clinic.com" required />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="label">Password</label>
-                  <input className="input" name="password" type="password" placeholder="Enter password" required />
+                <div className="neo-form-group">
+                  <label>Password</label>
+                  <div className="neo-input-wrapper">
+                    <i className="fa-solid fa-lock"></i>
+                    <input name="password" type="password" placeholder="Enter password" required />
+                  </div>
                 </div>
-                <div className="actions-row">
-                  <button type="submit" className="btn-primary" disabled={isLoading}>
-                    {isLoading ? <><i className="fa-solid fa-spinner fa-spin"></i> Signing In...</> : <><i className="fa-solid fa-sign-in-alt"></i> Sign In to Dashboard</>}
-                  </button>
-                </div>
-                <p style={{ textAlign: 'center', marginTop: '15px', fontSize: '0.9rem' }}>
+                <button type="submit" className="neo-btn neo-btn-primary neo-btn-block neo-btn-lg" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                      <span>Signing In...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-arrow-right-to-bracket"></i>
+                      <span>Sign In to Dashboard</span>
+                    </>
+                  )}
+                </button>
+                <p className="neo-auth-switch">
                   New to BaigDentPro?{' '}
-                  <button type="button" className="link-btn" onClick={() => setIsRegister(true)}>
-                    Create Account
-                  </button>
+                  <button type="button" onClick={() => setIsRegister(true)}>Create Account</button>
                 </p>
               </form>
             )}
 
-            <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              <p>Demo: demo@baigdentpro.com / password123</p>
-              <p style={{ marginTop: '8px' }}>© 2024 BaigDentPro • Omix Solutions</p>
+            <div className="neo-auth-footer">
+              <p className="neo-auth-demo">Demo: demo@baigdentpro.com / password123</p>
+              <p className="neo-auth-copyright">© 2026 BaigDentPro • Omix Solutions</p>
             </div>
           </div>
-        </section>
-      </main>
+        </div>
+      </div>
     </div>
   );
 };
