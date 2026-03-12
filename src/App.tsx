@@ -100,10 +100,7 @@ export const App: React.FC = () => {
         <div className="neo-auth-brand">
           <div className="neo-auth-brand-content">
             <div className="neo-logo neo-logo-lg" onClick={() => setView('home')} style={{ cursor: 'pointer' }}>
-              <div className="neo-logo-icon">
-                <i className="fa-solid fa-tooth"></i>
-              </div>
-              <span className="neo-logo-text">BaigDentPro</span>
+              <img src="/logo.png" alt="BaigDentPro" className="neo-logo-img neo-logo-img-lg" />
             </div>
             
             <h1 className="neo-auth-title">

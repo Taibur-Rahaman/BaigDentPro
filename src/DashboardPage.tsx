@@ -366,7 +366,7 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     <aside className="dashboard-sidebar">
       <div className="sidebar-header">
         <div className="sidebar-logo">
-          <i className="fa-solid fa-tooth"></i>
+          <img src="/logo.png" alt="BaigDentPro" className="sidebar-logo-img" />
           <span>BaigDentPro</span>
         </div>
         <div className="sidebar-user">

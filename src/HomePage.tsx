@@ -158,10 +158,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
       <header className="neo-header">
         <div className="neo-header-content">
           <div className="neo-logo">
-            <div className="neo-logo-icon">
-              <i className="fa-solid fa-tooth"></i>
-            </div>
-            <span className="neo-logo-text">BaigDentPro</span>
+            <img src="/logo.png" alt="BaigDentPro" className="neo-logo-img" />
           </div>
           <nav className="neo-nav">
             <a href="#hero" className="neo-nav-link">Home</a>
@@ -441,10 +438,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
         <div className="neo-footer-content">
           <div className="neo-footer-brand">
             <div className="neo-logo">
-              <div className="neo-logo-icon">
-                <i className="fa-solid fa-tooth"></i>
-              </div>
-              <span className="neo-logo-text">BaigDentPro</span>
+              <img src="/logo.png" alt="BaigDentPro" className="neo-logo-img neo-logo-img-sm" />
             </div>
             <p>Next-generation dental practice management</p>
           </div>
