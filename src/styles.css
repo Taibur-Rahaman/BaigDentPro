@@ -8,38 +8,80 @@
 }
 
 :root {
-  /* Professional Medical Color Palette */
-  --primary-color: #0d9488;        /* Teal - Professional medical */
-  --primary-dark: #0f766e;
-  --primary-light: #14b8a6;
-  --secondary-color: #0284c7;     /* Blue - Trust & reliability */
-  --secondary-dark: #0369a1;
-  --accent-color: #f59e0b;        /* Amber - Attention */
-  --success-color: #22c55e;       /* Green - Success */
-  --danger-color: #ef4444;        /* Red - Delete/Warning */
-  --warning-color: #f59e0b;        /* Amber - Warning */
+  /* Primary Futuristic Colors */
+  --neo-primary: #00e5ff;
+  --neo-primary-glow: rgba(0, 229, 255, 0.5);
+  --neo-primary-dim: rgba(0, 229, 255, 0.15);
+  --neo-secondary: #7c3aed;
+  --neo-secondary-glow: rgba(124, 58, 237, 0.5);
+  --neo-secondary-dim: rgba(124, 58, 237, 0.15);
+  --neo-accent: #a78bfa;
   
-  /* Neutrals */
-  --bg-main: #f1f5f9;
-  --bg-card: #ffffff;
-  --bg-sidebar: #0f172a;
-  --text-primary: #1e293b;
-  --text-secondary: #64748b;
-  --text-muted: #94a3b8;
-  --border-color: #e2e8f0;
+  /* Dark Theme Base */
+  --neo-bg-deep: #050508;
+  --neo-bg-base: #0a0a0f;
+  --neo-bg-surface: #0f1117;
+  --neo-bg-elevated: #151821;
+  --neo-bg-card: rgba(21, 24, 33, 0.8);
+  --neo-bg-glass: rgba(15, 17, 23, 0.6);
+  
+  /* Text Colors */
+  --neo-text-primary: #f0f4f8;
+  --neo-text-secondary: #94a3b8;
+  --neo-text-muted: #64748b;
+  --neo-text-glow: #00e5ff;
+  
+  /* Border & Effects */
+  --neo-border: rgba(255, 255, 255, 0.06);
+  --neo-border-glow: rgba(0, 229, 255, 0.3);
+  --neo-shadow-glow: 0 0 40px rgba(0, 229, 255, 0.15);
+  --neo-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
+  
+  /* Status Colors */
+  --neo-success: #00e676;
+  --neo-success-glow: rgba(0, 230, 118, 0.4);
+  --neo-warning: #ffab00;
+  --neo-warning-glow: rgba(255, 171, 0, 0.4);
+  --neo-danger: #ff5252;
+  --neo-danger-glow: rgba(255, 82, 82, 0.4);
+  
+  /* Glass Effect */
+  --glass-bg: rgba(15, 17, 23, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: blur(20px);
+
+  /* Legacy compatibility (for old components) */
+  --primary-color: #00e5ff;
+  --primary-dark: #00b8d4;
+  --primary-light: #18ffff;
+  --secondary-color: #7c3aed;
+  --secondary-dark: #6d28d9;
+  --accent-color: #ffab00;
+  --success-color: #00e676;
+  --danger-color: #ff5252;
+  --warning-color: #ffab00;
+  
+  /* Neutrals - Dark Theme */
+  --bg-main: #0a0a0f;
+  --bg-card: #151821;
+  --bg-sidebar: #0f1117;
+  --text-primary: #f0f4f8;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --border-color: rgba(255, 255, 255, 0.08);
   
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-  --gradient-sidebar: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-  --gradient-header: linear-gradient(135deg, #0d9488 0%, #0f766e 50%, #0284c7 100%);
+  --gradient-primary: linear-gradient(135deg, #00e5ff 0%, #7c3aed 100%);
+  --gradient-sidebar: linear-gradient(180deg, #0f1117 0%, #050508 100%);
+  --gradient-header: linear-gradient(135deg, #00e5ff 0%, #00b8d4 50%, #7c3aed 100%);
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
-  background: var(--bg-main);
-  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
+  background: var(--neo-bg-base);
+  color: var(--neo-text-primary);
   line-height: 1.6;
 }
 
@@ -4154,50 +4196,7 @@ body {
    FUTURISTIC 2025-2026 REDESIGN
    ======================================== */
 
-/* Futuristic Theme Variables */
-:root {
-  /* Primary Futuristic Colors */
-  --neo-primary: #00e5ff;
-  --neo-primary-glow: rgba(0, 229, 255, 0.5);
-  --neo-primary-dim: rgba(0, 229, 255, 0.15);
-  --neo-secondary: #7c3aed;
-  --neo-secondary-glow: rgba(124, 58, 237, 0.5);
-  --neo-secondary-dim: rgba(124, 58, 237, 0.15);
-  --neo-accent: #a78bfa;
-  
-  /* Dark Theme Base */
-  --neo-bg-deep: #050508;
-  --neo-bg-base: #0a0a0f;
-  --neo-bg-surface: #0f1117;
-  --neo-bg-elevated: #151821;
-  --neo-bg-card: rgba(21, 24, 33, 0.8);
-  --neo-bg-glass: rgba(15, 17, 23, 0.6);
-  
-  /* Text Colors */
-  --neo-text-primary: #f0f4f8;
-  --neo-text-secondary: #94a3b8;
-  --neo-text-muted: #64748b;
-  --neo-text-glow: #00e5ff;
-  
-  /* Border & Effects */
-  --neo-border: rgba(255, 255, 255, 0.06);
-  --neo-border-glow: rgba(0, 229, 255, 0.3);
-  --neo-shadow-glow: 0 0 40px rgba(0, 229, 255, 0.15);
-  --neo-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
-  
-  /* Status Colors */
-  --neo-success: #00e676;
-  --neo-success-glow: rgba(0, 230, 118, 0.4);
-  --neo-warning: #ffab00;
-  --neo-warning-glow: rgba(255, 171, 0, 0.4);
-  --neo-danger: #ff5252;
-  --neo-danger-glow: rgba(255, 82, 82, 0.4);
-  
-  /* Glass Effect */
-  --glass-bg: rgba(15, 17, 23, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-blur: blur(20px);
-}
+/* Futuristic Theme Variables - defined in main :root above */
 
 /* Keyframe Animations */
 @keyframes glow-pulse {
