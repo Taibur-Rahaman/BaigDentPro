@@ -148,6 +148,7 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   const [dx, setDx] = useState('');
   const [cc, setCc] = useState('');
   const [oeMode, setOeMode] = useState<'oe' | 'oeBox' | 'boxOe'>('oeBox');
+  const [oeText, setOeText] = useState('');
   const [oe, setOe] = useState({
     bp: '',
     pulse: '',
@@ -208,7 +209,7 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     nextVisitDays: '0',
   });
   const [followUpDay, setFollowUpDay] = useState('');
-  const [followUpMonth, setFollowUpMonth] = useState('');
+  const [revisitUnit, setRevisitUnit] = useState<'' | 'দিন' | 'মাস'>('');
   const [status, setStatus] = useState('');
   
   // Filter & templates
@@ -236,6 +237,30 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     email: 'contact@baigdentpro.com',
   });
 
+  const getOeDisplayString = useCallback((): string => {
+    if (oeMode === 'oe' && oeText.trim()) return oeText.trim();
+    const parts = (['bp', 'pulse', 'temp', 'heart', 'lungs', 'abd', 'anaemia', 'jaundice', 'cyanosis', 'oedema'] as const)
+      .map((k) => {
+        const label = k === 'abd' ? 'Abd' : k.charAt(0).toUpperCase() + k.slice(1);
+        const val = (oe as Record<string, string>)[k];
+        return val ? `${label}: ${val}` : null;
+      })
+      .filter(Boolean);
+    return parts.join('\n');
+  }, [oeMode, oeText, oe]);
+
+  const transferBoxToOe = useCallback(() => {
+    const lines = (['bp', 'pulse', 'temp', 'heart', 'lungs', 'abd', 'anaemia', 'jaundice', 'cyanosis', 'oedema'] as const)
+      .map((k) => {
+        const label = k === 'abd' ? 'Abd' : k.charAt(0).toUpperCase() + k.slice(1);
+        const val = (oe as Record<string, string>)[k];
+        return val ? `${label}: ${val}` : null;
+      })
+      .filter(Boolean);
+    setOeText(lines.join('\n'));
+    setOeMode('oe');
+  }, [oe]);
+
   const computeBmi = useCallback(() => {
     const w = parseFloat(weight);
     const f = parseFloat(heightFeet) || 0;
@@ -260,6 +285,8 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
 
   const handleAddDrugFromRx = () => {
     if (!rxBrand.trim() && !rxDose.trim() && !rxDuration.trim()) return;
+    const hasMonth = /মাস/.test(rxDuration);
+    const unit: 'D' | 'M' = hasMonth ? 'M' : rxDurationUnit;
     setDrugs((d) => [
       ...d,
       {
@@ -267,7 +294,7 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
         brand: rxBrand,
         dose: rxDose,
         duration: rxDuration,
-        durationUnit: rxDurationUnit,
+        durationUnit: unit,
         beforeFood: rxBeforeFood,
         afterFood: rxAfterFood,
       },
@@ -278,11 +305,13 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   };
 
   const handleSave = () => {
+    const revisitStr = [followUpDay.trim(), revisitUnit].filter(Boolean).join(' ');
     const payload = {
       patient,
       dx,
       cc,
-      oe,
+      oe: getOeDisplayString(),
+      oeBox: oe,
       ix,
       drugHistory,
       pastHistory,
@@ -290,6 +319,7 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
       notesHistory,
       drugs,
       visit,
+      revisit: revisitStr,
       richText: richTextRef.current?.innerHTML ?? '',
       createdAt: Date.now(),
     };
@@ -317,20 +347,25 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   const handlePreview = () => {
     const w = window.open('', '_blank', 'width=900,height=700');
     if (!w) return;
+    const revisitStr = [followUpDay.trim(), revisitUnit].filter(Boolean).join(' ');
+    const oeDisplay = getOeDisplayString().replace(/\n/g, '<br>');
+    const richHtml = richTextRef.current?.innerHTML ?? '';
     w.document.write(`
-      <!DOCTYPE html><html><head><title>Preview</title>
-      <style>body{font-family:sans-serif;padding:20px;background:#fff;color:#111;}
+      <!DOCTYPE html><html><head><title>Prescription Preview</title>
+      <style>body{font-family:sans-serif;padding:20px;background:#fff;color:#111;line-height:1.5;}
       table{border-collapse:collapse;} th,td{border:1px solid #ccc;padding:6px;}
-      .no-print{display:none;}</style></head><body>
+      .oe-block{white-space:pre-wrap;}</style></head><body>
       <h2>Prescription Preview</h2>
-      <p><strong>Patient:</strong> ${patient.name} | Age: ${patient.age} | Sex: ${patient.sex} | Reg: ${patient.regNo} | Date: ${patient.date}</p>
-      <p><strong>Dx:</strong> ${dx}</p>
-      <p><strong>C/C:</strong> ${cc}</p>
-      <p><strong>O/E:</strong> BP ${oe.bp} Pulse ${oe.pulse} Temp ${oe.temp} Heart ${oe.heart} Lungs ${oe.lungs} Abd ${oe.abd}</p>
-      <p><strong>Ix:</strong> ${ix}</p>
+      <p><strong>Patient:</strong> ${patient.name || '—'} | Age: ${patient.age || '—'} | Sex: ${patient.sex || '—'} | Reg: ${patient.regNo || '—'} | Date: ${patient.date || '—'}</p>
+      <p><strong>Dx:</strong> ${(dx || '—').replace(/\n/g, '<br>')}</p>
+      <p><strong>C/C:</strong> ${(cc || '—').replace(/\n/g, '<br>')}</p>
+      <p><strong>O/E:</strong><br><span class="oe-block">${oeDisplay || '—'}</span></p>
+      <p><strong>Ix:</strong> ${(ix || '—').replace(/\n/g, '<br>')}</p>
       <table><thead><tr><th>Brand</th><th>Dose</th><th>Duration</th></tr></thead><tbody>
-      ${drugs.map((r) => `<tr><td>${r.brand}</td><td>${r.dose}</td><td>${r.duration} ${r.durationUnit}</td></tr>`).join('')}
+      ${drugs.filter((r) => r.brand || r.dose || r.duration).map((r) => `<tr><td>${r.brand}</td><td>${r.dose}</td><td>${r.duration} ${r.durationUnit}</td></tr>`).join('') || '<tr><td colspan="3">—</td></tr>'}
       </tbody></table>
+      ${richHtml ? `<div style="margin-top:12px;">${richHtml}</div>` : ''}
+      ${revisitStr ? `<p><strong>Revisit:</strong> ${revisitStr} পর আসবেন।</p>` : ''}
       <p>Paid: ${visit.paid} TK | Visit No: ${visit.visitNo} | Last Visit: ${visit.lastVisit}</p>
       </body></html>`);
     w.document.close();
@@ -402,6 +437,31 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     searchDrugDatabase();
   }, [searchDrugDatabase]);
 
+  // Sync BMI weight/height to Insulin, BMR, Z-Score (ZilSoft behavior)
+  useEffect(() => {
+    setInsulin((i) => (weight !== i.weight ? { ...i, weight } : i));
+    setBmr((b) => (weight !== b.weight || heightFeet !== b.height || heightInch !== b.inch ? { ...b, weight, height: heightFeet, inch: heightInch } : b));
+    setZscore((z) => (weight !== z.weight ? { ...z, weight } : z));
+  }, [weight, heightFeet, heightInch]);
+
+  // Sync patient age to BMR age
+  useEffect(() => {
+    if (patient.age !== undefined && patient.age !== '' && /^\d+$/.test(String(patient.age))) {
+      setBmr((b) => (b.age !== patient.age ? { ...b, age: patient.age } : b));
+    }
+  }, [patient.age]);
+
+  // Z-Score: compute age in days from DOB
+  useEffect(() => {
+    if (!zscore.dob) return;
+    const dob = new Date(zscore.dob);
+    if (isNaN(dob.getTime())) return;
+    const today = new Date();
+    const diffMs = today.getTime() - dob.getTime();
+    const ageDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+    setZscore((z) => (z.ageDays !== String(ageDays) ? { ...z, ageDays: String(ageDays >= 0 ? ageDays : 0) } : z));
+  }, [zscore.dob]);
+
   const loadPatientFromSaved = (p: { patient?: { name?: string; age?: string; sex?: string; address?: string; mobile?: string; regNo?: string; date?: string } }) => {
     const q = p.patient;
     if (q) {
@@ -450,14 +510,24 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   }, [bmr.weight, bmr.height, bmr.inch, bmr.age, bmr.activity, bmr.gender]);
 
   // EDD calculation
-  const computeEdd = (lmpVal?: string) => {
-    const v = lmpVal ?? edd.lmp;
-    if (!v) return;
-    const d = new Date(v);
-    if (isNaN(d.getTime())) return;
-    d.setDate(d.getDate() + 280);
-    setEdd((e) => ({ ...e, lmp: v, edd: d.toLocaleDateString(), gestAge: '—' }));
-  };
+  const computeEdd = useCallback((lmpVal?: string) => {
+    const v = (lmpVal ?? edd.lmp)?.trim() || '';
+    if (!v) {
+      setEdd((e) => ({ ...e, lmp: '', gestAge: '', edd: '' }));
+      return;
+    }
+    const lmpDate = new Date(v);
+    if (isNaN(lmpDate.getTime())) return;
+    const eddDate = new Date(lmpDate);
+    eddDate.setDate(eddDate.getDate() + 280);
+    const today = new Date();
+    const diffMs = today.getTime() - lmpDate.getTime();
+    const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+    const weeks = Math.floor(diffDays / 7);
+    const days = diffDays % 7;
+    const gestAgeStr = diffDays >= 0 ? `${weeks} weeks ${days} days` : '—';
+    setEdd((e) => ({ ...e, lmp: v, edd: eddDate.toLocaleDateString(), gestAge: gestAgeStr }));
+  }, [edd.lmp]);
 
   const savedList = (() => {
     try {
@@ -1258,400 +1328,285 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
       </div>
       <header className="top-bar">
         <div className="brand"><i className="fa-solid fa-tooth"></i> BaigDentPro</div>
-        <div className="action-buttons">
-          <button type="button" className="btn-secondary action-btn-with-icon" onClick={handlePreview}>
-            <span><i className="fa-solid fa-eye"></i></span> Preview
-          </button>
-          <button type="button" className="btn-primary action-btn-with-icon" onClick={() => handleSaveAndPrint(false)}>
-            <span><i className="fa-solid fa-print"></i></span> Save & Print
-          </button>
-          <button type="button" className="btn-secondary action-btn-with-icon" onClick={() => handleSaveAndPrint(true)}>
-            <span><i className="fa-solid fa-file-pdf"></i></span> Print Without Header
-          </button>
-          <button type="button" className="btn-primary action-btn-with-icon" onClick={handleSave}>
-            <span><i className="fa-solid fa-save"></i></span> Save Only
-          </button>
-        </div>
       </header>
       <main className="prescription-shell">
-        <div className="prescription-three-col">
-          {/* Left column */}
-          <section className="prescription-left">
-            <div className="patient-row">
-              <div className="form-group compact">
-                <label className="label"><i className="fa-solid fa-user"></i> Name</label>
-                <input className="input" value={patient.name} onChange={(e) => setPatient({ ...patient, name: e.target.value })} />
+        <div className="rx-create">
+          <div className="rx-create-top">
+            <div className="rx-patient-strip">
+              <div className="rx-field">
+                <label>Name</label>
+                <input value={patient.name} onChange={(e) => setPatient({ ...patient, name: e.target.value })} />
               </div>
-              <div className="form-group compact">
-                <label className="label"><i className="fa-solid fa-baby"></i> Age</label>
-                <input className="input" value={patient.age} onChange={(e) => setPatient({ ...patient, age: e.target.value })} />
+              <div className="rx-field">
+                <label>Age</label>
+                <input value={patient.age} onChange={(e) => setPatient({ ...patient, age: e.target.value })} maxLength={4} style={{ textTransform: 'uppercase' }} />
               </div>
-              <div className="form-group compact">
-                <label className="label"><i className="fa-solid fa-venus-mars"></i> Sex</label>
-                <select className="select" value={patient.sex} onChange={(e) => setPatient({ ...patient, sex: e.target.value })}>
-                  <option value="">-</option>
-                  <option value="M">Male</option>
-                  <option value="F">Female</option>
-                </select>
+              <div className="rx-field">
+                <label>Sex</label>
+                <input value={patient.sex} onChange={(e) => setPatient({ ...patient, sex: e.target.value })} maxLength={1} style={{ textTransform: 'uppercase' }} />
               </div>
-              <div className="form-group compact full-width">
-                <label className="label"><i className="fa-solid fa-map-marker-alt"></i> Address</label>
-                <input className="input" value={patient.address} onChange={(e) => setPatient({ ...patient, address: e.target.value })} />
+              <div className="rx-field" style={{ gridColumn: '1 / -1' }}>
+                <label>Address</label>
+                <input value={patient.address} onChange={(e) => setPatient({ ...patient, address: e.target.value })} />
               </div>
-              <div className="form-group compact">
-                <label className="label"><i className="fa-solid fa-mobile-alt"></i> Mobile</label>
-                <input className="input" value={patient.mobile} onChange={(e) => setPatient({ ...patient, mobile: e.target.value })} />
+              <div className="rx-field">
+                <label>Mobile</label>
+                <input value={patient.mobile} onChange={(e) => setPatient({ ...patient, mobile: e.target.value })} />
               </div>
-              <div className="form-group compact">
-                <label className="label"><i className="fa-solid fa-id-card"></i> Reg No.</label>
+              <div className="rx-field">
+                <label>Reg No.</label>
                 <div className="reg-search-wrap">
-                  <input className="input" value={patient.regNo} onChange={(e) => setPatient({ ...patient, regNo: e.target.value })} />
+                  <input value={patient.regNo} onChange={(e) => setPatient({ ...patient, regNo: e.target.value })} />
                   <button type="button" className="btn-icon-sm" title="Search patient" onClick={() => setShowPatientSearch(true)}><i className="fa-solid fa-search"></i></button>
                 </div>
               </div>
-              <div className="form-group compact">
-                <label className="label"><i className="fa-solid fa-calendar"></i> Appointment</label>
-                <button type="button" className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowAppointmentModal(true)}>
-                  <i className="fa-solid fa-plus"></i> Appointment
+              <div className="rx-field">
+                <label>Q Appointment</label>
+                <button type="button" className="btn-secondary" style={{ width: '100%', padding: '8px 10px' }} onClick={() => setShowAppointmentModal(true)}>
+                  <i className="fa-solid fa-calendar-plus"></i> Appointment
                 </button>
               </div>
-              <div className="form-group compact">
-                <label className="label"><i className="fa-solid fa-calendar-day"></i> Date</label>
-                <input type="date" className="input" value={patient.date} onChange={(e) => setPatient({ ...patient, date: e.target.value })} />
+              <div className="rx-field">
+                <label>Date</label>
+                <input type="date" value={patient.date} onChange={(e) => setPatient({ ...patient, date: e.target.value })} />
               </div>
             </div>
-            <div className="form-group">
-              <label className="label"><i className="fa-solid fa-stethoscope"></i> Disease/Condition/Dx</label>
-              <textarea className="textarea" rows={2} value={dx} onChange={(e) => setDx(e.target.value)} />
+            <div className="rx-create-actions">
+              <button type="button" className="btn-secondary action-btn-with-icon" onClick={handlePreview}>
+                <span><i className="fa-solid fa-eye"></i></span> Preview
+              </button>
+              <button type="button" className="btn-primary action-btn-with-icon" onClick={() => handleSaveAndPrint(false)}>
+                <span><i className="fa-solid fa-print"></i></span> Save & Print
+              </button>
+              <button type="button" className="btn-secondary action-btn-with-icon" onClick={() => handleSaveAndPrint(true)}>
+                <span><i className="fa-solid fa-file-pdf"></i></span> Save & Print Without header
+              </button>
+              <button type="button" className="btn-primary action-btn-with-icon" onClick={handleSave}>
+                <span><i className="fa-solid fa-save"></i></span> Save Only
+              </button>
             </div>
-            <div className="form-group">
-              <label className="label"><i className="fa-solid fa-comment-medical"></i> C/C (Chief Complaint)</label>
-              <textarea className="textarea" rows={2} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Chief complaint" />
-            </div>
-            <div className="oe-mode-tabs">
-              <button type="button" className={oeMode === 'oe' ? 'active' : ''} onClick={() => setOeMode('oe')}><i className="fa-solid fa-list"></i> O/E</button>
-              <button type="button" className={oeMode === 'oeBox' ? 'active' : ''} onClick={() => setOeMode('oeBox')}><i className="fa-solid fa-th-large"></i> O/E (Box)</button>
-              <button type="button" className={oeMode === 'boxOe' ? 'active' : ''} onClick={() => setOeMode('boxOe')}><i className="fa-solid fa-border-all"></i> Box → O/E</button>
-              <button type="button" className="oe-box-toggle" onClick={() => setOeBoxVisible((v) => !v)}>{oeBoxVisible ? '[ − ]' : '[+]'}</button>
-            </div>
-            <div className="prescription-two-col" style={{ display: oeMode === 'oe' ? 'none' : undefined }}>
-              <div className="oe-panel" style={{ display: oeBoxVisible && oeMode === 'oeBox' ? undefined : 'none' }}>
-                <div className="panel-title"><i className="fa-solid fa-heart-pulse"></i> O/E</div>
-                <div className="oe-grid">
-                  {(['bp', 'pulse', 'temp', 'heart', 'lungs', 'abd', 'anaemia', 'jaundice', 'cyanosis', 'oedema'] as const).map((key) => (
-                    <label key={key} className="oe-label">
-                      {key === 'abd' ? 'Abd' : key.charAt(0).toUpperCase() + key.slice(1)}
-                      <input className="oe-input" value={(oe as Record<string, string>)[key]} onChange={(e) => setOe({ ...oe, [key]: e.target.value })} />
-                    </label>
+          </div>
+
+          <div className="rx-create-grid">
+            {/* Left column - Clinical & Calculators */}
+            <div className="rx-create-left">
+              <div className="rx-card">
+                <div className="rx-card-title"><i className="fa-solid fa-stethoscope"></i> Disease/Condition/Dx</div>
+                <textarea className="textarea" rows={2} value={dx} onChange={(e) => setDx(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid var(--border-color)' }} />
+              </div>
+              <div className="rx-card">
+                <div className="rx-card-title"><i className="fa-solid fa-comment-medical"></i> C/C</div>
+                <textarea className="textarea" rows={2} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Chief complaint" style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid var(--border-color)' }} />
+              </div>
+              <div className="rx-card">
+                <div className="rx-card-title"><i className="fa-solid fa-heart-pulse"></i> O/E</div>
+                <div className="oe-mode-tabs" style={{ marginBottom: 10 }}>
+                  <button type="button" className={oeMode === 'oe' ? 'active' : ''} onClick={() => setOeMode('oe')}>O/E</button>
+                  <button type="button" className={oeMode === 'oeBox' ? 'active' : ''} onClick={() => setOeMode('oeBox')}>O/E (Box)</button>
+                  <button type="button" className={oeMode === 'boxOe' ? 'active' : ''} onClick={transferBoxToOe}>Box → O/E</button>
+                  <button type="button" className="oe-box-toggle" onClick={() => setOeBoxVisible((v) => !v)}>{oeBoxVisible ? '[ − ]' : '[+]'}</button>
+                </div>
+                {oeMode === 'oe' && (
+                <textarea className="textarea" rows={3} value={oeText} onChange={(e) => setOeText(e.target.value)} placeholder="On examination (free text)" style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--border-color)', marginBottom: 10 }} />
+              )}
+                <div style={{ display: oeBoxVisible && oeMode === 'oeBox' ? 'block' : 'none' }}>
+                  <div className="rx-oe-row">
+                    {(['bp', 'pulse', 'temp', 'heart', 'lungs', 'abd', 'anaemia', 'jaundice', 'cyanosis', 'oedema'] as const).map((key) => (
+                      <div key={key} className="rx-oe-item">
+                        <span>{key === 'abd' ? 'Abd' : key.charAt(0).toUpperCase() + key.slice(1)}</span>
+                        <input value={(oe as Record<string, string>)[key]} onChange={(e) => setOe({ ...oe, [key]: e.target.value })} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="rx-card">
+                <div className="rx-card-title"><i className="fa-solid fa-flask"></i> Ix</div>
+                <textarea className="textarea" rows={3} value={ix} onChange={(e) => setIx(e.target.value)} placeholder="Investigations" style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid var(--border-color)' }} />
+              </div>
+              <div className="rx-card">
+                <div className="rx-card-title"><i className="fa-solid fa-capsules"></i> Drug History</div>
+                <div className="drug-history-row">
+                  <textarea className="textarea" rows={2} value={drugHistory} onChange={(e) => setDrugHistory(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid var(--border-color)' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <input className="input input-sm" placeholder="Type Brand" value={typeBrand} onChange={(e) => setTypeBrand(e.target.value)} style={{ maxWidth: 120 }} />
+                    <button type="button" className="btn-icon-sm" title="Add to drug history" onClick={() => typeBrand.trim() ? setDrugHistory((h) => h + (h ? '\n' : '') + typeBrand) : showNotice('Type a brand then add.')}><i className="fa-solid fa-plus"></i></button>
+                  </div>
+                </div>
+              </div>
+              <div className="rx-card">
+                <div className="rx-card-title"><i className="fa-solid fa-calculator"></i> BMI / Insulin / Z-Score / BMR / EDD</div>
+                <div className="calc-tabs">
+                  {(['bmi', 'insulin', 'zscore', 'bmr', 'edd'] as const).map((t) => (
+                    <button key={t} type="button" className={calcTab === t ? 'active' : ''} onClick={() => setCalcTab(t)}>
+                      {t === 'zscore' ? 'Z-Score' : t.toUpperCase()}
+                    </button>
                   ))}
                 </div>
+                <div className={`calc-panel ${calcTab === 'bmi' ? 'active' : ''}`}>
+                  <div className="bmi-row">
+                    <div className="form-group compact"><label className="label">Weight (Kg)</label><input className="input" value={weight} onChange={(e) => { setWeight(e.target.value); computeBmi(); }} /></div>
+                    <div className="form-group compact"><label className="label">Height (Feet)</label><input className="input" value={heightFeet} onChange={(e) => { setHeightFeet(e.target.value); computeBmi(); }} /></div>
+                    <div className="form-group compact"><label className="label">Height (Inch)</label><input className="input" value={heightInch} onChange={(e) => { setHeightInch(e.target.value); computeBmi(); }} /></div>
+                    <div className="form-group compact"><label className="label">BMI=</label><input className="input" value={bmiValue} readOnly /></div>
+                  </div>
+                  <div className="patient-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                    <div className="form-group compact"><label className="label">Class:</label><input className="input" value={classVal} readOnly /></div>
+                    <div className="form-group compact"><label className="label">Ideal Weight:</label><input className="input" value={idealWeight} readOnly /></div>
+                  </div>
+                </div>
+                <div className={`calc-panel ${calcTab === 'insulin' ? 'active' : ''}`}>
+                  <table><tbody>
+                    <tr><td>Weight (Kg)</td><td>Unit/Kg</td><td>Time</td><td>Total Unit=</td></tr>
+                    <tr>
+                      <td><input className="input input-sm" value={insulin.weight} onChange={(e) => setInsulin((i) => ({ ...i, weight: e.target.value }))} /></td>
+                      <td><input className="input input-sm" value={insulin.unitKg} onChange={(e) => setInsulin((i) => ({ ...i, unitKg: e.target.value }))} /></td>
+                      <td><select className="select" value={insulin.time} onChange={(e) => setInsulin((i) => ({ ...i, time: e.target.value }))}><option value="3">TDS</option><option value="2">BD</option><option value="1">Mono</option></select></td>
+                      <td><input className="input input-sm" value={insulin.totalUnit} readOnly /></td>
+                    </tr>
+                    <tr><td colSpan={4}><b>Dose:</b> <input className="input input-sm" value={insulin.dose} readOnly style={{ width: '80%' }} /></td></tr>
+                  </tbody></table>
+                </div>
+                <div className={`calc-panel ${calcTab === 'zscore' ? 'active' : ''}`}>
+                  <table><tbody>
+                    <tr><td>Date Of Birth</td><td>Gender</td><td>Weight (Kg)</td></tr>
+                    <tr>
+                      <td><input type="date" className="input input-sm" value={zscore.dob} onChange={(e) => setZscore((z) => ({ ...z, dob: e.target.value }))} /></td>
+                      <td><label><input type="radio" checked={zscore.gender === 'Male'} onChange={() => setZscore((z) => ({ ...z, gender: 'Male' }))} /> M</label> <label><input type="radio" checked={zscore.gender === 'Female'} onChange={() => setZscore((z) => ({ ...z, gender: 'Female' }))} /> F</label></td>
+                      <td><input className="input input-sm" value={zscore.weight} onChange={(e) => setZscore((z) => ({ ...z, weight: e.target.value }))} /></td>
+                    </tr>
+                    <tr><td colSpan={2}><b>Result:</b> <input className="input input-sm" value={zscore.result} readOnly /></td><td><b><input className="input input-sm" value={zscore.ageDays} readOnly /></b> Days</td></tr>
+                  </tbody></table>
+                </div>
+                <div className={`calc-panel ${calcTab === 'bmr' ? 'active' : ''}`}>
+                  <table><tbody>
+                    <tr><td>Weight (Kg)</td><td>Height (Feet)</td><td>Height (Inch)</td><td>Gender</td></tr>
+                    <tr>
+                      <td><input className="input input-sm" value={bmr.weight} onChange={(e) => setBmr((b) => ({ ...b, weight: e.target.value }))} /></td>
+                      <td><input className="input input-sm" value={bmr.height} onChange={(e) => setBmr((b) => ({ ...b, height: e.target.value }))} /></td>
+                      <td><input className="input input-sm" value={bmr.inch} onChange={(e) => setBmr((b) => ({ ...b, inch: e.target.value }))} /></td>
+                      <td><label><input type="radio" checked={bmr.gender === 'Male'} onChange={() => setBmr((b) => ({ ...b, gender: 'Male' }))} /> M</label> <label><input type="radio" checked={bmr.gender === 'Female'} onChange={() => setBmr((b) => ({ ...b, gender: 'Female' }))} /> F</label></td>
+                    </tr>
+                    <tr>
+                      <td><b>Age:</b> <input className="input input-sm" value={bmr.age} onChange={(e) => setBmr((b) => ({ ...b, age: e.target.value }))} style={{ width: 60 }} /></td>
+                      <td colSpan={2}><b>Activity:</b> <select className="select" value={bmr.activity} onChange={(e) => setBmr((b) => ({ ...b, activity: e.target.value }))}><option value="1.2">No Exercise</option><option value="1.375">Light Exercise</option><option value="1.55">Moderate</option><option value="1.725">Very Active</option><option value="1.9">Heavy Active</option></select></td>
+                      <td><b>BMR:</b> <input className="input input-sm" value={bmr.bmrVal} readOnly /></td>
+                    </tr>
+                    <tr><td colSpan={4}><div>{bmr.calorieNeed}</div></td></tr>
+                  </tbody></table>
+                </div>
+                <div className={`calc-panel ${calcTab === 'edd' ? 'active' : ''}`}>
+                  <table><tbody>
+                    <tr><td>LMP</td><td><input type="date" className="input input-sm" value={edd.lmp} onChange={(e) => computeEdd(e.target.value)} /></td></tr>
+                    <tr><td>Gestational Age (LMP)</td><td>{edd.gestAge || '—'}</td></tr>
+                    <tr><td>EDD (LMP)</td><td><b>{edd.edd || '—'}</b></td></tr>
+                  </tbody></table>
+                </div>
               </div>
-              <div className="ix-panel">
-                <div className="panel-title"><i className="fa-solid fa-flask"></i> Ix (Investigation)</div>
-                <textarea className="textarea" rows={4} value={ix} onChange={(e) => setIx(e.target.value)} />
+              <div className="rx-card">
+                <div className="rx-card-title"><i className="fa-solid fa-history"></i> History</div>
+                <div className="history-tabs">
+                  <button type="button" className={historyTab === 'past' ? 'active' : ''} onClick={() => setHistoryTab('past')}>Past History</button>
+                  <button type="button" className={historyTab === 'present' ? 'active' : ''} onClick={() => setHistoryTab('present')}>Present History</button>
+                  <button type="button" className={historyTab === 'notes' ? 'active' : ''} onClick={() => setHistoryTab('notes')}>Notes</button>
+                </div>
+                {historyTab === 'past' && <textarea className="textarea" rows={3} value={pastHistory} onChange={(e) => setPastHistory(e.target.value)} placeholder="Past medical history" style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--border-color)' }} />}
+                {historyTab === 'present' && <textarea className="textarea" rows={3} value={presentHistory} onChange={(e) => setPresentHistory(e.target.value)} placeholder="History of present illness" style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--border-color)' }} />}
+                {historyTab === 'notes' && <textarea className="textarea" rows={3} value={notesHistory} onChange={(e) => setNotesHistory(e.target.value)} placeholder="Notes" style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--border-color)' }} />}
               </div>
-            </div>
-            <div className="form-group">
-              <label className="label"><i className="fa-solid fa-capsules"></i> Drug History</label>
-              <div className="drug-history-row">
-                <textarea className="textarea" rows={2} value={drugHistory} onChange={(e) => setDrugHistory(e.target.value)} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <button
-                    type="button"
-                    className="btn-icon-sm"
-                    title="Search template"
-                    onClick={() => typeBrand.trim() ? setDrugHistory((h) => h + (h ? '; ' : '') + typeBrand) : showNotice('Type a brand in the box then click search to add to drug history.')}
-                  >
-                    <i className="fa-solid fa-search"></i>
-                  </button>
-                  <input className="input input-sm" placeholder="Type Brand" value={typeBrand} onChange={(e) => setTypeBrand(e.target.value)} style={{ maxWidth: 100 }} />
+              <div className="rx-card">
+                <div className="rx-card-title"><i className="fa-solid fa-print"></i> PRINT</div>
+                <div className="print-options">
+                  <label><input type="checkbox" checked={printPast} onChange={(e) => setPrintPast(e.target.checked)} /> Past H/O</label>
+                  <label><input type="checkbox" checked={printPresent} onChange={(e) => setPrintPresent(e.target.checked)} /> Present H/O</label>
+                  <label><input type="checkbox" checked={printNotes} onChange={(e) => setPrintNotes(e.target.checked)} /> Notes</label>
+                  <label><input type="checkbox" checked={printEdd} onChange={(e) => setPrintEdd(e.target.checked)} /> EDD</label>
                 </div>
               </div>
             </div>
-            <div className="calc-tabs">
-              {(['bmi', 'insulin', 'zscore', 'bmr', 'edd'] as const).map((t) => (
-                <button key={t} type="button" className={calcTab === t ? 'active' : ''} onClick={() => setCalcTab(t)}>
-                  {t === 'zscore' ? 'Z-Score' : t.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <div className={`calc-panel ${calcTab === 'bmi' ? 'active' : ''}`}>
-            <div className="bmi-row">
-              <div className="form-group compact">
-                <label className="label">Weight (Kg)</label>
-                <input className="input" value={weight} onChange={(e) => { setWeight(e.target.value); computeBmi(); }} />
-              </div>
-              <div className="form-group compact">
-                <label className="label">Height (Feet)</label>
-                <input className="input" value={heightFeet} onChange={(e) => { setHeightFeet(e.target.value); computeBmi(); }} />
-              </div>
-              <div className="form-group compact">
-                <label className="label">Height (Inch)</label>
-                <input className="input" value={heightInch} onChange={(e) => { setHeightInch(e.target.value); computeBmi(); }} />
-              </div>
-              <div className="form-group compact">
-                <label className="label">BMI=</label>
-                <input className="input" value={bmiValue} readOnly />
-              </div>
-            </div>
-            <div className="patient-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="form-group compact">
-                <label className="label">Class</label>
-                <input className="input" value={classVal} readOnly />
-              </div>
-              <div className="form-group compact">
-                <label className="label">Ideal Weight</label>
-                <input className="input" value={idealWeight} readOnly />
-              </div>
-            </div>
-            </div>
-            <div className={`calc-panel ${calcTab === 'insulin' ? 'active' : ''}`}>
-              <table>
-                <tbody>
-                  <tr><td>Weight (Kg)</td><td>Unit/Kg</td><td>Time</td><td>Total Unit=</td></tr>
-                  <tr>
-                    <td><input className="input input-sm" value={insulin.weight} onChange={(e) => setInsulin((i) => ({ ...i, weight: e.target.value }))} /></td>
-                    <td><input className="input input-sm" value={insulin.unitKg} onChange={(e) => setInsulin((i) => ({ ...i, unitKg: e.target.value }))} /></td>
-                    <td>
-                      <select className="select" value={insulin.time} onChange={(e) => setInsulin((i) => ({ ...i, time: e.target.value }))}>
-                        <option value="3">TDS</option>
-                        <option value="2">BD</option>
-                        <option value="1">Mono</option>
-                      </select>
-                    </td>
-                    <td><input className="input input-sm" value={insulin.totalUnit} readOnly /></td>
-                  </tr>
-                  <tr><td colSpan={4}><b>Dose:</b> <input className="input input-sm" value={insulin.dose} readOnly style={{ width: '80%' }} /></td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div className={`calc-panel ${calcTab === 'zscore' ? 'active' : ''}`}>
-              <table>
-                <tbody>
-                  <tr><td>Date Of Birth</td><td>Gender</td><td>Weight (Kg)</td></tr>
-                  <tr>
-                    <td><input type="date" className="input input-sm" value={zscore.dob} onChange={(e) => setZscore((z) => ({ ...z, dob: e.target.value }))} /></td>
-                    <td>
-                      <label><input type="radio" checked={zscore.gender === 'Male'} onChange={() => setZscore((z) => ({ ...z, gender: 'Male' }))} /> M</label>
-                      <label><input type="radio" checked={zscore.gender === 'Female'} onChange={() => setZscore((z) => ({ ...z, gender: 'Female' }))} /> F</label>
-                    </td>
-                    <td><input className="input input-sm" value={zscore.weight} onChange={(e) => setZscore((z) => ({ ...z, weight: e.target.value }))} /></td>
-                  </tr>
-                  <tr><td colSpan={2}><b>Result:</b> <input className="input input-sm" value={zscore.result} readOnly /></td><td><b>Age:</b> <input className="input input-sm" value={zscore.ageDays} readOnly /> Days</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div className={`calc-panel ${calcTab === 'bmr' ? 'active' : ''}`}>
-              <table>
-                <tbody>
-                  <tr><td>Weight (Kg)</td><td>Height (Feet)</td><td>Height (Inch)</td><td>Gender</td></tr>
-                  <tr>
-                    <td><input className="input input-sm" value={bmr.weight} onChange={(e) => setBmr((b) => ({ ...b, weight: e.target.value }))} /></td>
-                    <td><input className="input input-sm" value={bmr.height} onChange={(e) => setBmr((b) => ({ ...b, height: e.target.value }))} /></td>
-                    <td><input className="input input-sm" value={bmr.inch} onChange={(e) => setBmr((b) => ({ ...b, inch: e.target.value }))} /></td>
-                    <td>
-                      <label><input type="radio" checked={bmr.gender === 'Male'} onChange={() => setBmr((b) => ({ ...b, gender: 'Male' }))} /> M</label>
-                      <label><input type="radio" checked={bmr.gender === 'Female'} onChange={() => setBmr((b) => ({ ...b, gender: 'Female' }))} /> F</label>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td><b>Age:</b> <input className="input input-sm" value={bmr.age} onChange={(e) => setBmr((b) => ({ ...b, age: e.target.value }))} style={{ width: 60 }} /></td>
-                    <td colSpan={2}><b>Activity:</b>
-                      <select className="select" value={bmr.activity} onChange={(e) => setBmr((b) => ({ ...b, activity: e.target.value }))}>
-                        <option value="1.2">No Exercise</option>
-                        <option value="1.375">Light Exercise</option>
-                        <option value="1.55">Moderate</option>
-                        <option value="1.725">Very Active</option>
-                        <option value="1.9">Heavy Active</option>
-                      </select>
-                    </td>
-                    <td><b>BMR:</b> <input className="input input-sm" value={bmr.bmrVal} readOnly /></td>
-                  </tr>
-                  <tr><td colSpan={4}><div>{bmr.calorieNeed}</div></td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div className={`calc-panel ${calcTab === 'edd' ? 'active' : ''}`}>
-              <table>
-                <tbody>
-                  <tr><td>LMP</td><td><input type="date" className="input input-sm" value={edd.lmp} onChange={(e) => computeEdd(e.target.value)} /></td></tr>
-                  <tr><td>Gestational Age (LMP)</td><td>{edd.gestAge || '—'}</td></tr>
-                  <tr><td>EDD (LMP)</td><td><b>{edd.edd || '—'}</b></td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div className="history-tabs">
-              <button type="button" className={historyTab === 'past' ? 'active' : ''} onClick={() => setHistoryTab('past')}>Past History</button>
-              <button type="button" className={historyTab === 'present' ? 'active' : ''} onClick={() => setHistoryTab('present')}>Present History</button>
-              <button type="button" className={historyTab === 'notes' ? 'active' : ''} onClick={() => setHistoryTab('notes')}>Notes</button>
-            </div>
-            <div className="form-group">
-              {historyTab === 'past' && <textarea className="textarea" rows={3} value={pastHistory} onChange={(e) => setPastHistory(e.target.value)} />}
-              {historyTab === 'present' && <textarea className="textarea" rows={3} value={presentHistory} onChange={(e) => setPresentHistory(e.target.value)} />}
-              {historyTab === 'notes' && <textarea className="textarea" rows={3} value={notesHistory} onChange={(e) => setNotesHistory(e.target.value)} />}
-            </div>
-            <div className="print-options">
-              <b><i className="fa-solid fa-print"></i> PRINT:</b>
-              <label><input type="checkbox" checked={printPast} onChange={(e) => setPrintPast(e.target.checked)} /> Past H/O</label>
-              <label><input type="checkbox" checked={printPresent} onChange={(e) => setPrintPresent(e.target.checked)} /> Present H/O</label>
-              <label><input type="checkbox" checked={printNotes} onChange={(e) => setPrintNotes(e.target.checked)} /> Notes</label>
-              <label><input type="checkbox" checked={printEdd} onChange={(e) => setPrintEdd(e.target.checked)} /> EDD</label>
-            </div>
-          </section>
 
-          {/* Center column - Rx */}
-          <section className="prescription-center">
-            <div className="form-group">
-              <label className="label"><i className="fa-solid fa-pills"></i> Type Brand Name / Dose / Duration</label>
-              <div className="rx-input-row">
-                <input className="input" placeholder="Type Brand Name" value={rxBrand} onChange={(e) => setRxBrand(e.target.value)} />
-                <input className="input" placeholder="Type Dose" value={rxDose} onChange={(e) => setRxDose(e.target.value)} />
-                <input className="input" placeholder="Duration" value={rxDuration} onChange={(e) => setRxDuration(e.target.value)} style={{ maxWidth: 60 }} />
-                <div className="duration-unit">
-                  <label><input type="radio" checked={rxDurationUnit === 'D'} onChange={() => setRxDurationUnit('D')} /> D</label>
-                  <label><input type="radio" checked={rxDurationUnit === 'M'} onChange={() => setRxDurationUnit('M')} /> M</label>
+            {/* Right column - Drug bar, prescription body, revisit, payment, templates */}
+            <div className="rx-create-right">
+              <div className="rx-card rx-no-print">
+                <div className="rx-card-title"><i className="fa-solid fa-pills"></i> Type Brand Name / Type Dose / Duration</div>
+                <div className="rx-drug-bar">
+                  <input className="rx-drug-inp brand" placeholder="Type Brand Name" value={rxBrand} onChange={(e) => setRxBrand(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddDrugFromRx())} />
+                  <input className="rx-drug-inp dose" placeholder="Type Dose" value={rxDose} onChange={(e) => setRxDose(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddDrugFromRx())} />
+                  <input className="rx-drug-inp dur" placeholder="Duration" value={rxDuration} onChange={(e) => setRxDuration(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddDrugFromRx())} />
+                  <button type="button" className="btn-icon-sm" onClick={() => setRxDuration((d) => d + (d ? ' ' : '') + 'দিন')} title="দিন">D</button>
+                  <button type="button" className="btn-icon-sm" onClick={() => setRxDuration((d) => d + (d ? ' ' : '') + 'মাস')} title="মাস">M</button>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem' }}><input type="checkbox" checked={rxBeforeFood} onChange={(e) => setRxBeforeFood(e.target.checked)} /> খাবার আগে</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem' }}><input type="checkbox" checked={rxAfterFood} onChange={(e) => setRxAfterFood(e.target.checked)} /> খাবার পর</label>
+                  <button type="button" className="btn-primary" onClick={handleAddDrugFromRx}><i className="fa-solid fa-plus"></i> ADD</button>
                 </div>
-                <div className="food-timing">
-                  <label><input type="checkbox" checked={rxBeforeFood} onChange={(e) => setRxBeforeFood(e.target.checked)} /> Before Food</label>
-                  <label><input type="checkbox" checked={rxAfterFood} onChange={(e) => setRxAfterFood(e.target.checked)} /> After Food</label>
+                <div className="drug-info-cnt" title="Drug info" style={{ minHeight: 24, marginBottom: 10, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{drugInfoCnt || '\u00A0'}</div>
+              </div>
+              <div className="rx-card">
+                <div className="rich-text-wrap">
+                  <div className="rich-text-toolbar">
+                    <button type="button" onClick={() => document.execCommand('bold')}><b>B</b></button>
+                    <button type="button" onClick={() => document.execCommand('italic')}><i>I</i></button>
+                    <button type="button" onClick={() => document.execCommand('underline')}>U</button>
+                    <button type="button" onClick={() => document.execCommand('justifyLeft')}><i className="fa-solid fa-align-left"></i></button>
+                    <button type="button" onClick={() => document.execCommand('justifyCenter')}><i className="fa-solid fa-align-center"></i></button>
+                    <button type="button" onClick={() => document.execCommand('justifyRight')}><i className="fa-solid fa-align-right"></i></button>
+                  </div>
+                  <div ref={richTextRef} className="rich-text-editor" contentEditable data-placeholder="Prescription notes..." suppressContentEditableWarning />
                 </div>
-                <button type="button" className="btn-primary" onClick={handleAddDrugFromRx}><i className="fa-solid fa-plus"></i> ADD</button>
               </div>
-            </div>
-            <div className="drug-info-cnt" title="Drug info">{drugInfoCnt || '\u00A0'}</div>
-            <div className="rich-text-wrap">
-              <div className="rich-text-toolbar">
-                <button type="button" onClick={() => document.execCommand('bold')}><b>B</b></button>
-                <button type="button" onClick={() => document.execCommand('italic')}><i>I</i></button>
-                <button type="button" onClick={() => document.execCommand('underline')}>U</button>
-                <button type="button" onClick={() => document.execCommand('justifyLeft')}><i className="fa-solid fa-align-left"></i></button>
-                <button type="button" onClick={() => document.execCommand('justifyCenter')}><i className="fa-solid fa-align-center"></i></button>
-                <button type="button" onClick={() => document.execCommand('justifyRight')}><i className="fa-solid fa-align-right"></i></button>
+              <div className="rx-card">
+                <div className="rx-revisit-line">
+                  <input type="text" value={followUpDay} onChange={(e) => setFollowUpDay(e.target.value)} placeholder="Revisit" />
+                  <label><input type="checkbox" checked={revisitUnit === 'দিন'} onChange={() => setRevisitUnit(revisitUnit === 'দিন' ? '' : 'দিন')} /> দিন</label>
+                  <label><input type="checkbox" checked={revisitUnit === 'মাস'} onChange={() => setRevisitUnit(revisitUnit === 'মাস' ? '' : 'মাস')} /> মাস</label>
+                  <span className="rx-revisit-suffix">............... পর আসবেন।</span>
+                </div>
+                <div className="rx-visit-row">
+                  <div className="rx-visit-item"><label>Paid (TK)</label><input value={visit.paid} onChange={(e) => setVisit({ ...visit, paid: e.target.value })} /></div>
+                  <div className="rx-visit-item"><label>Visit No</label><input value={visit.visitNo} onChange={(e) => setVisit({ ...visit, visitNo: e.target.value })} /></div>
+                  <div className="rx-visit-item"><label>Last Visit</label><input value={visit.lastVisit.replace(/\s*days ago/i, '').trim()} onChange={(e) => setVisit({ ...visit, lastVisit: e.target.value ? `${e.target.value} days ago` : '0 days ago' })} /><span> days ago</span></div>
+                </div>
+                <div className="form-group" style={{ marginTop: 12 }}>
+                  <input ref={fileInputRef} type="file" accept="image/*,.pdf" onChange={(e) => handleFileSelect(e.target.files)} style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }} />
+                  <div className="upload-zone" onClick={() => fileInputRef.current?.click()} onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('upload-zone-dragover'); }} onDragLeave={(e) => e.currentTarget.classList.remove('upload-zone-dragover')} onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('upload-zone-dragover'); handleFileSelect(e.dataTransfer.files); }}>
+                    {uploadedFileName ? <><i className="fa-solid fa-check-circle"></i> Uploaded: {uploadedFileName}</> : <><i className="fa-solid fa-cloud-upload-alt"></i> Drag & Drop Upload</>}
+                  </div>
+                </div>
               </div>
-              <div
-                ref={richTextRef}
-                className="rich-text-editor"
-                contentEditable
-                data-placeholder="Prescription notes..."
-                suppressContentEditableWarning
-              />
-            </div>
-            <div className="follow-up-row">
-              <label><input type="checkbox" /> Follow-up in</label>
-              <input className="input" style={{ width: 60 }} value={followUpDay} onChange={(e) => setFollowUpDay(e.target.value)} />
-              <label>Days</label>
-              <input className="input" style={{ width: 60 }} value={followUpMonth} onChange={(e) => setFollowUpMonth(e.target.value)} />
-              <label>Months</label>
-            </div>
-            <div className="visit-meta-row">
-              <div className="form-group compact">
-                <label className="label">Paid (TK)</label>
-                <input className="input" value={visit.paid} onChange={(e) => setVisit({ ...visit, paid: e.target.value })} />
-              </div>
-              <div className="form-group compact">
-                <label className="label">Visit No</label>
-                <input className="input" value={visit.visitNo} onChange={(e) => setVisit({ ...visit, visitNo: e.target.value })} />
-              </div>
-              <div className="form-group compact">
-                <label className="label">Last Visit</label>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <input className="input" value={visit.lastVisit.replace(/\s*days ago/i, '').trim()} onChange={(e) => setVisit({ ...visit, lastVisit: e.target.value ? `${e.target.value} days ago` : '0 days ago' })} style={{ width: 60 }} />
-                  <span>days ago</span>
-                </span>
-              </div>
-              <div className="form-group compact">
-                <label className="label">Next visit (days)</label>
-                <input className="input" value={visit.nextVisitDays} onChange={(e) => setVisit({ ...visit, nextVisitDays: e.target.value })} />
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="label"><i className="fa-solid fa-file-upload"></i> Upload File</label>
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="input input-file-hidden"
-                accept="image/*,.pdf"
-                onChange={(e) => handleFileSelect(e.target.files)}
-                style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
-              />
-              <div
-                className="upload-zone"
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('upload-zone-dragover'); }}
-                onDragLeave={(e) => { e.currentTarget.classList.remove('upload-zone-dragover'); } }
-                onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('upload-zone-dragover'); handleFileSelect(e.dataTransfer.files); }}
-              >
-                {uploadedFileName ? <><i className="fa-solid fa-check-circle"></i> Uploaded: {uploadedFileName}</> : <><i className="fa-solid fa-cloud-upload-alt"></i> Drag & Drop or Click to Upload</>}
-              </div>
-            </div>
-            <table className="drugs-table">
-              <thead>
-                <tr>
-                  <th>Brand name</th>
-                  <th>Dose</th>
-                  <th>Duration</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {drugs.map((row) => (
-                  <tr key={row.id}>
-                    <td><input className="input input-sm" value={row.brand} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, brand: e.target.value } : d)))} /></td>
-                    <td><input className="input input-sm" value={row.dose} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, dose: e.target.value } : d)))} /></td>
-                    <td>
-                      <input className="input input-sm" value={row.duration} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, duration: e.target.value } : d)))} style={{ width: 48 }} />
-                      <span className="dur-unit">{row.durationUnit}</span>
-                    </td>
-                    <td>
-                      <button type="button" className="btn-ghost btn-icon" onClick={() => setDrugs((list) => list.filter((d) => d.id !== row.id))}><i className="fa-solid fa-times"></i></button>
-                    </td>
-                  </tr>
+              <table className="drugs-table" style={{ width: '100%', marginBottom: 12 }}>
+                <thead><tr><th>Brand name</th><th>Dose</th><th>Duration</th><th></th></tr></thead>
+                <tbody>
+                  {drugs.map((row) => (
+                    <tr key={row.id}>
+                      <td><input className="input input-sm" value={row.brand} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, brand: e.target.value } : d)))} /></td>
+                      <td><input className="input input-sm" value={row.dose} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, dose: e.target.value } : d)))} /></td>
+                      <td><input className="input input-sm" value={row.duration} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, duration: e.target.value } : d)))} style={{ width: 80 }} /> {!/দিন|মাস/.test(row.duration) && <span className="dur-unit">{row.durationUnit}</span>}</td>
+                      <td><button type="button" className="btn-ghost btn-icon" onClick={() => setDrugs((list) => list.filter((d) => d.id !== row.id))}><i className="fa-solid fa-times"></i></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button type="button" className="btn-ghost" onClick={() => setDrugs((d) => [...d, createDrugRow()])}><i className="fa-solid fa-plus"></i> Add drug</button>
+              <div className="prescription-actions" style={{ marginTop: 12 }}><span className="helper-pill"><i className="fa-solid fa-check-circle"></i> {status}</span></div>
+
+              <div className="rx-card rx-no-print">
+                <div className="rx-card-title"><i className="fa-solid fa-file-medical"></i> Templates</div>
+                {TEMPLATE_SEARCH_ITEMS.map(({ key, label, icon }) => (
+                  <div key={key} className="rx-template-row">
+                    <span className="rx-template-label"><i className={`fa-solid ${icon}`}></i> {key === 'drug' ? 'GET Drug Template' : key === 'generic' ? 'Generic to brand (Random)' : key === 'treatment' ? 'GET Treatment Template' : key === 'advice' ? 'GET Advice Template' : key === 'cc' ? 'GET C/C Template' : key === 'oe' ? 'GET O/E Template' : key === 'ix' ? 'GET I/X Template' : label}</span>
+                    <input placeholder="Search..." value={templateSearch[key] ?? ''} onChange={(e) => setTemplateSearch((t) => ({ ...t, [key]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') applyTemplate(key); }} />
+                    <button type="button" className="btn-icon-sm" onClick={() => applyTemplate(key)}><i className="fa-solid fa-arrow-right"></i></button>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-            <button type="button" className="btn-ghost" onClick={() => setDrugs((d) => [...d, createDrugRow()])}><i className="fa-solid fa-plus"></i> Add drug</button>
-            <div className="prescription-actions">
-              <span className="helper-pill"><i className="fa-solid fa-check-circle"></i> {status}</span>
-            </div>
-          </section>
-
-          {/* Right column - templates */}
-          <section className="prescription-right">
-            <div className="cta-box">
-              <div><i className="fa-solid fa-headset"></i> BaigDentPro Support</div>
-              <div>Click here for help & support</div>
-            </div>
-            <div className="template-list">
-              {TEMPLATE_SEARCH_ITEMS.map(({ key, label, icon }) => (
-                <div key={key} className="template-row">
-                  <span className="template-label"><i className={`fa-solid ${icon}`}></i> {label}</span>
-                  <input
-                    className="input"
-                    placeholder="Search..."
-                    value={templateSearch[key] ?? ''}
-                    onChange={(e) => setTemplateSearch((t) => ({ ...t, [key]: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { applyTemplate(key); } }}
-                  />
-                  <button type="button" className="btn-icon-sm" onClick={() => applyTemplate(key)}><i className="fa-solid fa-arrow-right"></i></button>
-                </div>
-              ))}
-            </div>
-            <div className="filter-section">
-              <div className="panel-title"><i className="fa-solid fa-filter"></i> Quick Filter</div>
-              <div className="form-group compact">
-                <label className="label">Company</label>
-                <input className="input" value={filter.company} onChange={(e) => setFilter({ ...filter, company: e.target.value })} />
               </div>
-              <div className="form-group compact">
-                <label className="label">Generic</label>
-                <input className="input" value={filter.generic} onChange={(e) => setFilter({ ...filter, generic: e.target.value })} />
-              </div>
-              <div className="form-group compact">
-                <label className="label">Brand</label>
-                <input className="input" value={filter.brand} onChange={(e) => setFilter({ ...filter, brand: e.target.value })} />
+              <div className="rx-card rx-no-print">
+                <div className="rx-card-title"><i className="fa-solid fa-filter"></i> Filter</div>
+                <div className="rx-template-row"><span className="rx-template-label">Company:</span><input value={filter.company} onChange={(e) => setFilter({ ...filter, company: e.target.value })} /></div>
+                <div className="rx-template-row"><span className="rx-template-label">Generic:</span><input value={filter.generic} onChange={(e) => setFilter({ ...filter, generic: e.target.value })} /></div>
+                <div className="rx-template-row"><span className="rx-template-label">Brand:</span><input value={filter.brand} onChange={(e) => setFilter({ ...filter, brand: e.target.value })} /></div>
               </div>
             </div>
-          </section>
+          </div>
         </div>
       </main>
 

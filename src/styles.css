@@ -1024,6 +1024,275 @@ body {
   accent-color: var(--primary-color);
 }
 
+/* ========================================
+   Create Prescription - Alternate Style (Card-based)
+   All ZilSoft features, different layout
+   ======================================== */
+
+.rx-create {
+  --rx-card-radius: 14px;
+  --rx-card-border: 1px solid var(--border-color);
+  --rx-accent: 4px solid var(--primary-color);
+}
+
+.rx-create .rx-create-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  background: linear-gradient(135deg, var(--neo-bg-deep) 0%, var(--neo-bg-surface) 100%);
+  border-radius: var(--rx-card-radius);
+  border: var(--rx-card-border);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+}
+
+.rx-create .rx-patient-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px 20px;
+  flex: 1;
+  min-width: 280px;
+}
+
+.rx-create .rx-patient-strip .rx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rx-create .rx-patient-strip .rx-field label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.rx-create .rx-patient-strip .rx-field input,
+.rx-create .rx-patient-strip .rx-field select {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--bg-card);
+}
+
+.rx-create .rx-create-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.rx-create .rx-create-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .rx-create .rx-create-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rx-create .rx-card {
+  background: var(--bg-card);
+  border-radius: var(--rx-card-radius);
+  border: var(--rx-card-border);
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+}
+
+.rx-create .rx-card-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  padding-left: 12px;
+  border-left: var(--rx-accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rx-create .rx-card-title i {
+  color: var(--primary-color);
+}
+
+.rx-create .rx-oe-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 14px;
+}
+
+.rx-create .rx-oe-row .rx-oe-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rx-create .rx-oe-row .rx-oe-item span {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rx-create .rx-oe-row .rx-oe-item input {
+  flex: 1;
+  max-width: 140px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.rx-create .rx-template-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.rx-create .rx-template-row .rx-template-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  min-width: 140px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rx-create .rx-template-row input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.rx-create .rx-revisit-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.rx-create .rx-revisit-line input[type="text"] {
+  width: 80px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.rx-create .rx-revisit-suffix {
+  margin-left: 4px;
+}
+
+.rx-create .rx-drug-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.rx-create .rx-drug-bar .rx-drug-inp {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  min-width: 0;
+}
+
+.rx-create .rx-drug-bar .rx-drug-inp.brand { min-width: 140px; }
+.rx-create .rx-drug-bar .rx-drug-inp.dose { min-width: 100px; }
+.rx-create .rx-drug-bar .rx-drug-inp.dur { min-width: 70px; }
+
+.rx-create .rx-patient-strip .reg-search-wrap {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.rx-create .rx-patient-strip .reg-search-wrap input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--bg-card);
+}
+
+.rx-create .calc-panel table {
+  width: 100%;
+  font-size: 0.85rem;
+  border-collapse: collapse;
+}
+.rx-create .calc-panel td {
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+.rx-create .calc-panel .input,
+.rx-create .calc-panel .select {
+  width: 100%;
+  max-width: 120px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  font-size: 0.85rem;
+}
+.rx-create .calc-panel tr:first-child td {
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--neo-bg-deep);
+}
+
+.rx-create .rx-create-left {
+  min-width: 0;
+}
+.rx-create .rx-create-right {
+  min-width: 0;
+}
+.rx-create .rx-card:last-child {
+  margin-bottom: 0;
+}
+
+.rx-create .rx-visit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.rx-create .rx-visit-row .rx-visit-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rx-create .rx-visit-row .rx-visit-item label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.rx-create .rx-visit-row .rx-visit-item input {
+  width: 70px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
 /* Rich Text Editor */
 .rich-text-wrap {
   border: 1px solid var(--border-color);
@@ -2536,7 +2805,10 @@ body {
   .rich-text-toolbar,
   .whatsapp-float,
   .prescription-right,
-  .prescription-left {
+  .prescription-left,
+  .rx-create-top,
+  .rx-create-left,
+  .rx-no-print {
     display: none !important;
   }
   
@@ -8202,26 +8474,31 @@ body {
   border-top: 2px solid var(--neo-border);
 }
 
-/* Ledger Table with colored rows - Pink, Yellow, Blue, Green pattern */
+/* Ledger Table with colored rows */
 .ledger-table .ledger-row-0 {
-  background: rgba(255, 182, 193, 0.35);
+  background: rgba(236, 64, 122, 0.08);
 }
 
 .ledger-table .ledger-row-1 {
-  background: rgba(255, 255, 150, 0.35);
+  background: rgba(255, 238, 88, 0.1);
 }
 
 .ledger-table .ledger-row-2 {
-  background: rgba(173, 216, 230, 0.35);
+  background: rgba(100, 181, 246, 0.1);
 }
 
 .ledger-table .ledger-row-3 {
-  background: rgba(144, 238, 144, 0.35);
+  background: rgba(129, 199, 132, 0.1);
 }
 
-.ledger-table .ledger-row:hover {
-  filter: brightness(0.95);
-}
+/* Ledger table header column colors (from form) */
+.ledger-table thead th.ledger-col-date { background: rgba(236, 64, 122, 0.12); color: #c2185b; }
+.ledger-table thead th.ledger-col-treatment { background: rgba(129, 199, 132, 0.2); color: #2e7d32; }
+.ledger-table thead th.ledger-col-cost { background: rgba(100, 181, 246, 0.2); color: #1565c0; }
+.ledger-table thead th.ledger-col-paid { background: rgba(255, 238, 88, 0.25); color: #f57f17; }
+.ledger-table thead th.ledger-col-due { background: rgba(255, 238, 88, 0.25); color: #f57f17; }
+.ledger-table thead th.ledger-col-patsign { background: rgba(236, 64, 122, 0.12); color: #c2185b; }
+.ledger-table thead th.ledger-col-docsign { background: rgba(38, 198, 218, 0.1); color: var(--neo-primary); }
 
 /* Status Badges */
 .status-badge {
@@ -8685,6 +8962,20 @@ body {
   object-fit: contain;
   border-radius: 8px;
 }
+
+.dental-chart-visual.teeth-chart-above .dental-chart-image.primary { max-height: 380px; }
+.dental-chart-visual.teeth-chart-above .dental-chart-image.secondary { max-height: 280px; }
+.dental-chart-visual.teeth-chart-above .dental-chart-image.tertiary { max-height: 220px; }
+
+.dental-chart-visual-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--neo-primary);
+  margin: 12px 0 8px;
+  text-align: center;
+}
+
+.dental-chart-visual-label:first-child { margin-top: 0; }
 
 /* Selected Teeth Section */
 .selected-teeth-section {
