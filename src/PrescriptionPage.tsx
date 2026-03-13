@@ -13,6 +13,8 @@ export interface DrugRow {
 interface Props {
   onBackToLogin: () => void;
   userName?: string;
+  /** When true, only the Create Prescription form is rendered (no nav, no app shell). Use inside Dashboard. */
+  embeddedInDashboard?: boolean;
 }
 
 const createDrugRow = (): DrugRow => ({
@@ -125,7 +127,7 @@ type PrescriptionSubView =
   | 'settings'
   | 'dashboard';
 
-export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'User' }) => {
+export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'User', embeddedInDashboard = false }) => {
   const [activeNav, setActiveNav] = useState<PrescriptionSubView>('prescription');
   const [notice, setNotice] = useState<string | null>(null);
   const [showPatientSearch, setShowPatientSearch] = useState(false);
@@ -1304,31 +1306,8 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     );
   }
 
-  return (
-    <div className="app-shell">
-      {notice && (
-        <div className="prescription-notice" role="alert">
-          <i className="fa-solid fa-info-circle"></i> {notice}
-        </div>
-      )}
-      <a className="whatsapp-float" href="https://wa.me/8801617180711" target="_blank" rel="noopener noreferrer">
-        <span>💬</span> Chat with Us on WhatsApp
-      </a>
-      {renderPrescriptionNav()}
-      <div className="user-bar">
-        <span className="user-info">
-          <strong><i className="fa-solid fa-user"></i> User:</strong> {userName} 
-          <span className="badge badge-free">FREE</span>
-          <span>| <i className="fa-solid fa-database"></i> {DRUG_NUM_DRUGS} Drugs</span>
-          <span>| <i className="fa-solid fa-sms"></i> 850 SMS</span>
-        </span>
-        <button type="button" className="btn-ghost" onClick={onBackToLogin}>
-          <i className="fa-solid fa-sign-out-alt"></i> Logout
-        </button>
-      </div>
-      <header className="top-bar">
-        <div className="brand"><i className="fa-solid fa-tooth"></i> BaigDentPro</div>
-      </header>
+  const formContent = (
+    <>
       <main className="prescription-shell">
         <div className="rx-create">
           <header className="rx-create-header">
@@ -1673,6 +1652,48 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
           </div>
         </div>
       )}
+    </>
+  );
+
+  if (embeddedInDashboard) {
+    return (
+      <>
+        {notice && (
+          <div className="prescription-notice" role="alert">
+            <i className="fa-solid fa-info-circle"></i> {notice}
+          </div>
+        )}
+        {formContent}
+      </>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      {notice && (
+        <div className="prescription-notice" role="alert">
+          <i className="fa-solid fa-info-circle"></i> {notice}
+        </div>
+      )}
+      <a className="whatsapp-float" href="https://wa.me/8801617180711" target="_blank" rel="noopener noreferrer">
+        <span>💬</span> Chat with Us on WhatsApp
+      </a>
+      {renderPrescriptionNav()}
+      <div className="user-bar">
+        <span className="user-info">
+          <strong><i className="fa-solid fa-user"></i> User:</strong> {userName}
+          <span className="badge badge-free">FREE</span>
+          <span>| <i className="fa-solid fa-database"></i> {DRUG_NUM_DRUGS} Drugs</span>
+          <span>| <i className="fa-solid fa-sms"></i> 850 SMS</span>
+        </span>
+        <button type="button" className="btn-ghost" onClick={onBackToLogin}>
+          <i className="fa-solid fa-sign-out-alt"></i> Logout
+        </button>
+      </div>
+      <header className="top-bar">
+        <div className="brand"><i className="fa-solid fa-tooth"></i> BaigDentPro</div>
+      </header>
+      {formContent}
     </div>
   );
 };

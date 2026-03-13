@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { PrescriptionPage } from './PrescriptionPage';
 
 interface Patient {
   id: string;
@@ -2186,7 +2187,7 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
       case 'dashboard': return renderDashboard();
       case 'patients': return renderPatients();
       case 'patient-detail': return renderPatientDetail();
-      case 'prescription': return renderPrescription();
+      case 'prescription': return <PrescriptionPage embeddedInDashboard onBackToLogin={onLogout} userName={userName} />;
       case 'prescriptions-list': return renderPrescriptionsList();
       case 'appointments': return renderAppointments();
       case 'billing': return renderBilling();
