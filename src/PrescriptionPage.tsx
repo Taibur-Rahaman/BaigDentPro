@@ -75,10 +75,9 @@ const TEMPLATE_DROPDOWN = [
 ] as const;
 
 const PAGE_SETUP_DROPDOWN = [
-  { label: 'Page Size (A4/Letter)', icon: 'fa-file', action: 'pageSize' },
-  { label: 'Header Options', icon: 'fa-heading', action: 'header' },
-  { label: 'Footer Options', icon: 'fa-underline', action: 'footer' },
-  { label: 'Logo Upload', icon: 'fa-image', action: 'logo' },
+  { label: 'Page Setup', icon: 'fa-ruler-combined', action: 'pageSetup' },
+  { label: 'Page Option', icon: 'fa-sliders', action: 'pageOption' },
+  { label: 'Settings', icon: 'fa-gear', action: 'settings' },
   { label: 'Print Preview', icon: 'fa-eye', action: 'printPreview' },
 ] as const;
 
@@ -245,6 +244,127 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     dayOff: '',
   });
 
+  type PrintBarcodePosition = 'leftBottom' | 'rightTop';
+  type PrintSetupState = {
+    footerText: string;
+    fontSizePt: number;
+    linePerPage: number;
+    visitFees: number;
+    revisitFees: number;
+    revisitValidityDays: number;
+    defaultRevisitText: string;
+    printBarcode: boolean;
+    barcodePosition: PrintBarcodePosition;
+    multipage: boolean;
+    displayVisitNo: boolean;
+    printPatientInfo: boolean;
+    displayRxTitle: boolean;
+    showName: boolean;
+    showAge: boolean;
+    showSex: boolean;
+    showWeight: boolean;
+    showDate: boolean;
+    showAddress: boolean;
+    showRegNo: boolean;
+    showMobile: boolean;
+    showCC: boolean;
+    showOE: boolean;
+    showAdvice: boolean;
+    showDx: boolean;
+    showFooter: boolean;
+    defaultPastPrint: boolean;
+    defaultPresentPrint: boolean;
+    defaultNotesPrint: boolean;
+    defaultEddPrint: boolean;
+    // Page size controls (cm)
+    headerHeightCm: number;
+    headerWidthCm: number;
+    patientInfoHeightCm: number;
+    patientInfoWidthCm: number;
+    leftHeightCm: number;
+    leftWidthCm: number;
+    rightHeightCm: number;
+    rightWidthCm: number;
+    footerHeightCm: number;
+    footerWidthCm: number;
+    pageHeightCm: number;
+    pageWidthCm: number;
+  };
+
+  const PRINT_SETUP_STORAGE_KEY = 'baigdentpro:printSetup';
+  const defaultPrintSetup: PrintSetupState = {
+    footerText: 'নিয়ম মাফিক ঔষধ খাবেন। ডাক্তারের পরামর্শ ব্যতীত ঔষধ পরিবর্তন নিষেধ।',
+    fontSizePt: 12,
+    linePerPage: 32,
+    visitFees: 300,
+    revisitFees: 200,
+    revisitValidityDays: 90,
+    defaultRevisitText: '',
+    printBarcode: true,
+    barcodePosition: 'leftBottom',
+    multipage: true,
+    displayVisitNo: true,
+    printPatientInfo: true,
+    displayRxTitle: true,
+    showName: true,
+    showAge: true,
+    showSex: true,
+    showWeight: true,
+    showDate: true,
+    showAddress: true,
+    showRegNo: true,
+    showMobile: true,
+    showCC: true,
+    showOE: true,
+    showAdvice: true,
+    showDx: true,
+    showFooter: true,
+    defaultPastPrint: false,
+    defaultPresentPrint: false,
+    defaultNotesPrint: false,
+    defaultEddPrint: false,
+    headerHeightCm: 5.7,
+    headerWidthCm: 21.1,
+    patientInfoHeightCm: 1.6,
+    patientInfoWidthCm: 21.1,
+    leftHeightCm: 19,
+    leftWidthCm: 7.6,
+    rightHeightCm: 19,
+    rightWidthCm: 13.3,
+    footerHeightCm: 1,
+    footerWidthCm: 21.1,
+    pageHeightCm: 29.6,
+    pageWidthCm: 21.3,
+  };
+
+  const [printSetupTab, setPrintSetupTab] = useState<'pageSetup' | 'pageOption' | 'settings'>('pageSetup');
+  const [printSetup, setPrintSetup] = useState<PrintSetupState>(defaultPrintSetup);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PRINT_SETUP_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<PrintSetupState>;
+      setPrintSetup((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    // Keep visit fees aligned with configured defaults (don’t overwrite user edits if they already changed it).
+    setVisit((v) => (v.paid === '300' ? { ...v, paid: String(printSetup.visitFees) } : v));
+  }, [printSetup.visitFees]);
+
+  useEffect(() => {
+    // Sync checkbox defaults like ZilSoft (only when first loaded and still false).
+    if (!printPast && printSetup.defaultPastPrint) setPrintPast(true);
+    if (!printPresent && printSetup.defaultPresentPrint) setPrintPresent(true);
+    if (!printNotes && printSetup.defaultNotesPrint) setPrintNotes(true);
+    if (!printEdd && printSetup.defaultEddPrint) setPrintEdd(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printSetup.defaultPastPrint, printSetup.defaultPresentPrint, printSetup.defaultNotesPrint, printSetup.defaultEddPrint]);
+
   const getOeDisplayString = useCallback((): string => {
     if (oeMode === 'oe' && oeText.trim()) return oeText.trim();
     const parts = (['bp', 'pulse', 'temp', 'heart', 'lungs', 'abd', 'anaemia', 'jaundice', 'cyanosis', 'oedema'] as const)
@@ -339,7 +459,7 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     showNotice('Prescription saved successfully!');
   };
 
-  const getPrintHtml = useCallback((opts: { forPrint?: boolean }) => {
+  const getPrintHtml = useCallback((opts: { forPrint?: boolean; withoutHeader?: boolean }) => {
     const revisitStr = [followUpDay.trim(), revisitUnit].filter(Boolean).join(' ');
     const oeDisplay = getOeDisplayString().replace(/\n/g, '<br>');
     const richHtml = richTextRef.current?.innerHTML ?? '';
@@ -359,6 +479,10 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     const regNo = (patient.regNo || visit.visitNo || '').toString().replace(/\s/g, '');
     const barcodeData = encodeURIComponent(regNo || '0');
     const barcodeDigits = (regNo || '—').split('').join(' ');
+    const withoutHeader = Boolean(opts.withoutHeader);
+    const fontSizePt = printSetup.fontSizePt || 12;
+    const footerText = printSetup.footerText || defaultPrintSetup.footerText;
+    const showFooter = printSetup.showFooter;
     const drugsList = drugs
       .filter((r) => r.brand || r.dose || r.duration)
       .map((r) => {
@@ -368,20 +492,40 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
         return `<div class="rx-item"><span class="rx-line1">${(r.brand || '').replace(/</g, '&lt;')} ${(r.dose || '').replace(/</g, '&lt;')}</span><br><span class="rx-line2">${line2.replace(/</g, '&lt;')}</span></div>`;
       })
       .join('');
+    const patientFields: string[] = [];
+    if (printSetup.showName) patientFields.push(`<span>Name : ${(patient.name || '—').replace(/</g, '&lt;')}</span>`);
+    if (printSetup.showAge) patientFields.push(`<span>Age : ${(patient.age || '—').replace(/</g, '&lt;')}</span>`);
+    if (printSetup.showSex) patientFields.push(`<span>Sex : ${(patient.sex || '—').replace(/</g, '&lt;')}</span>`);
+    if (printSetup.showDate) patientFields.push(`<span>Date : ${(patient.date || '—').replace(/</g, '&lt;')}</span>`);
+    if (printSetup.showAddress) patientFields.push(`<span>Address : ${(patient.address || '—').replace(/</g, '&lt;')}</span>`);
+    if (printSetup.showRegNo) patientFields.push(`<span>Reg. No : ${(patient.regNo || '—').replace(/</g, '&lt;')}</span>`);
+    if (printSetup.showWeight) patientFields.push(`<span>Wt. : ${wt.replace(/</g, '&lt;')}</span>`);
+    if (printSetup.showMobile) patientFields.push(`<span>Mobile : ${(patient.mobile || '—').replace(/</g, '&lt;')}</span>`);
+
+    const shouldPrintPast = printPast;
+    const shouldPrintPresent = printPresent;
+    const shouldPrintNotes = printNotes;
+    const shouldPrintEdd = printEdd;
+
+    const showBarcode = printSetup.printBarcode;
+    const barcodeRightTop = printSetup.barcodePosition === 'rightTop';
+
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Prescription</title>
 <style>
   *{box-sizing:border-box;}
-  body{font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#000;background:#fff;margin:0;padding:14px;}
-  .print-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:8px;}
+  @page{size: ${printSetup.pageWidthCm}cm ${printSetup.pageHeightCm}cm; margin: 0;}
+  body{font-family:Arial,sans-serif;font-size:${fontSizePt}pt;line-height:1.45;color:#000;background:#fff;margin:0;padding:0;}
+  .page{width:${printSetup.pageWidthCm}cm;min-height:${printSetup.pageHeightCm}cm;margin:0 auto;padding:0.4cm;}
+  .print-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:8px;min-height:${printSetup.headerHeightCm}cm;${withoutHeader ? 'display:none;' : ''}}
   .print-header-left{text-align:left;font-size:13px;}
   .print-header-right{text-align:right;font-size:13px;}
   .print-header-left .doc-name,.print-header-right .chamber-label{font-weight:bold;font-size:14px;display:block;margin-bottom:2px;}
-  .patient-line{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 20px;margin-bottom:10px;padding:6px 0;border-bottom:1px solid #000;font-size:12px;}
+  .patient-line{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 20px;margin-bottom:10px;padding:6px 0;border-bottom:1px solid #000;font-size:12px;min-height:${printSetup.patientInfoHeightCm}cm;${printSetup.printPatientInfo ? '' : 'display:none;'}}
   .patient-line span{white-space:nowrap;}
-  .print-body{display:flex;gap:20px;margin-top:10px;}
-  .print-left{flex:1;min-width:0;}
-  .print-right{flex:1;min-width:0;border-left:2px solid #000;padding-left:14px;}
+  .print-body{display:flex;gap:0.4cm;margin-top:10px;}
+  .print-left{min-width:0;width:${printSetup.leftWidthCm}cm;min-height:${printSetup.leftHeightCm}cm;}
+  .print-right{min-width:0;width:${printSetup.rightWidthCm}cm;min-height:${printSetup.rightHeightCm}cm;border-left:2px solid #000;padding-left:0.35cm;position:relative;}
   .print-left .section{margin-bottom:10px;}
   .section-title{font-weight:bold;margin-bottom:2px;}
   .section-title-ul{font-weight:bold;text-decoration:underline;margin-bottom:2px;}
@@ -393,10 +537,13 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   .rx-line1{font-weight:bold;}
   .rx-line2{color:#000;}
   .diagnosis{margin-top:12px;font-weight:bold;}
-  .print-footer{margin-top:20px;padding-top:8px;border-top:1px solid #000;font-size:12px;text-align:center;}
+  .print-footer{margin-top:0.35cm;padding-top:0.2cm;border-top:1px solid #000;font-size:12px;text-align:center;min-height:${printSetup.footerHeightCm}cm;${showFooter ? '' : 'display:none;'}}
+  .barcode-rt{position:absolute;top:0;right:0;text-align:right;}
+  .barcode-rt img{height:36px;display:block;}
   @media print{body{padding:10px;} .print-header,.patient-line,.print-body,.print-footer{break-inside:avoid;}}
 </style></head>
 <body>
+  <div class="page">
   <div class="print-header">
     <div class="print-header-left">
       <span class="doc-name">${(doc || '').replace(/</g, '&lt;')}</span>
@@ -416,46 +563,39 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     </div>
   </div>
   <div class="patient-line">
-    <span>Name : ${(patient.name || '—').replace(/</g, '&lt;')}</span>
-    <span>Age : ${(patient.age || '—').replace(/</g, '&lt;')}</span>
-    <span>Sex : ${(patient.sex || '—').replace(/</g, '&lt;')}</span>
-    <span>Date : ${(patient.date || '—').replace(/</g, '&lt;')}</span>
-    <span>Address : ${(patient.address || '—').replace(/</g, '&lt;')}</span>
-    <span>Reg. No : ${(patient.regNo || '—').replace(/</g, '&lt;')}</span>
-    <span>Wt. : ${wt.replace(/</g, '&lt;')}</span>
-    <span>Mobile : ${(patient.mobile || '—').replace(/</g, '&lt;')}</span>
+    ${patientFields.join('')}
   </div>
   <div class="print-body">
     <div class="print-left">
-      <div class="barcode-block">
+      ${showBarcode && !barcodeRightTop ? `<div class="barcode-block">
         <img src="https://barcode.tec-it.com/barcode.ashx?data=${barcodeData}&code=Code128&dpi=96" alt="barcode" />
         <span class="barcode-digits">${barcodeDigits.replace(/</g, '&lt;')}</span><br>
-        <span class="section-title">Visit No:</span> ${(visit.visitNo || '—').replace(/</g, '&lt;')}
-      </div>
-      <div class="section"><span class="section-title">C/C</span><br>${(cc || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>
-      <div class="section"><span class="section-title">O/E</span><br>${oeDisplay || '—'}${bmiStr ? '<br>' + bmiStr : ''}</div>
+        ${printSetup.displayVisitNo ? `<span class="section-title">Visit No:</span> ${(visit.visitNo || '—').replace(/</g, '&lt;')}` : ''}
+      </div>` : (printSetup.displayVisitNo ? `<div class="section"><span class="section-title">Visit No:</span> ${(visit.visitNo || '—').replace(/</g, '&lt;')}</div>` : '')}
+      ${printSetup.showCC ? `<div class="section"><span class="section-title">C/C</span><br>${(cc || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>` : ''}
+      ${printSetup.showOE ? `<div class="section"><span class="section-title">O/E</span><br>${oeDisplay || '—'}${bmiStr ? '<br>' + bmiStr : ''}</div>` : ''}
       <div class="section"><span class="section-title">D/H</span><br>${(drugHistory || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>
-      <div class="section"><span class="section-title-ul">Present History</span><br>${(presentHistory || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>
-      <div class="section"><span class="section-title-ul">Past History</span><br>${(pastHistory || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>
-      ${printEdd ? `<div class="section"><span class="section-title">EDD</span><br>${(edd.edd || edd.lmp || '—').replace(/</g, '&lt;')}</div>` : ''}
-      ${printNotes ? `<div class="section"><span class="section-title">Notes</span><br>${(notesHistory || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>` : ''}
-      <div class="section"><span class="section-title">Advice</span><br>${richHtml || '—'}</div>
-      ${dx ? `<div class="diagnosis">&#916; ${(dx || '').replace(/\n/g, ' ').replace(/</g, '&lt;').toUpperCase()}</div>` : ''}
+      ${shouldPrintPresent ? `<div class="section"><span class="section-title-ul">Present History</span><br>${(presentHistory || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>` : ''}
+      ${shouldPrintPast ? `<div class="section"><span class="section-title-ul">Past History</span><br>${(pastHistory || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>` : ''}
+      ${shouldPrintEdd ? `<div class="section"><span class="section-title">EDD</span><br>${(edd.edd || edd.lmp || '—').replace(/</g, '&lt;')}</div>` : ''}
+      ${shouldPrintNotes ? `<div class="section"><span class="section-title">Notes</span><br>${(notesHistory || '—').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>` : ''}
+      ${printSetup.showAdvice ? `<div class="section"><span class="section-title">Advice</span><br>${richHtml || '—'}</div>` : ''}
+      ${printSetup.showDx && dx ? `<div class="diagnosis">&#916; ${(dx || '').replace(/\n/g, ' ').replace(/</g, '&lt;').toUpperCase()}</div>` : ''}
     </div>
     <div class="print-right">
-      <div class="rx-title">Rx.</div>
+      ${showBarcode && barcodeRightTop ? `<div class="barcode-rt"><img src="https://barcode.tec-it.com/barcode.ashx?data=${barcodeData}&code=Code128&dpi=96" alt="barcode" /><span class="barcode-digits">${barcodeDigits.replace(/</g, '&lt;')}</span></div>` : ''}
+      ${printSetup.displayRxTitle ? `<div class="rx-title">Rx.</div>` : ''}
       <div class="rx-drug">${drugsList || '—'}</div>
-      ${revisitStr ? `<div class="section" style="margin-top:10px;"><strong>** ${revisitStr} পর আসবেন।</strong></div>` : ''}
+      ${revisitStr ? `<div class="section" style="margin-top:10px;"><strong>** ${revisitStr} ${(printSetup.defaultRevisitText || 'পর আসবেন।').replace(/</g, '&lt;')}</strong></div>` : ''}
     </div>
   </div>
-  <div class="print-footer">
-    নিয়ম মাফিক ঔষধ খাবেন। ডাক্তারের পরামর্শ ব্যতীত ঔষধ পরিবর্তন নিষেধ।
+  <div class="print-footer">${footerText.replace(/</g, '&lt;')}</div>
   </div>
 </body></html>`;
-  }, [patient, visit, dx, cc, getOeDisplayString, drugHistory, presentHistory, pastHistory, notesHistory, edd, drugs, followUpDay, revisitUnit, weight, bmiValue, headerSettings, printEdd, printNotes]);
+  }, [patient, visit, dx, cc, getOeDisplayString, drugHistory, presentHistory, pastHistory, notesHistory, edd, drugs, followUpDay, revisitUnit, weight, bmiValue, headerSettings, printEdd, printNotes, printPast, printPresent, printSetup, defaultPrintSetup.footerText]);
 
-  const printViaIframe = () => {
-    const html = getPrintHtml({ forPrint: true });
+  const printViaIframe = (withoutHeader: boolean) => {
+    const html = getPrintHtml({ forPrint: true, withoutHeader });
     const iframe = document.createElement('iframe');
     iframe.setAttribute('style', 'position:fixed;left:0;top:0;width:0;height:0;border:0;');
     document.body.appendChild(iframe);
@@ -473,7 +613,7 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   };
 
   const openPreviewInNewTab = () => {
-    const html = getPrintHtml({ forPrint: false });
+    const html = getPrintHtml({ forPrint: false, withoutHeader: false });
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const w = window.open(url, '_blank', 'noopener');
@@ -486,12 +626,12 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
 
   const handlePrint = (withoutHeader: boolean) => {
     handleSave();
-    printViaIframe();
+    printViaIframe(withoutHeader);
   };
 
   const handleSaveAndPrint = (withoutHeader: boolean) => {
     handleSave();
-    printViaIframe();
+    printViaIframe(withoutHeader);
   };
 
   const handlePreview = () => {
@@ -532,6 +672,15 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   };
 
   const handlePageSetupClick = (item: { label: string; action: string }) => {
+    if (item.action === 'printPreview') {
+      handlePreview();
+      return;
+    }
+    setActiveNav('page-setup');
+    if (item.action === 'pageSetup' || item.action === 'pageOption' || item.action === 'settings') {
+      setPrintSetupTab(item.action);
+      return;
+    }
     showNotice(`${item.label} - Settings opened!`);
   };
 
@@ -1054,56 +1203,233 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   );
 
   // Page Setup
+  const savePrintSetup = () => {
+    try {
+      localStorage.setItem(PRINT_SETUP_STORAGE_KEY, JSON.stringify(printSetup));
+      showNotice('Page setup saved!');
+    } catch {
+      showNotice('Failed to save page setup');
+    }
+  };
+
+  const resetPrintSetup = () => {
+    setPrintSetup(defaultPrintSetup);
+    showNotice('Factory reset applied');
+  };
+
   const renderPageSetup = () => (
     <main className="prescription-shell" style={{ padding: 24 }}>
       <h2 style={{ margin: '0 0 24px' }}><i className="fa-solid fa-print"></i> Page Setup</h2>
       
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
-        <div className="card">
-          <h3 style={{ marginTop: 0, marginBottom: '16px' }}><i className="fa-solid fa-file"></i> Page Settings</h3>
-          <div className="form-group">
-            <label className="label">Page Size</label>
-            <select className="select">
-              <option>A4 (210 × 297 mm)</option>
-              <option>Letter (8.5 × 11 in)</option>
-              <option>Legal (8.5 × 14 in)</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="label">Orientation</label>
-            <select className="select">
-              <option>Portrait</option>
-              <option>Landscape</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="label">Margins</label>
-            <select className="select">
-              <option>Normal</option>
-              <option>Narrow</option>
-              <option>Wide</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="card">
-          <h3 style={{ marginTop: 0, marginBottom: '16px' }}><i className="fa-solid fa-eye"></i> Print Options</h3>
-          <div className="print-options" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <label><input type="checkbox" defaultChecked /> Print Header</label>
-            <label><input type="checkbox" defaultChecked /> Print Patient Info</label>
-            <label><input type="checkbox" defaultChecked /> Print O/E</label>
-            <label><input type="checkbox" defaultChecked /> Print Drugs</label>
-            <label><input type="checkbox" /> Print History</label>
-            <label><input type="checkbox" /> Print Footer</label>
-          </div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" className={`btn-secondary ${printSetupTab === 'pageSetup' ? 'active' : ''}`} onClick={() => setPrintSetupTab('pageSetup')}>Page Setup</button>
+          <button type="button" className={`btn-secondary ${printSetupTab === 'pageOption' ? 'active' : ''}`} onClick={() => setPrintSetupTab('pageOption')}>Page Option</button>
+          <button type="button" className={`btn-secondary ${printSetupTab === 'settings' ? 'active' : ''}`} onClick={() => setPrintSetupTab('settings')}>Settings</button>
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: '24px' }}>
-        <button type="button" className="btn-primary" onClick={handlePreview}>
-          <i className="fa-solid fa-print"></i> Print Preview
-        </button>
-      </div>
+      {printSetupTab === 'pageSetup' && (
+        <div className="card">
+          <h3 style={{ marginTop: 0, marginBottom: 12 }}><i className="fa-solid fa-ruler-combined"></i> Page Setup (cm)</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+            <div className="form-group">
+              <label className="label">Header Height</label>
+              <input className="input" type="number" step="0.1" value={printSetup.headerHeightCm} onChange={(e) => setPrintSetup({ ...printSetup, headerHeightCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Header Width</label>
+              <input className="input" type="number" step="0.1" value={printSetup.headerWidthCm} onChange={(e) => setPrintSetup({ ...printSetup, headerWidthCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Patient Info Height</label>
+              <input className="input" type="number" step="0.1" value={printSetup.patientInfoHeightCm} onChange={(e) => setPrintSetup({ ...printSetup, patientInfoHeightCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Patient Info Width</label>
+              <input className="input" type="number" step="0.1" value={printSetup.patientInfoWidthCm} onChange={(e) => setPrintSetup({ ...printSetup, patientInfoWidthCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Left (History) Height</label>
+              <input className="input" type="number" step="0.1" value={printSetup.leftHeightCm} onChange={(e) => setPrintSetup({ ...printSetup, leftHeightCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Left (History) Width</label>
+              <input className="input" type="number" step="0.1" value={printSetup.leftWidthCm} onChange={(e) => setPrintSetup({ ...printSetup, leftWidthCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Right (Rx) Height</label>
+              <input className="input" type="number" step="0.1" value={printSetup.rightHeightCm} onChange={(e) => setPrintSetup({ ...printSetup, rightHeightCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Right (Rx) Width</label>
+              <input className="input" type="number" step="0.1" value={printSetup.rightWidthCm} onChange={(e) => setPrintSetup({ ...printSetup, rightWidthCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Footer Height</label>
+              <input className="input" type="number" step="0.1" value={printSetup.footerHeightCm} onChange={(e) => setPrintSetup({ ...printSetup, footerHeightCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Footer Width</label>
+              <input className="input" type="number" step="0.1" value={printSetup.footerWidthCm} onChange={(e) => setPrintSetup({ ...printSetup, footerWidthCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Page Height</label>
+              <input className="input" type="number" step="0.1" value={printSetup.pageHeightCm} onChange={(e) => setPrintSetup({ ...printSetup, pageHeightCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Page Width</label>
+              <input className="input" type="number" step="0.1" value={printSetup.pageWidthCm} onChange={(e) => setPrintSetup({ ...printSetup, pageWidthCm: Number(e.target.value) })} />
+            </div>
+          </div>
+          <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn-secondary" onClick={resetPrintSetup}><i className="fa-solid fa-rotate-left"></i> Factory Reset</button>
+            <button type="button" className="btn-primary" onClick={savePrintSetup}><i className="fa-solid fa-save"></i> Save Settings</button>
+            <button type="button" className="btn-secondary" onClick={handlePreview}><i className="fa-solid fa-eye"></i> Preview</button>
+          </div>
+        </div>
+      )}
+
+      {printSetupTab === 'pageOption' && (
+        <div className="card">
+          <h3 style={{ marginTop: 0, marginBottom: 12 }}><i className="fa-solid fa-sliders"></i> Page Option</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+              <label className="label">Footer Text</label>
+              <input className="input" value={printSetup.footerText} onChange={(e) => setPrintSetup({ ...printSetup, footerText: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Print Font Size (pt)</label>
+              <input className="input" type="number" value={printSetup.fontSizePt} onChange={(e) => setPrintSetup({ ...printSetup, fontSizePt: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Line Per Page</label>
+              <input className="input" type="number" value={printSetup.linePerPage} onChange={(e) => setPrintSetup({ ...printSetup, linePerPage: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Visit Fees</label>
+              <input className="input" type="number" value={printSetup.visitFees} onChange={(e) => setPrintSetup({ ...printSetup, visitFees: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Re-Visit Fees</label>
+              <input className="input" type="number" value={printSetup.revisitFees} onChange={(e) => setPrintSetup({ ...printSetup, revisitFees: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Re-Visit Validity (days)</label>
+              <input className="input" type="number" value={printSetup.revisitValidityDays} onChange={(e) => setPrintSetup({ ...printSetup, revisitValidityDays: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Default Revisit Text</label>
+              <input className="input" value={printSetup.defaultRevisitText} onChange={(e) => setPrintSetup({ ...printSetup, defaultRevisitText: e.target.value })} placeholder="(blank) means “পর আসবেন।”" />
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn-primary" onClick={savePrintSetup}><i className="fa-solid fa-save"></i> Save Settings</button>
+          </div>
+        </div>
+      )}
+
+      {printSetupTab === 'settings' && (
+        <div className="card">
+          <h3 style={{ marginTop: 0, marginBottom: 12 }}><i className="fa-solid fa-gear"></i> Settings</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+            <div className="form-group">
+              <label className="label">Print Barcode?</label>
+              <select className="select" value={printSetup.printBarcode ? 'yes' : 'no'} onChange={(e) => setPrintSetup({ ...printSetup, printBarcode: e.target.value === 'yes' })}>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">Barcode Position</label>
+              <select className="select" value={printSetup.barcodePosition} onChange={(e) => setPrintSetup({ ...printSetup, barcodePosition: e.target.value as PrintBarcodePosition })}>
+                <option value="leftBottom">Left Bottom Position</option>
+                <option value="rightTop">Right Top Position</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">Multipage Print?</label>
+              <select className="select" value={printSetup.multipage ? 'yes' : 'no'} onChange={(e) => setPrintSetup({ ...printSetup, multipage: e.target.value === 'yes' })}>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">Display Visit No?</label>
+              <select className="select" value={printSetup.displayVisitNo ? 'yes' : 'no'} onChange={(e) => setPrintSetup({ ...printSetup, displayVisitNo: e.target.value === 'yes' })}>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">Print Patient’s Info?</label>
+              <select className="select" value={printSetup.printPatientInfo ? 'yes' : 'no'} onChange={(e) => setPrintSetup({ ...printSetup, printPatientInfo: e.target.value === 'yes' })}>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">Display text title “Rx.”?</label>
+              <select className="select" value={printSetup.displayRxTitle ? 'yes' : 'no'} onChange={(e) => setPrintSetup({ ...printSetup, displayRxTitle: e.target.value === 'yes' })}>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            <label><input type="checkbox" checked={printSetup.showName} onChange={(e) => setPrintSetup({ ...printSetup, showName: e.target.checked })} /> Display “Name”</label>
+            <label><input type="checkbox" checked={printSetup.showAge} onChange={(e) => setPrintSetup({ ...printSetup, showAge: e.target.checked })} /> Display “Age”</label>
+            <label><input type="checkbox" checked={printSetup.showSex} onChange={(e) => setPrintSetup({ ...printSetup, showSex: e.target.checked })} /> Display “Sex”</label>
+            <label><input type="checkbox" checked={printSetup.showWeight} onChange={(e) => setPrintSetup({ ...printSetup, showWeight: e.target.checked })} /> Display “Weight”</label>
+            <label><input type="checkbox" checked={printSetup.showDate} onChange={(e) => setPrintSetup({ ...printSetup, showDate: e.target.checked })} /> Display “Date”</label>
+            <label><input type="checkbox" checked={printSetup.showAddress} onChange={(e) => setPrintSetup({ ...printSetup, showAddress: e.target.checked })} /> Display “Address”</label>
+            <label><input type="checkbox" checked={printSetup.showRegNo} onChange={(e) => setPrintSetup({ ...printSetup, showRegNo: e.target.checked })} /> Display “Reg. No”</label>
+            <label><input type="checkbox" checked={printSetup.showMobile} onChange={(e) => setPrintSetup({ ...printSetup, showMobile: e.target.checked })} /> Display “Mobile”</label>
+            <label><input type="checkbox" checked={printSetup.showCC} onChange={(e) => setPrintSetup({ ...printSetup, showCC: e.target.checked })} /> Display “C/C”</label>
+            <label><input type="checkbox" checked={printSetup.showOE} onChange={(e) => setPrintSetup({ ...printSetup, showOE: e.target.checked })} /> Display “O/E”</label>
+            <label><input type="checkbox" checked={printSetup.showAdvice} onChange={(e) => setPrintSetup({ ...printSetup, showAdvice: e.target.checked })} /> Display “Advice”</label>
+            <label><input type="checkbox" checked={printSetup.showDx} onChange={(e) => setPrintSetup({ ...printSetup, showDx: e.target.checked })} /> Display “D/x”</label>
+            <label><input type="checkbox" checked={printSetup.showFooter} onChange={(e) => setPrintSetup({ ...printSetup, showFooter: e.target.checked })} /> Display “Footer”</label>
+          </div>
+
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+            <div className="form-group">
+              <label className="label">Past H/O Print Default</label>
+              <select className="select" value={printSetup.defaultPastPrint ? 'print' : 'dont'} onChange={(e) => setPrintSetup({ ...printSetup, defaultPastPrint: e.target.value === 'print' })}>
+                <option value="print">Print</option>
+                <option value="dont">Don’t Print</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">Present H/O Print Default</label>
+              <select className="select" value={printSetup.defaultPresentPrint ? 'print' : 'dont'} onChange={(e) => setPrintSetup({ ...printSetup, defaultPresentPrint: e.target.value === 'print' })}>
+                <option value="print">Print</option>
+                <option value="dont">Don’t Print</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">Notes Print Default</label>
+              <select className="select" value={printSetup.defaultNotesPrint ? 'print' : 'dont'} onChange={(e) => setPrintSetup({ ...printSetup, defaultNotesPrint: e.target.value === 'print' })}>
+                <option value="print">Print</option>
+                <option value="dont">Don’t Print</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">EDD Print Default</label>
+              <select className="select" value={printSetup.defaultEddPrint ? 'print' : 'dont'} onChange={(e) => setPrintSetup({ ...printSetup, defaultEddPrint: e.target.value === 'print' })}>
+                <option value="print">Print</option>
+                <option value="dont">Don’t Print</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn-primary" onClick={savePrintSetup}><i className="fa-solid fa-save"></i> Save Settings</button>
+            <button type="button" className="btn-secondary" onClick={handlePreview}><i className="fa-solid fa-eye"></i> Preview</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 
