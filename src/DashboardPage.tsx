@@ -511,12 +511,99 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     showToast('Invoice created');
   };
 
-  const handlePrintInvoice = (invoiceId: string) => {
-    const url = api.invoices.getPDF(invoiceId);
-    const win = window.open(url, '_blank');
-    if (!win || win.closed || typeof win.closed === 'undefined') {
-      window.location.href = url;
+  const handlePrintInvoice = (invoice: Invoice) => {
+    const printWindow = window.open('', '_blank', 'width=900,height=650');
+    if (!printWindow) {
+      return;
     }
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <title>Invoice ${invoice.invoiceNo}</title>
+        <style>
+          body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 32px; color: #0f172a; }
+          .invoice-shell { max-width: 720px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px 28px; }
+          .invoice-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+          .clinic-name { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+          .muted { color: #6b7280; font-size: 13px; }
+          .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+          .badge-paid { background: #ecfdf3; color: #15803d; }
+          .badge-pending { background: #fef3c7; color: #92400e; }
+          .rows { margin-top: 8px; }
+          .rows div { margin-bottom: 2px; }
+          h2 { font-size: 18px; margin: 0 0 4px; }
+          table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 14px; }
+          th, td { padding: 10px 8px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+          th { background: #f9fafb; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; }
+          .totals { margin-top: 12px; float: right; font-size: 14px; }
+          .totals div { display: flex; justify-content: space-between; gap: 32px; margin-bottom: 4px; }
+          .totals .label { color: #6b7280; }
+          .totals .value-strong { font-weight: 700; }
+          .footer { clear: both; margin-top: 40px; font-size: 12px; color: #6b7280; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <div class="invoice-shell">
+          <div class="invoice-header">
+            <div>
+              <p class="clinic-name">BaigDentPro Clinic</p>
+              <p class="muted">Smart dental practice management</p>
+              <div class="rows">
+                <div class="muted">Invoice #: <strong>${invoice.invoiceNo}</strong></div>
+                <div class="muted">Date: <strong>${invoice.date}</strong></div>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <h2>Invoice</h2>
+              <p class="muted">Patient: <strong>${invoice.patientName}</strong></p>
+              <span class="badge ${invoice.status === 'PAID' ? 'badge-paid' : 'badge-pending'}">
+                ${invoice.status}
+              </span>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 60%;">Description</th>
+                <th style="width: 20%;">Qty</th>
+                <th style="width: 20%;">Amount (৳)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Treatment & procedures</td>
+                <td>1</td>
+                <td>${invoice.total.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div><span class="label">Total</span><span>৳${invoice.total.toFixed(2)}</span></div>
+            <div><span class="label">Paid</span><span>৳${invoice.paid.toFixed(2)}</span></div>
+            <div><span class="label">Due</span><span class="value-strong">৳${invoice.due.toFixed(2)}</span></div>
+          </div>
+
+          <div class="footer">
+            Thank you for visiting BaigDentPro Clinic. For any billing questions, please contact reception.
+          </div>
+        </div>
+        <script>
+          window.onload = function () {
+            window.print();
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   const handleCreateLabOrder = () => {
@@ -1946,8 +2033,8 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                       <td>
                         <button
                           type="button"
-                          className="btn-outline-small"
-                          onClick={() => handlePrintInvoice(inv.id)}
+                          className="btn-primary"
+                          onClick={() => handlePrintInvoice(inv)}
                           title="Print / Download invoice"
                         >
                           <i className="fa-solid fa-print"></i> Print
