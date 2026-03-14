@@ -137,14 +137,36 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
     }
   };
 
-  const handleChoosePlan = (planId: string, price: number) => {
-    const params = new URLSearchParams({
-      plan: planId,
-      price: String(price),
-      currency: 'BDT',
-      billing: 'monthly',
-    });
-    window.location.href = `/payment?${params.toString()}`;
+  const handleChoosePlan = (plan: { id: string; name: string; price: number }) => {
+    const subscriptionProduct: Product = {
+      id: plan.id,
+      name: `${plan.name} Plan`,
+      slug: plan.id.toLowerCase(),
+      description: `Monthly ${plan.name} subscription for BaigDentPro`,
+      price: plan.price,
+      images: [],
+      category: 'SUBSCRIPTION',
+      stock: 9999,
+      isFeatured: false,
+    };
+
+    const existingItem = cart.items.find((item) => item.product.id === subscriptionProduct.id);
+    let nextItems: CartItem[];
+
+    if (existingItem) {
+      nextItems = cart.items.map((item) =>
+        item.product.id === subscriptionProduct.id
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      );
+    } else {
+      nextItems = [...cart.items, { id: subscriptionProduct.id, product: subscriptionProduct, quantity: 1 }];
+    }
+
+    const total = nextItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+    setCart({ items: nextItems, total });
+    setShowCart(false);
+    setShowCheckout(true);
   };
 
   const getCategoryIcon = (category: string) => {
@@ -431,10 +453,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
       <section id="pricing" className="neo-cta">
         <div className="neo-cta-content neo-pricing">
           <div className="neo-pricing-header">
-            <p className="neo-pricing-badge-title">Monthly subscription • Cancel anytime</p>
-            <h2 className="neo-cta-title">Choose the right plan for your clinic</h2>
+            <p className="neo-pricing-badge-title">MONTHLY PLANS • CANCEL ANYTIME</p>
+            <h2 className="neo-cta-title">Pick a plan that matches your clinic</h2>
             <p className="neo-cta-subtitle">
-              All plans include secure cloud backup, prescription printing, and patient records. Upgrade only when you need more power.
+              Every plan includes secure cloud backup, digital prescriptions, and full patient records. Start with Platinum and upgrade as your team and devices grow.
             </p>
           </div>
 
@@ -443,31 +465,28 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
             <div className="neo-pricing-card">
               <div className="neo-pricing-card-header">
                 <h3 className="neo-pricing-name">Platinum</h3>
-                <p className="neo-pricing-desc">Best for individual dentists or small clinics</p>
-                <div className="neo-pricing-discount-pill">Up to 2 chairs</div>
+                <p className="neo-pricing-desc">For solo dentists or a single reception PC</p>
+                <div className="neo-pricing-discount-pill">1 device</div>
               </div>
               <div className="neo-pricing-price-block">
                 <div className="neo-pricing-price-main">
                   <span className="neo-pricing-price-value">৳700</span>
                   <span className="neo-pricing-price-period">/month</span>
                 </div>
-                <p className="neo-pricing-small">
-                  Billed monthly in BDT. Ideal for a single branch clinic getting started with digital records.
-                </p>
+                <p className="neo-pricing-small">Billed monthly in BDT. Best for one‑chair or home practice setups.</p>
               </div>
               <button
                 className="neo-btn neo-btn-outline neo-btn-block"
-                onClick={() => handleChoosePlan('platinum', 700)}
+                onClick={() => handleChoosePlan({ id: 'PLAN_PLATINUM', name: 'Platinum', price: 700 })}
               >
                 Choose Platinum
               </button>
               <ul className="neo-pricing-features">
-                <li><i className="fa-solid fa-check"></i>Up to 2 chairs / doctors</li>
+                <li><i className="fa-solid fa-check"></i>Access from 1 clinic device</li>
                 <li><i className="fa-solid fa-check"></i>Unlimited patients & prescriptions</li>
-                <li><i className="fa-solid fa-check"></i>Digital prescription with PDF export</li>
-                <li><i className="fa-solid fa-check"></i>Basic appointment scheduling</li>
-                <li><i className="fa-solid fa-check"></i>Standard email / WhatsApp reminders</li>
-                <li><i className="fa-solid fa-check"></i>Basic reports (daily & monthly)</li>
+                <li><i className="fa-solid fa-check"></i>Print‑ready digital prescriptions (PDF)</li>
+                <li><i className="fa-solid fa-check"></i>Simple appointment calendar</li>
+                <li><i className="fa-solid fa-check"></i>Basic daily collection report</li>
               </ul>
             </div>
 
@@ -476,31 +495,29 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
               <div className="neo-pricing-most-popular">Most popular</div>
               <div className="neo-pricing-card-header">
                 <h3 className="neo-pricing-name">Premium</h3>
-                <p className="neo-pricing-desc">For growing clinics with multiple doctors</p>
-                <div className="neo-pricing-discount-pill">Up to 5 chairs</div>
+                <p className="neo-pricing-desc">For busy clinics with multiple rooms</p>
+                <div className="neo-pricing-discount-pill">Up to 3 devices</div>
               </div>
               <div className="neo-pricing-price-block">
                 <div className="neo-pricing-price-main">
                   <span className="neo-pricing-price-value">৳1,000</span>
                   <span className="neo-pricing-price-period">/month</span>
                 </div>
-                <p className="neo-pricing-small">
-                  Billed monthly in BDT. Perfect for busy clinics that need advanced automation and controls.
-                </p>
+                <p className="neo-pricing-small">Billed monthly in BDT. Ideal when you have separate reception, doctor and counselor PCs.</p>
               </div>
               <button
                 className="neo-btn neo-btn-primary neo-btn-block"
-                onClick={() => handleChoosePlan('premium', 1000)}
+                onClick={() => handleChoosePlan({ id: 'PLAN_PREMIUM', name: 'Premium', price: 1000 })}
               >
                 Choose Premium
               </button>
               <ul className="neo-pricing-features">
                 <li><i className="fa-solid fa-check"></i>Everything in Platinum</li>
-                <li><i className="fa-solid fa-check"></i>Up to 5 chairs / doctors</li>
-                <li><i className="fa-solid fa-check"></i>Advanced appointment calendar & waitlist</li>
-                <li><i className="fa-solid fa-check"></i>Smart recall & follow‑up reminders</li>
-                <li><i className="fa-solid fa-check"></i>Income & expense analytics dashboard</li>
-                <li><i className="fa-solid fa-check"></i>Priority support (Bangladesh time)</li>
+                <li><i className="fa-solid fa-check"></i>Access from up to 3 clinic devices</li>
+                <li><i className="fa-solid fa-check"></i>Full appointment calendar with chair view</li>
+                <li><i className="fa-solid fa-check"></i>Automatic recall & follow‑up reminders</li>
+                <li><i className="fa-solid fa-check"></i>Monthly income, due & patient reports</li>
+                <li><i className="fa-solid fa-check"></i>Priority WhatsApp / phone support</li>
               </ul>
             </div>
 
@@ -508,31 +525,29 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
             <div className="neo-pricing-card">
               <div className="neo-pricing-card-header">
                 <h3 className="neo-pricing-name">Luxury</h3>
-                <p className="neo-pricing-desc">For premium clinics and multi-branch setups</p>
-                <div className="neo-pricing-discount-pill">Multi‑branch</div>
+                <p className="neo-pricing-desc">For premium clinics and multi‑branch groups</p>
+                <div className="neo-pricing-discount-pill">Up to 5+ devices</div>
               </div>
               <div className="neo-pricing-price-block">
                 <div className="neo-pricing-price-main">
                   <span className="neo-pricing-price-value">৳1,500</span>
                   <span className="neo-pricing-price-period">/month</span>
                 </div>
-                <p className="neo-pricing-small">
-                  Billed monthly in BDT. Designed for high-volume clinics that need deep reporting and controls.
-                </p>
+                <p className="neo-pricing-small">Billed monthly in BDT. Best when you manage multiple locations or a high‑volume premium brand.</p>
               </div>
               <button
                 className="neo-btn neo-btn-outline neo-btn-block"
-                onClick={() => handleChoosePlan('luxury', 1500)}
+                onClick={() => handleChoosePlan({ id: 'PLAN_LUXURY', name: 'Luxury', price: 1500 })}
               >
                 Choose Luxury
               </button>
               <ul className="neo-pricing-features">
                 <li><i className="fa-solid fa-check"></i>Everything in Premium</li>
-                <li><i className="fa-solid fa-check"></i>Multi‑branch / multi‑location support</li>
-                <li><i className="fa-solid fa-check"></i>Role-based access & audit logs</li>
-                <li><i className="fa-solid fa-check"></i>Advanced financial and chair‑utilization reports</li>
-                <li><i className="fa-solid fa-check"></i>Custom branding & white‑label options</li>
-                <li><i className="fa-solid fa-check"></i>Dedicated account manager</li>
+                <li><i className="fa-solid fa-check"></i>Access from 5+ devices and branches</li>
+                <li><i className="fa-solid fa-check"></i>Role‑based access & activity logs</li>
+                <li><i className="fa-solid fa-check"></i>Branch‑wise revenue & chair utilization</li>
+                <li><i className="fa-solid fa-check"></i>Custom branding on reports & prescriptions</li>
+                <li><i className="fa-solid fa-check"></i>Dedicated onboarding & success manager</li>
               </ul>
             </div>
           </div>

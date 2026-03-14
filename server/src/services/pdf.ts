@@ -151,105 +151,171 @@ export async function generateInvoicePDF(invoice: any): Promise<Buffer> {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      doc.font('Helvetica-Bold').fontSize(20).text(invoice.user.clinicName || 'Medical Center', { align: 'center' });
-      
-      if (invoice.user.clinicAddress) {
-        doc.font('Helvetica').fontSize(10).text(invoice.user.clinicAddress, { align: 'center' });
-      }
-      if (invoice.user.clinicPhone) {
-        doc.text(`Phone: ${invoice.user.clinicPhone}`, { align: 'center' });
-      }
-      if (invoice.user.clinicEmail) {
-        doc.text(`Email: ${invoice.user.clinicEmail}`, { align: 'center' });
-      }
+      // ====== Header: Clinic / Supplier info ======
+      const clinicName = invoice.user.clinicName || 'Medical Center';
+      doc.font('Helvetica-Bold').fontSize(18).text(clinicName, { align: 'center' });
+      doc.moveDown(0.3);
 
-      doc.moveDown();
+      const headerLines: string[] = [];
+      if (invoice.user.clinicAddress) headerLines.push(invoice.user.clinicAddress);
+      if (invoice.user.clinicPhone) headerLines.push(`Phone: ${invoice.user.clinicPhone}`);
+      if (invoice.user.clinicEmail) headerLines.push(`Email: ${invoice.user.clinicEmail}`);
+      // If the clinic wants to be Mushak-compliant, they should include their BIN in clinicAddress or name.
+
+      doc.font('Helvetica').fontSize(9);
+      headerLines.forEach((line) => doc.text(line, { align: 'center' }));
+
+      doc.moveDown(0.8);
       doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-      doc.moveDown();
+      doc.moveDown(0.6);
 
-      doc.font('Helvetica-Bold').fontSize(16).text('INVOICE', { align: 'center' });
-      doc.moveDown();
+      // ====== Mushak 6.3 Title & Meta ======
+      doc.font('Helvetica-Bold').fontSize(12).text('ভ্যাট চালান পত্র (মূসক - ৬.৩)', { align: 'center' });
+      doc.moveDown(0.2);
+      doc.font('Helvetica').fontSize(9).text('VAT TAX INVOICE (Mushak - 6.3)', { align: 'center' });
+      doc.moveDown(0.8);
 
       const infoY = doc.y;
-      doc.font('Helvetica-Bold').fontSize(10).text('Bill To:', 50, infoY);
-      doc.font('Helvetica').text(invoice.patient.name, 50, infoY + 15);
-      if (invoice.patient.phone) doc.text(invoice.patient.phone, 50, doc.y);
-      if (invoice.patient.address) doc.text(invoice.patient.address, 50, doc.y);
+      doc.font('Helvetica-Bold').fontSize(9).text('Supplier (Clinic):', 50, infoY);
+      doc.font('Helvetica').text(clinicName, 50, infoY + 12, { width: 230 });
 
-      doc.font('Helvetica-Bold').text('Invoice No:', 350, infoY, { continued: true });
-      doc.font('Helvetica').text(` ${invoice.invoiceNo}`);
-      doc.font('Helvetica-Bold').text('Date:', 350, doc.y, { continued: true });
-      doc.font('Helvetica').text(` ${new Date(invoice.date).toLocaleDateString()}`);
-      if (invoice.dueDate) {
-        doc.font('Helvetica-Bold').text('Due Date:', 350, doc.y, { continued: true });
-        doc.font('Helvetica').text(` ${new Date(invoice.dueDate).toLocaleDateString()}`);
+      const patientBlockY = infoY;
+      doc.font('Helvetica-Bold').text('Customer (Patient):', 300, patientBlockY);
+      doc.font('Helvetica').text(invoice.patient.name, 300, patientBlockY + 12, { width: 230 });
+      let currentY = Math.max(doc.y, patientBlockY + 28);
+
+      doc.font('Helvetica-Bold').text('Patient Phone:', 300, currentY, { continued: true });
+      doc.font('Helvetica').text(` ${invoice.patient.phone || '-'}`);
+      currentY = doc.y;
+
+      if (invoice.patient.address) {
+        doc.font('Helvetica-Bold').text('Patient Address:', 300, currentY);
+        doc.font('Helvetica').text(invoice.patient.address, 300, doc.y + 2, { width: 230 });
+        currentY = doc.y;
       }
-      doc.font('Helvetica-Bold').text('Status:', 350, doc.y, { continued: true });
+
+      let rightY = infoY;
+      doc.font('Helvetica-Bold').text('Invoice No:', 50, rightY, { continued: true });
+      doc.font('Helvetica').text(` ${invoice.invoiceNo}`);
+      rightY = doc.y;
+
+      doc.font('Helvetica-Bold').text('Issue Date:', 50, rightY, { continued: true });
+      doc.font('Helvetica').text(` ${new Date(invoice.date).toLocaleDateString('en-BD')}`);
+      rightY = doc.y;
+
+      if (invoice.dueDate) {
+        doc.font('Helvetica-Bold').text('Payment Due Date:', 50, rightY, { continued: true });
+        doc.font('Helvetica').text(` ${new Date(invoice.dueDate).toLocaleDateString('en-BD')}`);
+        rightY = doc.y;
+      }
+
+      doc.font('Helvetica-Bold').text('Payment Status:', 50, rightY, { continued: true });
       doc.font('Helvetica').text(` ${invoice.status}`);
 
-      doc.moveDown(3);
+      doc.moveDown(1.2);
+
+      // ====== Item Table (Mushak-style) ======
+      // We proportionally allocate VAT per line from the overall tax amount if present.
+      const subtotal = Number(invoice.subtotal) || 0;
+      const totalVat = Number(invoice.tax) || 0;
 
       const tableTop = doc.y;
-      doc.font('Helvetica-Bold').fontSize(10);
-      doc.text('Description', 50, tableTop);
-      doc.text('Qty', 320, tableTop, { width: 50, align: 'center' });
-      doc.text('Price', 380, tableTop, { width: 70, align: 'right' });
-      doc.text('Total', 460, tableTop, { width: 85, align: 'right' });
+      doc.font('Helvetica-Bold').fontSize(9);
 
-      doc.moveTo(50, tableTop + 15).lineTo(545, tableTop + 15).stroke();
+      doc.text('SL', 50, tableTop, { width: 20, align: 'center' });
+      doc.text('Description of service', 75, tableTop, { width: 190 });
+      doc.text('Qty', 270, tableTop, { width: 30, align: 'center' });
+      doc.text('Unit Price', 305, tableTop, { width: 70, align: 'right' });
+      doc.text('Value (BDT)', 380, tableTop, { width: 70, align: 'right' });
+      doc.text('VAT (BDT)', 455, tableTop, { width: 65, align: 'right' });
 
-      let itemY = tableTop + 25;
-      doc.font('Helvetica');
-      
-      invoice.items.forEach((item: any) => {
-        doc.text(item.description, 50, itemY, { width: 260 });
-        doc.text(String(item.quantity), 320, itemY, { width: 50, align: 'center' });
-        doc.text(`৳${Number(item.unitPrice).toFixed(2)}`, 380, itemY, { width: 70, align: 'right' });
-        doc.text(`৳${Number(item.total).toFixed(2)}`, 460, itemY, { width: 85, align: 'right' });
-        itemY += 20;
+      doc.moveTo(50, tableTop + 14).lineTo(545, tableTop + 14).stroke();
+
+      let itemY = tableTop + 20;
+      doc.font('Helvetica').fontSize(9);
+
+      invoice.items.forEach((item: any, index: number) => {
+        const qty = Number(item.quantity) || 1;
+        const unitPrice = Number(item.unitPrice) || 0;
+        const lineTotal = Number(item.total) || qty * unitPrice;
+
+        let lineVat = 0;
+        if (subtotal > 0 && totalVat > 0) {
+          lineVat = (lineTotal / subtotal) * totalVat;
+        }
+
+        doc.text(String(index + 1), 50, itemY, { width: 20, align: 'center' });
+        doc.text(item.description, 75, itemY, { width: 190 });
+        doc.text(qty.toString(), 270, itemY, { width: 30, align: 'center' });
+        doc.text(`৳${unitPrice.toFixed(2)}`, 305, itemY, { width: 70, align: 'right' });
+        doc.text(`৳${lineTotal.toFixed(2)}`, 380, itemY, { width: 70, align: 'right' });
+        doc.text(`৳${lineVat.toFixed(2)}`, 455, itemY, { width: 65, align: 'right' });
+
+        itemY += 18;
       });
 
       doc.moveTo(50, itemY).lineTo(545, itemY).stroke();
-      itemY += 10;
+      itemY += 8;
 
-      doc.font('Helvetica').text('Subtotal:', 380, itemY, { width: 70, align: 'right' });
-      doc.text(`৳${Number(invoice.subtotal).toFixed(2)}`, 460, itemY, { width: 85, align: 'right' });
-      itemY += 15;
+      // ====== Summary block ======
+      doc.font('Helvetica').fontSize(9);
+      doc.text('Subtotal (taxable value):', 330, itemY, { width: 110, align: 'right' });
+      doc.text(`৳${subtotal.toFixed(2)}`, 445, itemY, { width: 75, align: 'right' });
+      itemY += 14;
 
-      if (Number(invoice.discount) > 0) {
-        doc.text('Discount:', 380, itemY, { width: 70, align: 'right' });
-        doc.text(`-৳${Number(invoice.discount).toFixed(2)}`, 460, itemY, { width: 85, align: 'right' });
-        itemY += 15;
+      const discount = Number(invoice.discount) || 0;
+      if (discount > 0) {
+        doc.text('Less: Discount:', 330, itemY, { width: 110, align: 'right' });
+        doc.text(`-৳${discount.toFixed(2)}`, 445, itemY, { width: 75, align: 'right' });
+        itemY += 14;
       }
 
-      if (Number(invoice.tax) > 0) {
-        doc.text('Tax:', 380, itemY, { width: 70, align: 'right' });
-        doc.text(`৳${Number(invoice.tax).toFixed(2)}`, 460, itemY, { width: 85, align: 'right' });
-        itemY += 15;
+      if (totalVat > 0) {
+        doc.text('Add: VAT (Mushak 6.3):', 330, itemY, { width: 110, align: 'right' });
+        doc.text(`৳${totalVat.toFixed(2)}`, 445, itemY, { width: 75, align: 'right' });
+        itemY += 14;
       }
 
-      doc.moveTo(380, itemY).lineTo(545, itemY).stroke();
-      itemY += 5;
+      const grandTotal = Number(invoice.total) || subtotal - discount + totalVat;
 
-      doc.font('Helvetica-Bold').text('Total:', 380, itemY, { width: 70, align: 'right' });
-      doc.text(`৳${Number(invoice.total).toFixed(2)}`, 460, itemY, { width: 85, align: 'right' });
-      itemY += 15;
+      doc.moveTo(330, itemY).lineTo(545, itemY).stroke();
+      itemY += 4;
 
-      doc.font('Helvetica').text('Paid:', 380, itemY, { width: 70, align: 'right' });
-      doc.text(`৳${Number(invoice.paid).toFixed(2)}`, 460, itemY, { width: 85, align: 'right' });
-      itemY += 15;
+      doc.font('Helvetica-Bold').text('Grand Total Payable:', 330, itemY, { width: 110, align: 'right' });
+      doc.text(`৳${grandTotal.toFixed(2)}`, 445, itemY, { width: 75, align: 'right' });
+      itemY += 14;
 
-      doc.font('Helvetica-Bold').text('Due:', 380, itemY, { width: 70, align: 'right' });
-      doc.text(`৳${Number(invoice.due).toFixed(2)}`, 460, itemY, { width: 85, align: 'right' });
+      const paid = Number(invoice.paid) || 0;
+      const due = Number(invoice.due) || Math.max(0, grandTotal - paid);
 
+      doc.font('Helvetica').text('Amount Paid:', 330, itemY, { width: 110, align: 'right' });
+      doc.text(`৳${paid.toFixed(2)}`, 445, itemY, { width: 75, align: 'right' });
+      itemY += 14;
+
+      doc.font('Helvetica-Bold').text('Amount Due:', 330, itemY, { width: 110, align: 'right' });
+      doc.text(`৳${due.toFixed(2)}`, 445, itemY, { width: 75, align: 'right' });
+
+      // ====== Notes and declarations ======
       if (invoice.notes) {
         doc.moveDown(2);
-        doc.font('Helvetica-Bold').fontSize(10).text('Notes:', 50);
-        doc.font('Helvetica').text(invoice.notes, 50);
+        doc.font('Helvetica-Bold').fontSize(9).text('Notes / Terms & Conditions:', 50);
+        doc.font('Helvetica').fontSize(9).text(invoice.notes, 50);
       }
 
-      doc.moveDown(3);
-      doc.fontSize(10).text('Thank you for choosing us!', { align: 'center' });
+      doc.moveDown(1.5);
+      doc.font('Helvetica').fontSize(8).text(
+        'This VAT Invoice (Mushak 6.3) has been generated by BaigDentPro. ' +
+          'Please ensure that supplier BIN and other regulatory fields are kept up to date in clinic settings.',
+        { align: 'left' }
+      );
+
+      doc.moveDown(2);
+      const signY = doc.y;
+      doc.moveTo(380, signY).lineTo(545, signY).stroke();
+      doc.font('Helvetica').fontSize(9).text('Authorised Signature', 380, signY + 4, {
+        width: 165,
+        align: 'center',
+      });
 
       doc.end();
     } catch (error) {

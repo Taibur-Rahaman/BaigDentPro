@@ -7731,8 +7731,8 @@ body {
 }
 
 .neo-pricing-card-featured {
-  border-color: rgba(79, 70, 229, 0.9);
-  box-shadow: 0 22px 60px rgba(79, 70, 229, 0.3);
+  border-color: #0f766e;
+  box-shadow: 0 22px 60px rgba(15, 118, 110, 0.3);
   transform: translateY(-6px);
 }
 
@@ -7741,7 +7741,7 @@ body {
   top: 0;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: #4f46e5;
+  background: #0f766e;
   color: #fff;
   padding: 6px 18px;
   border-radius: 999px;
