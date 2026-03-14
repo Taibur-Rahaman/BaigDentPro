@@ -6317,6 +6317,18 @@ body {
   color: var(--primary-color);
 }
 
+.invoice-actions-cell {
+  text-align: right;
+}
+
+.invoice-actions-cell .btn-sm {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* Futuristic Invoices List */
 .invoices-list {
   border-radius: 16px;

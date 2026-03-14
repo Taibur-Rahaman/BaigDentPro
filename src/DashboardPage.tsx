@@ -2117,14 +2117,15 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                       <td>৳{inv.paid}</td>
                       <td>৳{inv.due}</td>
                       <td><span className={`status-badge status-${inv.status.toLowerCase()}`}>{inv.status}</span></td>
-                      <td>
+                      <td className="invoice-actions-cell">
                         <button
                           type="button"
-                          className="btn-primary"
+                          className="btn-primary btn-sm"
                           onClick={() => handlePrintInvoice(inv)}
-                          title="Print / Download invoice"
+                          title="Print Mushak 6.3 & clinic invoice"
                         >
-                          <i className="fa-solid fa-print"></i> Print
+                          <i className="fa-solid fa-print"></i>
+                          <span>Print (2 copies)</span>
                         </button>
                       </td>
                     </tr>
