@@ -519,77 +519,111 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
 
     const html = `
       <!DOCTYPE html>
-      <html lang="en">
+      <html lang="bn">
       <head>
         <meta charset="UTF-8" />
-        <title>Invoice ${invoice.invoiceNo}</title>
+        <title>মূল্য সংযোজন কর চালানপত্র (মূশক-৬.৩) - ${invoice.invoiceNo}</title>
         <style>
-          body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 32px; color: #0f172a; }
-          .invoice-shell { max-width: 720px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px 28px; }
-          .invoice-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-          .clinic-name { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
-          .muted { color: #6b7280; font-size: 13px; }
-          .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-          .badge-paid { background: #ecfdf3; color: #15803d; }
-          .badge-pending { background: #fef3c7; color: #92400e; }
-          .rows { margin-top: 8px; }
-          .rows div { margin-bottom: 2px; }
-          h2 { font-size: 18px; margin: 0 0 4px; }
-          table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 14px; }
-          th, td { padding: 10px 8px; border-bottom: 1px solid #e5e7eb; text-align: left; }
-          th { background: #f9fafb; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; }
-          .totals { margin-top: 12px; float: right; font-size: 14px; }
-          .totals div { display: flex; justify-content: space-between; gap: 32px; margin-bottom: 4px; }
-          .totals .label { color: #6b7280; }
-          .totals .value-strong { font-weight: 700; }
-          .footer { clear: both; margin-top: 40px; font-size: 12px; color: #6b7280; text-align: center; }
+          body { font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Noto Sans Bengali', 'Segoe UI', sans-serif; padding: 24px 32px; color: #111827; background: #fff; }
+          .mushak-shell { max-width: 800px; margin: 0 auto; border: 1px solid #111827; padding: 24px 32px; }
+          .gov-header { text-align: center; margin-bottom: 8px; }
+          .gov-header h1 { font-size: 16px; margin: 0; }
+          .gov-header h2 { font-size: 14px; margin: 4px 0 0; }
+          .mushak-title-row { display: flex; justify-content: space-between; align-items: flex-start; margin: 8px 0 16px; }
+          .mushak-box { border: 1px solid #111827; padding: 4px 12px; font-size: 13px; font-weight: 600; }
+          .mushak-main-title { text-align: center; font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+          .section { font-size: 13px; margin-bottom: 10px; }
+          .section strong { display: inline-block; min-width: 130px; }
+          .flex-row { display: flex; justify-content: space-between; gap: 24px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+          th, td { border: 1px solid #111827; padding: 6px 4px; text-align: center; }
+          th { font-weight: 600; }
+          .right { text-align: right; padding-right: 8px; }
+          .total-row td { font-weight: 600; }
+          .sign-section { margin-top: 28px; font-size: 12px; }
+          .sign-line { margin-top: 40px; border-top: 1px solid #111827; width: 220px; }
+          .sign-label { margin-top: 4px; }
+          .footnote { margin-top: 16px; font-size: 11px; line-height: 1.4; }
         </style>
       </head>
       <body>
-        <div class="invoice-shell">
-          <div class="invoice-header">
-            <div>
-              <p class="clinic-name">BaigDentPro Clinic</p>
-              <p class="muted">Smart dental practice management</p>
-              <div class="rows">
-                <div class="muted">Invoice #: <strong>${invoice.invoiceNo}</strong></div>
-                <div class="muted">Date: <strong>${invoice.date}</strong></div>
-              </div>
+        <div class="mushak-shell">
+          <div class="gov-header">
+            <h1>গণপ্রজাতন্ত্রী বাংলাদেশ সরকার</h1>
+            <h2>জাতীয় রাজস্ব বোর্ড</h2>
+          </div>
+
+          <div class="mushak-title-row">
+            <div class="mushak-main-title">
+              কর চালানপত্র<br />
+              [ ভ্যাট ও সম্পূরক শুল্ক আইন, ২০১২ (ধারা ৪০) এর উপধারা (১) এর দফা (গ) ও দফা (ঘ) ]
             </div>
-            <div style="text-align: right;">
-              <h2>Invoice</h2>
-              <p class="muted">Patient: <strong>${invoice.patientName}</strong></p>
-              <span class="badge ${invoice.status === 'PAID' ? 'badge-paid' : 'badge-pending'}">
-                ${invoice.status}
-              </span>
+            <div class="mushak-box">মূশক-৬.৩</div>
+          </div>
+
+          <div class="section">
+            <strong>নিবন্ধিত ব্যক্তির নাম:</strong> BaigDentPro Clinic<br />
+            <strong>নিবন্ধিত ব্যক্তির বিআইএন:</strong> _________________________<br />
+            <strong>চালানপত্র ইস্যুকারীর ঠিকানা:</strong> _________________________
+          </div>
+
+          <div class="flex-row section">
+            <div>
+              <strong>ক্রেতার নাম:</strong> ${invoice.patientName}<br />
+              <strong>সরবরাহের গন্তব্যস্থল:</strong> _________________________
+            </div>
+            <div>
+              <strong>চালানপত্র নম্বর:</strong> ${invoice.invoiceNo}<br />
+              <strong>ইস্যুর তারিখ:</strong> ${invoice.date}<br />
+              <strong>ইস্যুর সময়:</strong> __________
             </div>
           </div>
 
           <table>
             <thead>
               <tr>
-                <th style="width: 60%;">Description</th>
-                <th style="width: 20%;">Qty</th>
-                <th style="width: 20%;">Amount (৳)</th>
+                <th>ক্রমিক</th>
+                <th>পণ্য বা সেবার বর্ণনা<br />(প্রয়োজনে ব্র্যান্ড নামসহ)</th>
+                <th>সরবরাহের একক</th>
+                <th>পরিমাণ</th>
+                <th>একক মূল্য<br />(টাকায়)</th>
+                <th>মোট মূল্য<br />(টাকায়)</th>
+                <th>মূল্য সংযোজন করের হার / সুনির্দিষ্ট কর</th>
+                <th>মূল্য সংযোজন কর / সুনির্দিষ্ট করের পরিমাণ<br />(টাকায়)</th>
+                <th>সকল প্রকার শুল্ক ও করসহ মূল্য<br />(টাকায়)</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>Treatment & procedures</td>
-                <td>1</td>
-                <td>${invoice.total.toFixed(2)}</td>
+                <td>১</td>
+                <td>ডেন্টাল চিকিৎসা সেবা</td>
+                <td>সেবা</td>
+                <td>১</td>
+                <td class="right">${invoice.total.toFixed(2)}</td>
+                <td class="right">${invoice.total.toFixed(2)}</td>
+                <td>১৫%</td>
+                <td class="right">${(invoice.total * 0.15).toFixed(2)}</td>
+                <td class="right">${(invoice.total * 1.15).toFixed(2)}</td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="5" class="right">সর্বমোট</td>
+                <td class="right">${invoice.total.toFixed(2)}</td>
+                <td></td>
+                <td class="right">${(invoice.total * 0.15).toFixed(2)}</td>
+                <td class="right">${(invoice.total * 1.15).toFixed(2)}</td>
               </tr>
             </tbody>
           </table>
 
-          <div class="totals">
-            <div><span class="label">Total</span><span>৳${invoice.total.toFixed(2)}</span></div>
-            <div><span class="label">Paid</span><span>৳${invoice.paid.toFixed(2)}</span></div>
-            <div><span class="label">Due</span><span class="value-strong">৳${invoice.due.toFixed(2)}</span></div>
+          <div class="sign-section">
+            <div>প্রতিষ্ঠান কর্তৃপক্ষের দায়িত্বপ্রাপ্ত ব্যক্তির নাম: __________________________</div>
+            <div>পদবী: __________________________</div>
+            <div>স্বাক্ষর: __________________________</div>
+            <div>সীল: __________________________</div>
           </div>
 
-          <div class="footer">
-            Thank you for visiting BaigDentPro Clinic. For any billing questions, please contact reception.
+          <div class="footnote">
+            * উপরোক্ত তথ্যাবলী সরবরাহের ক্ষেত্রে ফরমটি সম্মিলিত কর চালানপত্র ও উৎসে কর কর্তন সনদপত্র হিসেবে বিবেচিত হইবে এবং উক্ত উৎস কর কর্তনকারীর সরবরাহের ক্ষেত্রে প্রযোজ্য হবে।
           </div>
         </div>
         <script>
