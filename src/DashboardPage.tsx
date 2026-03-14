@@ -511,6 +511,14 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     showToast('Invoice created');
   };
 
+  const handlePrintInvoice = (invoiceId: string) => {
+    const url = api.invoices.getPDF(invoiceId);
+    const win = window.open(url, '_blank');
+    if (!win || win.closed || typeof win.closed === 'undefined') {
+      window.location.href = url;
+    }
+  };
+
   const handleCreateLabOrder = () => {
     if (!labForm.patientId || !labForm.workType) {
       showToast('Select patient and work type');
@@ -1923,6 +1931,7 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                     <th>Paid</th>
                     <th>Due</th>
                     <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1934,6 +1943,16 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                       <td>৳{inv.paid}</td>
                       <td>৳{inv.due}</td>
                       <td><span className={`status-badge status-${inv.status.toLowerCase()}`}>{inv.status}</span></td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-outline-small"
+                          onClick={() => handlePrintInvoice(inv.id)}
+                          title="Print / Download invoice"
+                        >
+                          <i className="fa-solid fa-print"></i> Print
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
