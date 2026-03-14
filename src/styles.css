@@ -4895,6 +4895,21 @@ body {
   filter: drop-shadow(0 0 10px var(--neo-primary-glow));
 }
 
+.page-header .header-patient-select {
+  min-width: 240px;
+}
+
+.page-header .header-patient-select label {
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+}
+
+.page-header .header-patient-select select {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
 .page-header p {
   color: var(--neo-text-secondary);
   margin: 8px 0 0;
@@ -6261,6 +6276,45 @@ body {
 .invoice-items h4 {
   font-size: 0.95rem;
   margin: 0 0 14px;
+}
+
+.billing-service-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.billing-service-input {
+  display: flex;
+  gap: 8px;
+}
+
+.billing-service-input input {
+  flex: 1;
+}
+
+.billing-service-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.billing-service-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--border-color);
+  background: #f0fdfa;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--neo-text-secondary);
+}
+
+.billing-service-tag i {
+  font-size: 0.7rem;
 }
 
 .procedure-buttons {

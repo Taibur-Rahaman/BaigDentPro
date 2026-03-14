@@ -147,6 +147,7 @@ const MEDICAL_HISTORY_KEY = (patientId: string) => `baigdentpro:medicalHistory:$
 const TREATMENT_PLANS_KEY = (patientId: string) => `baigdentpro:treatmentPlans:${patientId}`;
 const TREATMENT_RECORDS_KEY = (patientId: string) => `baigdentpro:treatmentRecords:${patientId}`;
 const CONSENT_KEY = (patientId: string) => `baigdentpro:consent:${patientId}`;
+const BILLING_PROCEDURES_KEY = 'baigdentpro:billingProcedures';
 
 const DIAGNOSIS_OPTIONS = [
   'Examination', 'X-Ray/RVG', 'Calculus', 'Caries', 'Deep Caries',
@@ -177,7 +178,7 @@ const DRUG_DATABASE = [
   { company: 'Dr Reddy', generic: 'Ferrous Sulfate', brand: 'Ferra', strength: '325mg' },
 ];
 
-const DENTAL_PROCEDURES = [
+const DEFAULT_DENTAL_PROCEDURES = [
   'Consultation', 'Scaling & Polishing', 'Filling (Composite)', 'Filling (Amalgam)',
   'Root Canal Treatment', 'Extraction', 'Surgical Extraction', 'Crown', 'Bridge',
   'Denture (Complete)', 'Denture (Partial)', 'Implant', 'Teeth Whitening',
@@ -244,6 +245,22 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
   const [prescriptionForm, setPrescriptionForm] = useState({ patientId: '', diagnosis: '', advice: '', drugs: [] as DrugItem[] });
   const [invoiceForm, setInvoiceForm] = useState({ patientId: '', items: [] as { description: string; amount: number }[], discount: 0 });
   const [labForm, setLabForm] = useState({ patientId: '', workType: 'Crown', description: '', toothNumber: '', shade: '' });
+  const [billingProcedures, setBillingProcedures] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return DEFAULT_DENTAL_PROCEDURES;
+    try {
+      const raw = window.localStorage.getItem(BILLING_PROCEDURES_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every((p) => typeof p === 'string')) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore and fall back
+    }
+    return DEFAULT_DENTAL_PROCEDURES;
+  });
+  const [newBillingProcedure, setNewBillingProcedure] = useState('');
   
   // Drug form
   const [drugForm, setDrugForm] = useState({ brand: '', dose: '', duration: '', frequency: '1-0-1', beforeFood: false, afterFood: true });
@@ -2041,24 +2058,93 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     <div className="dashboard-content">
       <div className="page-header">
         <h1><i className="fa-solid fa-file-invoice-dollar"></i> Billing & Invoices</h1>
+        <div className="header-actions">
+          <div className="form-group header-patient-select">
+            <label>Patient *</label>
+            <select
+              value={invoiceForm.patientId}
+              onChange={(e) => setInvoiceForm({ ...invoiceForm, patientId: e.target.value })}
+            >
+              <option value="">-- Select Patient --</option>
+              {patients.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button className="btn-primary" onClick={handleCreateInvoice}>
+            <i className="fa-solid fa-file-invoice"></i> Create Invoice
+          </button>
+        </div>
       </div>
 
       <div className="two-column-layout">
         <div className="form-panel">
-          <h3><i className="fa-solid fa-plus"></i> Create Invoice</h3>
-          <div className="form-group">
-            <label>Patient *</label>
-            <select value={invoiceForm.patientId} onChange={(e) => setInvoiceForm({ ...invoiceForm, patientId: e.target.value })}>
-              <option value="">-- Select Patient --</option>
-              {patients.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
+          <h3><i className="fa-solid fa-plus"></i> Add Procedures & Items</h3>
           <div className="invoice-items">
-            <h4>Add Items</h4>
+            <h4>Quick add procedures</h4>
+            <div className="billing-service-editor">
+              <div className="billing-service-input">
+                <input
+                  type="text"
+                  value={newBillingProcedure}
+                  onChange={(e) => setNewBillingProcedure(e.target.value)}
+                  placeholder="Add custom service (e.g. Ortho Review)"
+                />
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    const label = newBillingProcedure.trim();
+                    if (!label) return;
+                    if (billingProcedures.includes(label)) {
+                      setNewBillingProcedure('');
+                      return;
+                    }
+                    const updated = [...billingProcedures, label];
+                    setBillingProcedures(updated);
+                    try {
+                      window.localStorage.setItem(BILLING_PROCEDURES_KEY, JSON.stringify(updated));
+                    } catch {
+                      // ignore storage errors
+                    }
+                    setNewBillingProcedure('');
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+              {billingProcedures.length > 0 && (
+                <div className="billing-service-tags">
+                  {billingProcedures.map((proc) => (
+                    <button
+                      key={proc}
+                      type="button"
+                      className="billing-service-tag"
+                      onClick={() => {
+                        const updated = billingProcedures.filter((p) => p !== proc);
+                        setBillingProcedures(updated.length ? updated : DEFAULT_DENTAL_PROCEDURES);
+                        try {
+                          window.localStorage.setItem(
+                            BILLING_PROCEDURES_KEY,
+                            JSON.stringify(updated.length ? updated : DEFAULT_DENTAL_PROCEDURES),
+                          );
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                      title="Click to remove from list"
+                    >
+                      <span>{proc}</span>
+                      <i className="fa-solid fa-times"></i>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="procedure-buttons">
-              {DENTAL_PROCEDURES.slice(0, 12).map(proc => (
+              {billingProcedures.map((proc) => (
                 <button key={proc} className="procedure-btn" onClick={() => setInvoiceForm({ ...invoiceForm, items: [...invoiceForm.items, { description: proc, amount: 500 }] })}>
                   {proc}
                 </button>
@@ -2085,9 +2171,6 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
               </div>
             )}
           </div>
-          <button className="btn-primary" onClick={handleCreateInvoice}>
-            <i className="fa-solid fa-file-invoice"></i> Create Invoice
-          </button>
         </div>
 
         <div className="list-panel">
