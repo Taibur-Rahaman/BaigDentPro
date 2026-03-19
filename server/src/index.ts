@@ -13,6 +13,7 @@ import shopRoutes from './routes/shop.js';
 import communicationRoutes from './routes/communication.js';
 import dashboardRoutes from './routes/dashboard.js';
 import adminRoutes from './routes/admin.js';
+import superAdminRoutes from './routes/superAdmin.js';
 
 dotenv.config();
 
@@ -22,7 +23,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: process.env.NODE_ENV === 'production' ? (process.env.FRONTEND_URL?.split(',') || []) : true,
   credentials: true,
 }));
 
@@ -43,6 +44,7 @@ app.use('/api/shop', shopRoutes);
 app.use('/api/communication', communicationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/super-admin', superAdminRoutes);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Error:', err);

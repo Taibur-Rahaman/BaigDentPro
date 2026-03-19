@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { PrescriptionPage } from './PrescriptionPage';
+import api from './api';
 
 interface Patient {
   id: string;
@@ -24,6 +25,9 @@ interface Appointment {
   time: string;
   type: string;
   status: string;
+  duration?: number; // minutes
+  notes?: string;
+  patientPhone?: string;
 }
 
 interface Prescription {
@@ -133,6 +137,7 @@ interface PatientConsent {
 interface Props {
   onLogout: () => void;
   userName?: string;
+  userRole?: string;
 }
 
 const STORAGE_KEYS = {
@@ -142,6 +147,217 @@ const STORAGE_KEYS = {
   invoices: 'baigdentpro:invoices',
   labOrders: 'baigdentpro:labOrders',
 };
+
+function mapPatientFromApi(p: any): Patient {
+  return {
+    id: p.id,
+    regNo: p.regNo ?? undefined,
+    name: p.name,
+    phone: p.phone ?? '',
+    age: p.age != null ? String(p.age) : undefined,
+    gender: p.gender ?? undefined,
+    email: p.email ?? undefined,
+    address: p.address ?? undefined,
+    bloodGroup: p.bloodGroup ?? undefined,
+    occupation: p.occupation ?? undefined,
+    refBy: p.referredBy ?? undefined,
+    createdAt: p.createdAt ? new Date(p.createdAt).getTime() : Date.now(),
+  };
+}
+
+function mapAppointmentFromApi(a: any): Appointment {
+  const d = a.date ? new Date(a.date) : new Date();
+  const dateStr = d.toISOString().split('T')[0];
+  return {
+    id: a.id,
+    patientId: a.patientId,
+    patientName: a.patient?.name ?? 'Unknown',
+    patientPhone: a.patient?.phone ?? undefined,
+    date: dateStr,
+    time: a.time ?? '',
+    type: a.type ?? 'Checkup',
+    status: a.status ?? 'SCHEDULED',
+    duration: a.duration ?? 30,
+    notes: a.notes ?? undefined,
+  };
+}
+
+function mapPrescriptionFromApi(p: any): Prescription {
+  const d = p.date ? new Date(p.date) : new Date();
+  const dateStr = d.toISOString().split('T')[0];
+  return {
+    id: p.id,
+    patientId: p.patientId,
+    patientName: p.patient?.name ?? 'Unknown',
+    date: dateStr,
+    diagnosis: p.diagnosis ?? '',
+    drugs: (p.items ?? []).map((i: any) => ({
+      id: i.id ?? crypto.randomUUID(),
+      brand: i.drugName ?? i.genericName ?? '',
+      dose: i.dosage ?? '',
+      duration: i.duration ?? '',
+      frequency: i.frequency ?? '',
+      beforeFood: i.beforeFood ?? false,
+      afterFood: i.afterFood ?? true,
+    })),
+  };
+}
+
+function mapInvoiceFromApi(i: any): Invoice {
+  const d = i.date ? new Date(i.date) : new Date();
+  const dateStr = d.toISOString().split('T')[0];
+  return {
+    id: i.id,
+    invoiceNo: i.invoiceNo,
+    patientName: i.patient?.name ?? 'Unknown',
+    total: Number(i.total ?? 0),
+    paid: Number(i.paid ?? 0),
+    due: Number(i.due ?? 0),
+    date: dateStr,
+    status: i.status ?? 'PENDING',
+  };
+}
+
+function mapLabOrderFromApi(l: any): LabOrder {
+  const d = l.orderDate ? new Date(l.orderDate) : new Date();
+  const dateStr = d.toISOString().split('T')[0];
+  return {
+    id: l.id,
+    patientName: l.patient?.name ?? 'Unknown',
+    workType: l.workType ?? '',
+    status: l.status ?? 'PENDING',
+    orderDate: dateStr,
+  };
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0');
+}
+
+function parseAppointmentStartLocal(a: Appointment): Date {
+  // Build a "local time" Date from the stored YYYY-MM-DD + HH:MM.
+  // This avoids timezone-related day shifts.
+  const [yStr, mStr, dStr] = a.date.split('-');
+  const [hhStr, mmStr] = (a.time || '00:00').split(':');
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  const d = parseInt(dStr, 10);
+  const hh = parseInt(hhStr ?? '0', 10);
+  const mm = parseInt(mmStr ?? '0', 10);
+  return new Date(y, m - 1, d, hh, mm, 0, 0);
+}
+
+function formatICSDateTimeUTC(d: Date): string {
+  // Example: 20260319T043000Z
+  return (
+    `${d.getUTCFullYear()}${pad2(d.getUTCMonth() + 1)}${pad2(d.getUTCDate())}` +
+    `T${pad2(d.getUTCHours())}${pad2(d.getUTCMinutes())}${pad2(d.getUTCSeconds())}Z`
+  );
+}
+
+function escapeIcsText(value: string): string {
+  // RFC5545 escaping: https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.11
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\r?\n/g, '\\n')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,');
+}
+
+function buildAppointmentIcs(a: Appointment): string {
+  const start = parseAppointmentStartLocal(a);
+  const durationMin = a.duration ?? 30;
+  const end = new Date(start.getTime() + durationMin * 60 * 1000);
+  const dtStamp = formatICSDateTimeUTC(new Date());
+  const dtStart = formatICSDateTimeUTC(start);
+  const dtEnd = formatICSDateTimeUTC(end);
+
+  const summary = `Appointment with ${a.patientName}`;
+
+  const descriptionLines = [
+    `Type: ${a.type ?? '-'}`,
+    `Patient: ${a.patientName ?? '-'}`,
+    a.patientPhone ? `Phone: ${a.patientPhone}` : null,
+    a.notes ? `Notes: ${a.notes}` : null,
+  ].filter(Boolean) as string[];
+
+  const icsStatus =
+    String(a.status ?? '').toUpperCase() === 'CANCELLED' || String(a.status ?? '').toUpperCase() === 'CANCELED'
+      ? 'CANCELLED'
+      : 'CONFIRMED';
+
+  // Use CRLF as per ICS spec.
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//BaigMed//Appointments//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:${a.id}@baigmed`,
+    `DTSTAMP:${dtStamp}`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `STATUS:${icsStatus}`,
+    `SUMMARY:${escapeIcsText(summary)}`,
+    `DESCRIPTION:${escapeIcsText(descriptionLines.join('\n'))}`,
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n');
+}
+
+function downloadAppointmentIcs(a: Appointment) {
+  if (typeof window === 'undefined') return;
+  const ics = buildAppointmentIcs(a);
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const safePatient = (a.patientName || 'patient').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+  const safeDate = (a.date || 'date').replace(/[^0-9]+/g, '');
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `appointment-${safePatient}-${safeDate}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  // Ensure we don't leak object URLs.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function formatGoogleDateTimeUTC(d: Date): string {
+  // Example: 20260319T043000Z
+  return formatICSDateTimeUTC(d);
+}
+
+function getGoogleCalendarUrl(a: Appointment): string {
+  const start = parseAppointmentStartLocal(a);
+  const durationMin = a.duration ?? 30;
+  const end = new Date(start.getTime() + durationMin * 60 * 1000);
+
+  const text = `Appointment: ${a.patientName}`;
+  const detailsLines = [
+    `Type: ${a.type ?? '-'}`,
+    `Patient: ${a.patientName ?? '-'}`,
+    a.patientPhone ? `Phone: ${a.patientPhone}` : null,
+    a.notes ? `Notes: ${a.notes}` : null,
+  ].filter(Boolean) as string[];
+
+  const details = detailsLines.join('\n');
+  const dates = `${formatGoogleDateTimeUTC(start)}/${formatGoogleDateTimeUTC(end)}`;
+
+  const url = new URL('https://calendar.google.com/calendar/render');
+  url.searchParams.set('action', 'TEMPLATE');
+  url.searchParams.set('text', text);
+  url.searchParams.set('details', details);
+  url.searchParams.set('dates', dates);
+  // Add a simple default; user can edit before saving.
+  url.searchParams.set('sprop', '');
+  url.searchParams.set('sf', 'true');
+  return url.toString();
+}
 
 const MEDICAL_HISTORY_KEY = (patientId: string) => `baigdentpro:medicalHistory:${patientId}`;
 const TREATMENT_PLANS_KEY = (patientId: string) => `baigdentpro:treatmentPlans:${patientId}`;
@@ -226,9 +442,9 @@ const TOOTH_CHART = {
 };
 
 type NavSection = 'dashboard' | 'patients' | 'patient-detail' | 'prescription' | 'prescriptions-list' | 
-  'appointments' | 'billing' | 'lab' | 'drugs' | 'sms' | 'settings';
+  'appointments' | 'billing' | 'lab' | 'drugs' | 'sms' | 'settings' | 'super-admin';
 
-export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }) => {
+export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', userRole }) => {
   const [activeNav, setActiveNav] = useState<NavSection>('dashboard');
   const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -238,6 +454,15 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
   const [labOrders, setLabOrders] = useState<LabOrder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNotice, setShowNotice] = useState<string | null>(null);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [superAdminStats, setSuperAdminStats] = useState<any>(null);
+  const [superAdminClinics, setSuperAdminClinics] = useState<any[]>([]);
+  const [superAdminRevenue, setSuperAdminRevenue] = useState<any[]>([]);
+  const [superAdminUtilization, setSuperAdminUtilization] = useState<any[]>([]);
+  const [superAdminLogs, setSuperAdminLogs] = useState<any[]>([]);
+  const [superAdminLoading, setSuperAdminLoading] = useState(false);
+  const [superAdminTab, setSuperAdminTab] = useState<'overview' | 'clinics' | 'revenue' | 'utilization' | 'logs'>('overview');
   
   // Form states
   const [patientForm, setPatientForm] = useState({ name: '', phone: '', age: '', gender: '', email: '', address: '', bloodGroup: '', occupation: '', refBy: '' });
@@ -261,7 +486,9 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     return DEFAULT_DENTAL_PROCEDURES;
   });
   const [newBillingProcedure, setNewBillingProcedure] = useState('');
-  
+  const [customLineDescription, setCustomLineDescription] = useState('');
+  const [customLineAmount, setCustomLineAmount] = useState<string>('');
+
   // Drug form
   const [drugForm, setDrugForm] = useState({ brand: '', dose: '', duration: '', frequency: '1-0-1', beforeFood: false, afterFood: true });
   const [drugSearch, setDrugSearch] = useState('');
@@ -288,22 +515,105 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<TreatmentPlan | null>(null);
   const [editingRecord, setEditingRecord] = useState<TreatmentRecord | null>(null);
+  // Payment record modal inputs (used for auto-calculating Due)
+  const [paymentCostInput, setPaymentCostInput] = useState<string>('0');
+  const [paymentPaidInput, setPaymentPaidInput] = useState<string>('0');
+
+  const paymentDuePreview = (() => {
+    const costNum = parseFloat(paymentCostInput) || 0;
+    const paidNum = parseFloat(paymentPaidInput) || 0;
+    const dueNum = costNum - paidNum;
+    return (dueNum > 0 ? dueNum : 0).toFixed(2);
+  })();
+
+  const loadData = useCallback(async () => {
+    if (!api.getToken()) {
+      try {
+        setPatients(JSON.parse(localStorage.getItem(STORAGE_KEYS.patients) || '[]'));
+        setPrescriptions(JSON.parse(localStorage.getItem(STORAGE_KEYS.prescriptions) || '[]'));
+        setAppointments(JSON.parse(localStorage.getItem(STORAGE_KEYS.appointments) || '[]'));
+        setInvoices(JSON.parse(localStorage.getItem(STORAGE_KEYS.invoices) || '[]'));
+        setLabOrders(JSON.parse(localStorage.getItem(STORAGE_KEYS.labOrders) || '[]'));
+      } catch (e) {
+        console.error('Error loading data:', e);
+      }
+      setDataLoading(false);
+      return;
+    }
+    setDataLoading(true);
+    setApiError(null);
+    try {
+      const [patientsRes, appointmentsRes, prescriptionsRes, invoicesRes, labRes] = await Promise.all([
+        api.patients.list({ limit: 500 }),
+        api.appointments.list(),
+        api.prescriptions.list({ page: 1, limit: 500 }),
+        api.invoices.list({ page: 1, limit: 500 }),
+        api.lab.list({ page: 1, limit: 500 }),
+      ]);
+      const patientsList = (patientsRes as { patients: any[] }).patients ?? [];
+      const appointmentsList = Array.isArray(appointmentsRes) ? appointmentsRes : [];
+      const prescriptionsList = (prescriptionsRes as { prescriptions: any[] }).prescriptions ?? [];
+      const invoicesList = (invoicesRes as { invoices: any[] }).invoices ?? [];
+      const labList = (labRes as { labOrders: any[] }).labOrders ?? [];
+      setPatients(patientsList.map(mapPatientFromApi));
+      setAppointments(appointmentsList.map(mapAppointmentFromApi));
+      setPrescriptions(prescriptionsList.map(mapPrescriptionFromApi));
+      setInvoices(invoicesList.map(mapInvoiceFromApi));
+      setLabOrders(labList.map(mapLabOrderFromApi));
+    } catch (e: any) {
+      console.error('API load error:', e);
+      setApiError(e?.message ?? 'Failed to load data');
+      try {
+        setPatients(JSON.parse(localStorage.getItem(STORAGE_KEYS.patients) || '[]'));
+        setPrescriptions(JSON.parse(localStorage.getItem(STORAGE_KEYS.prescriptions) || '[]'));
+        setAppointments(JSON.parse(localStorage.getItem(STORAGE_KEYS.appointments) || '[]'));
+        setInvoices(JSON.parse(localStorage.getItem(STORAGE_KEYS.invoices) || '[]'));
+        setLabOrders(JSON.parse(localStorage.getItem(STORAGE_KEYS.labOrders) || '[]'));
+      } catch {
+        // keep empty
+      }
+    } finally {
+      setDataLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
-  const loadData = () => {
-    try {
-      setPatients(JSON.parse(localStorage.getItem(STORAGE_KEYS.patients) || '[]'));
-      setPrescriptions(JSON.parse(localStorage.getItem(STORAGE_KEYS.prescriptions) || '[]'));
-      setAppointments(JSON.parse(localStorage.getItem(STORAGE_KEYS.appointments) || '[]'));
-      setInvoices(JSON.parse(localStorage.getItem(STORAGE_KEYS.invoices) || '[]'));
-      setLabOrders(JSON.parse(localStorage.getItem(STORAGE_KEYS.labOrders) || '[]'));
-    } catch (e) {
-      console.error('Error loading data:', e);
-    }
-  };
+  useEffect(() => {
+    if (!showTreatmentRecordModal) return;
+    setPaymentCostInput(editingRecord?.cost ?? '0');
+    setPaymentPaidInput(editingRecord?.paid ?? '0');
+  }, [showTreatmentRecordModal, editingRecord?.id]);
+
+  useEffect(() => {
+    if (activeNav !== 'super-admin' || userRole !== 'SUPER_ADMIN' || !api.getToken()) return;
+    let cancelled = false;
+    setSuperAdminLoading(true);
+    (async () => {
+      try {
+        const [statsRes, clinicsRes, revenueRes, utilRes, logsRes] = await Promise.all([
+          api.superAdmin.stats(),
+          api.superAdmin.clinics({ limit: 100 }),
+          api.superAdmin.revenueByBranch(),
+          api.superAdmin.chairUtilization(),
+          api.superAdmin.activityLogs({ limit: 100 }),
+        ]);
+        if (cancelled) return;
+        setSuperAdminStats(statsRes);
+        setSuperAdminClinics(clinicsRes.clinics ?? []);
+        setSuperAdminRevenue(revenueRes.branches ?? []);
+        setSuperAdminUtilization(utilRes.utilization ?? []);
+        setSuperAdminLogs(logsRes.logs ?? []);
+      } catch (e) {
+        if (!cancelled) showToast('Failed to load super admin data');
+      } finally {
+        if (!cancelled) setSuperAdminLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeNav, userRole]);
 
   const savePatients = (data: Patient[]) => {
     localStorage.setItem(STORAGE_KEYS.patients, JSON.stringify(data));
@@ -424,9 +734,30 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
   }), [patients, todayAppointments, prescriptions, invoices, labOrders]);
 
   // Handlers
-  const handleAddPatient = () => {
+  const handleAddPatient = async () => {
     if (!patientForm.name || !patientForm.phone) {
       showToast('Name and phone are required');
+      return;
+    }
+    if (api.getToken()) {
+      try {
+        await api.patients.create({
+          name: patientForm.name,
+          phone: patientForm.phone,
+          age: patientForm.age ? parseInt(patientForm.age, 10) : undefined,
+          gender: patientForm.gender || undefined,
+          email: patientForm.email || undefined,
+          address: patientForm.address || undefined,
+          bloodGroup: patientForm.bloodGroup || undefined,
+          occupation: patientForm.occupation || undefined,
+          referredBy: patientForm.refBy || undefined,
+        });
+        setPatientForm({ name: '', phone: '', age: '', gender: '', email: '', address: '', bloodGroup: '', occupation: '', refBy: '' });
+        showToast('Patient added successfully');
+        loadData();
+      } catch (e: any) {
+        showToast(e?.message ?? 'Failed to add patient');
+      }
       return;
     }
     const newPatient: Patient = {
@@ -448,9 +779,26 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     showToast('Patient added successfully');
   };
 
-  const handleAddAppointment = () => {
+  const handleAddAppointment = async () => {
     if (!appointmentForm.patientId || !appointmentForm.date || !appointmentForm.time) {
       showToast('Please fill all appointment details');
+      return;
+    }
+    if (api.getToken()) {
+      try {
+        await api.appointments.create({
+          patientId: appointmentForm.patientId,
+          date: new Date(`${appointmentForm.date}T${appointmentForm.time}`).toISOString(),
+          time: appointmentForm.time,
+          duration: 30,
+          type: appointmentForm.type,
+        });
+        setAppointmentForm({ patientId: '', date: '', time: '', type: 'Checkup' });
+        showToast('Appointment scheduled');
+        loadData();
+      } catch (e: any) {
+        showToast(e?.message ?? 'Failed to schedule appointment');
+      }
       return;
     }
     const patient = patients.find(p => p.id === appointmentForm.patientId);
@@ -462,6 +810,7 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
       time: appointmentForm.time,
       type: appointmentForm.type,
       status: 'SCHEDULED',
+      duration: 30,
     };
     saveAppointments([newAppointment, ...appointments]);
     setAppointmentForm({ patientId: '', date: '', time: '', type: 'Checkup' });
@@ -487,9 +836,32 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     setDrugSearch('');
   };
 
-  const handleSavePrescription = () => {
+  const handleSavePrescription = async () => {
     if (!prescriptionForm.patientId || prescriptionForm.drugs.length === 0) {
       showToast('Select patient and add at least one drug');
+      return;
+    }
+    if (api.getToken()) {
+      try {
+        await api.prescriptions.create({
+          patientId: prescriptionForm.patientId,
+          diagnosis: prescriptionForm.diagnosis,
+          advice: prescriptionForm.advice,
+          items: prescriptionForm.drugs.map((d) => ({
+            drugName: d.brand,
+            dosage: d.dose,
+            frequency: d.frequency,
+            duration: d.duration,
+            beforeFood: d.beforeFood,
+            afterFood: d.afterFood,
+          })),
+        });
+        setPrescriptionForm({ patientId: '', diagnosis: '', advice: '', drugs: [] });
+        showToast('Prescription saved');
+        loadData();
+      } catch (e: any) {
+        showToast(e?.message ?? 'Failed to save prescription');
+      }
       return;
     }
     const patient = patients.find(p => p.id === prescriptionForm.patientId);
@@ -506,9 +878,28 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     showToast('Prescription saved');
   };
 
-  const handleCreateInvoice = () => {
+  const handleCreateInvoice = async () => {
     if (!invoiceForm.patientId || invoiceForm.items.length === 0) {
       showToast('Select patient and add items');
+      return;
+    }
+    if (api.getToken()) {
+      try {
+        await api.invoices.create({
+          patientId: invoiceForm.patientId,
+          discount: invoiceForm.discount,
+          items: invoiceForm.items.map((item) => ({
+            description: item.description,
+            quantity: 1,
+            unitPrice: item.amount,
+          })),
+        });
+        setInvoiceForm({ patientId: '', items: [], discount: 0 });
+        showToast('Invoice created');
+        loadData();
+      } catch (e: any) {
+        showToast(e?.message ?? 'Failed to create invoice');
+      }
       return;
     }
     const patient = patients.find(p => p.id === invoiceForm.patientId);
@@ -528,29 +919,137 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     showToast('Invoice created');
   };
 
-  const handlePrintInvoice = (invoice: Invoice) => {
+const handlePrintInvoice = (invoice: Invoice) => {
+    const invoiceHtml = `<!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <title>Invoice - ${invoice.invoiceNo}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', sans-serif; padding: 24px 32px; color: #111827; background: #fff; }
+          .shell { max-width: 820px; margin: 0 auto; border: 1px solid #e5e7eb; padding: 28px 32px; border-radius: 12px; }
+          .title { text-align: center; font-size: 22px; font-weight: 800; letter-spacing: 0.6px; margin: 0 0 6px; }
+          .subtitle { text-align: center; font-size: 12px; color: #6b7280; margin: 0 0 18px; }
+          .top { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: start; }
+          .brand h2 { margin: 0 0 2px; font-size: 18px; }
+          .brand p { margin: 0; font-size: 13px; color: #6b7280; }
+          .billto { margin-top: 12px; font-size: 13px; color: #374151; }
+          .meta { font-size: 13px; color: #374151; text-align: right; }
+          .meta div { margin-bottom: 4px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+          th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 6px; }
+          th { text-align: left; color: #374151; font-weight: 700; }
+          td.amount, th.amount { text-align: right; }
+          .totals { margin-top: 12px; display: flex; justify-content: flex-end; }
+          .totals-card { min-width: 260px; font-size: 13px; }
+          .row { display: flex; justify-content: space-between; margin-bottom: 6px; color: #374151; }
+          .row strong { color: #111827; }
+          .grand { border-top: 1px solid #e5e7eb; padding-top: 10px; margin-top: 10px; font-size: 14px; }
+          @media print { body { padding: 0; } .shell { border: none; padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="shell">
+          <h1 class="title">Invoice</h1>
+          <p class="subtitle">BaigDentPro Clinic</p>
+
+          <div class="top">
+            <div class="brand">
+              <h2>BaigDentPro Clinic</h2>
+              <p>Dental practice billing invoice</p>
+              <div class="billto"><strong>Patient:</strong> ${invoice.patientName}</div>
+            </div>
+            <div class="meta">
+              <div><strong>Invoice No:</strong> ${invoice.invoiceNo}</div>
+              <div><strong>Date:</strong> ${invoice.date}</div>
+              <div><strong>Status:</strong> ${invoice.status}</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th class="amount">Amount (৳)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Dental treatment & procedures</td>
+                <td class="amount">${invoice.total.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div class="totals-card">
+              <div class="row"><span>Total</span><strong>৳ ${invoice.total.toFixed(2)}</strong></div>
+              <div class="row"><span>Paid</span><strong>৳ ${invoice.paid.toFixed(2)}</strong></div>
+              <div class="row grand"><span>Due</span><strong>৳ ${invoice.due.toFixed(2)}</strong></div>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>`;
     const printWindow = window.open('', '_blank', 'width=900,height=650');
     if (!printWindow) {
+      showToast('Popup blocked. Allow popups to print.');
       return;
     }
+    printWindow.document.open();
+    printWindow.document.write(invoiceHtml);
+    printWindow.document.close();
+    setTimeout(() => {
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch {
+        // ignore printing errors
+      }
+      setTimeout(() => {
+        try {
+          printWindow.close();
+        } catch {
+          // ignore close errors
+        }
+      }, 500);
+    }, 450);
+  };
 
-    const html = `
-      <!DOCTYPE html>
+  const handlePrintMushok63 = (invoice: Invoice) => {
+const printHtml = (title: string, html: string) => {
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('style', 'position:fixed;left:0;top:0;width:0;height:0;border:0;');
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    doc.title = title;
+    const printFn = () => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => document.body.removeChild(iframe), 500);
+    };
+    iframe.onload = () => setTimeout(printFn, 400);
+  };
+
+    const mushokHtml = `<!DOCTYPE html>
       <html lang="bn">
       <head>
         <meta charset="UTF-8" />
-        <title>মূল্য সংযোজন কর চালানপত্র (মূশক-৬.৩) - ${invoice.invoiceNo}</title>
+        <title>মূশক-৬.৩ - ${invoice.invoiceNo}</title>
         <style>
           body { font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Noto Sans Bengali', 'Segoe UI', sans-serif; padding: 24px 32px; color: #111827; background: #fff; }
-          .page { page-break-after: always; }
-          .page:last-child { page-break-after: auto; }
-          .mushak-shell { max-width: 800px; margin: 0 auto; border: 1px solid #111827; padding: 24px 32px; }
+          .shell { max-width: 800px; margin: 0 auto; border: 1px solid #111827; padding: 24px 32px; }
           .gov-header { text-align: center; margin-bottom: 8px; }
           .gov-header h1 { font-size: 16px; margin: 0; }
           .gov-header h2 { font-size: 14px; margin: 4px 0 0; }
-          .mushak-title-row { display: flex; justify-content: space-between; align-items: flex-start; margin: 8px 0 16px; }
-          .mushak-box { border: 1px solid #111827; padding: 4px 12px; font-size: 13px; font-weight: 600; }
-          .mushak-main-title { text-align: center; font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+          .title-row { display: flex; justify-content: space-between; align-items: flex-start; margin: 8px 0 16px; }
+          .box { border: 1px solid #111827; padding: 4px 12px; font-size: 13px; font-weight: 600; }
+          .main-title { text-align: center; font-size: 14px; font-weight: 600; margin-bottom: 12px; }
           .section { font-size: 13px; margin-bottom: 10px; }
           .section strong { display: inline-block; min-width: 130px; }
           .flex-row { display: flex; justify-content: space-between; gap: 24px; }
@@ -560,24 +1059,22 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
           .right { text-align: right; padding-right: 8px; }
           .total-row td { font-weight: 600; }
           .sign-section { margin-top: 28px; font-size: 12px; }
-          .sign-line { margin-top: 40px; border-top: 1px solid #111827; width: 220px; }
-          .sign-label { margin-top: 4px; }
           .footnote { margin-top: 16px; font-size: 11px; line-height: 1.4; }
         </style>
       </head>
       <body>
-        <div class="page mushak-shell">
+        <div class="shell">
           <div class="gov-header">
             <h1>গণপ্রজাতন্ত্রী বাংলাদেশ সরকার</h1>
             <h2>জাতীয় রাজস্ব বোর্ড</h2>
           </div>
 
-          <div class="mushak-title-row">
-            <div class="mushak-main-title">
+          <div class="title-row">
+            <div class="main-title">
               কর চালানপত্র<br />
               [ ভ্যাট ও সম্পূরক শুল্ক আইন, ২০১২ (ধারা ৪০) এর উপধারা (১) এর দফা (গ) ও দফা (ঘ) ]
             </div>
-            <div class="mushak-box">মূশক-৬.৩</div>
+            <div class="box">মূশক-৬.৩</div>
           </div>
 
           <div class="section">
@@ -645,74 +1142,32 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
             * উপরোক্ত তথ্যাবলী সরবরাহের ক্ষেত্রে ফরমটি সম্মিলিত কর চালানপত্র ও উৎসে কর কর্তন সনদপত্র হিসেবে বিবেচিত হইবে এবং উক্ত উৎস কর কর্তনকারীর সরবরাহের ক্ষেত্রে প্রযোজ্য হবে।
           </div>
         </div>
-
-        <div class="page" style="max-width: 800px; margin: 24px auto 0; border: 1px solid #e5e7eb; padding: 24px 32px;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-            <div>
-              <h2 style="margin: 0 0 4px; font-size: 18px;">BaigDentPro Clinic</h2>
-              <p style="margin: 0; font-size: 13px; color: #6b7280;">Dental practice billing invoice</p>
-            </div>
-            <div style="text-align: right; font-size: 13px; color: #4b5563;">
-              <div>Invoice: <strong>${invoice.invoiceNo}</strong></div>
-              <div>Date: <strong>${invoice.date}</strong></div>
-              <div>Patient: <strong>${invoice.patientName}</strong></div>
-              <div>Status: <strong>${invoice.status}</strong></div>
-            </div>
-          </div>
-
-          <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px;">
-            <thead>
-              <tr>
-                <th style="text-align: left; border-bottom: 1px solid #e5e7eb; padding: 8px 4px;">Description</th>
-                <th style="text-align: right; border-bottom: 1px solid #e5e7eb; padding: 8px 4px;">Amount (৳)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style="padding: 8px 4px; border-bottom: 1px solid #e5e7eb;">Dental treatment & procedures</td>
-                <td style="padding: 8px 4px; text-align: right; border-bottom: 1px solid #e5e7eb;">${invoice.total.toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
-            <div style="min-width: 220px; font-size: 13px;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                <span style="color: #6b7280;">Total</span>
-                <span>৳${invoice.total.toFixed(2)}</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                <span style="color: #6b7280;">Paid</span>
-                <span>৳${invoice.paid.toFixed(2)}</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-weight: 600;">
-                <span style="color: #6b7280;">Due</span>
-                <span>৳${invoice.due.toFixed(2)}</span>
-              </div>
-            </div>
-          </div>
-
-          <p style="margin-top: 32px; font-size: 12px; color: #6b7280; text-align: center;">
-            Thank you for visiting BaigDentPro Clinic.
-          </p>
-        </div>
-        <script>
-          window.onload = function () {
-            window.print();
-          };
-        </script>
       </body>
-      </html>
-    `;
+      </html>`;
 
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
+    printHtml(`মূশক-৬.৩ - ${invoice.invoiceNo}`, mushokHtml);
   };
 
-  const handleCreateLabOrder = () => {
+  const handleCreateLabOrder = async () => {
     if (!labForm.patientId || !labForm.workType) {
       showToast('Select patient and work type');
+      return;
+    }
+    if (api.getToken()) {
+      try {
+        await api.lab.create({
+          patientId: labForm.patientId,
+          workType: labForm.workType,
+          description: labForm.description || labForm.workType,
+          toothNumber: labForm.toothNumber || undefined,
+          shade: labForm.shade || undefined,
+        });
+        setLabForm({ patientId: '', workType: 'Crown', description: '', toothNumber: '', shade: '' });
+        showToast('Lab order created');
+        loadData();
+      } catch (e: any) {
+        showToast(e?.message ?? 'Failed to create lab order');
+      }
       return;
     }
     const patient = patients.find(p => p.id === labForm.patientId);
@@ -794,6 +1249,11 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
         <button className={`sidebar-item ${activeNav === 'settings' ? 'active' : ''}`} onClick={() => setActiveNav('settings')}>
           <i className="fa-solid fa-gear"></i> <span>Settings</span>
         </button>
+        {userRole === 'SUPER_ADMIN' && (
+          <button className={`sidebar-item ${activeNav === 'super-admin' ? 'active' : ''}`} onClick={() => setActiveNav('super-admin')} style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4 }}>
+            <i className="fa-solid fa-shield-halved"></i> <span>Super Admin</span>
+          </button>
+        )}
       </nav>
       <div className="sidebar-footer">
         <button className="sidebar-logout" onClick={onLogout}>
@@ -974,162 +1434,113 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     </div>
   );
 
-  const renderPatients = () => (
-    <div className="dashboard-content">
-      <div className="page-header">
-        <h1><i className="fa-solid fa-users"></i> Patients</h1>
-        <div className="header-actions">
-          <div className="search-box-inline">
-            <i className="fa-solid fa-search"></i>
-            <input 
-              type="text" 
-              placeholder="Search patients..." 
+  const renderPatients = () => {
+    const q = searchQuery.trim().toLowerCase();
+    const filtered = q
+      ? patients.filter((p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.phone.toLowerCase().includes(q) ||
+          (p.regNo || '').toLowerCase().includes(q)
+        )
+      : patients;
+
+    return (
+      <div className="dashboard-content">
+        <div className="page-header">
+          <h1><i className="fa-solid fa-users"></i> Patients</h1>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <input
+              className="input"
+              placeholder="Search name / phone / reg no"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ width: 280 }}
             />
           </div>
         </div>
-      </div>
 
-      <div className="two-column-layout">
-        <div className="form-panel">
-          <h3><i className="fa-solid fa-user-plus"></i> Add New Patient</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label>Full Name *</label>
-              <input type="text" value={patientForm.name} onChange={(e) => setPatientForm({ ...patientForm, name: e.target.value })} placeholder="Patient name" />
+        <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 16 }}>
+          <div className="dashboard-card">
+            <div className="card-header">
+              <h3><i className="fa-solid fa-user-plus"></i> Add Patient</h3>
             </div>
-            <div className="form-group">
-              <label>Phone *</label>
-              <input type="tel" value={patientForm.phone} onChange={(e) => setPatientForm({ ...patientForm, phone: e.target.value })} placeholder="Phone number" />
-            </div>
-            <div className="form-group">
-              <label>Age</label>
-              <input type="text" value={patientForm.age} onChange={(e) => setPatientForm({ ...patientForm, age: e.target.value })} placeholder="Age" />
-            </div>
-            <div className="form-group">
-              <label>Gender</label>
-              <select value={patientForm.gender} onChange={(e) => setPatientForm({ ...patientForm, gender: e.target.value })}>
-                <option value="">Select</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Email</label>
-              <input type="email" value={patientForm.email} onChange={(e) => setPatientForm({ ...patientForm, email: e.target.value })} placeholder="Email" />
-            </div>
-            <div className="form-group">
-              <label>Blood Group</label>
-              <select value={patientForm.bloodGroup} onChange={(e) => setPatientForm({ ...patientForm, bloodGroup: e.target.value })}>
-                <option value="">Select</option>
-                <option value="A+">A+</option>
-                <option value="A-">A-</option>
-                <option value="B+">B+</option>
-                <option value="B-">B-</option>
-                <option value="AB+">AB+</option>
-                <option value="AB-">AB-</option>
-                <option value="O+">O+</option>
-                <option value="O-">O-</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Occupation</label>
-              <input type="text" value={patientForm.occupation} onChange={(e) => setPatientForm({ ...patientForm, occupation: e.target.value })} placeholder="Occupation" />
-            </div>
-            <div className="form-group">
-              <label>Ref. By</label>
-              <input type="text" value={patientForm.refBy} onChange={(e) => setPatientForm({ ...patientForm, refBy: e.target.value })} placeholder="Referred by" />
-            </div>
-            <div className="form-group full-width">
-              <label>Address</label>
-              <textarea value={patientForm.address} onChange={(e) => setPatientForm({ ...patientForm, address: e.target.value })} placeholder="Address" />
+            <div className="card-body">
+              <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10 }}>
+                <input className="input" placeholder="Patient name *" value={patientForm.name} onChange={(e) => setPatientForm({ ...patientForm, name: e.target.value })} />
+                <input className="input" placeholder="Phone *" value={patientForm.phone} onChange={(e) => setPatientForm({ ...patientForm, phone: e.target.value })} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <input className="input" placeholder="Age" value={patientForm.age} onChange={(e) => setPatientForm({ ...patientForm, age: e.target.value })} />
+                  <select className="input" value={patientForm.gender} onChange={(e) => setPatientForm({ ...patientForm, gender: e.target.value })}>
+                    <option value="">Gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <input className="input" placeholder="Email" value={patientForm.email} onChange={(e) => setPatientForm({ ...patientForm, email: e.target.value })} />
+                <input className="input" placeholder="Address" value={patientForm.address} onChange={(e) => setPatientForm({ ...patientForm, address: e.target.value })} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <input className="input" placeholder="Blood group" value={patientForm.bloodGroup} onChange={(e) => setPatientForm({ ...patientForm, bloodGroup: e.target.value })} />
+                  <input className="input" placeholder="Occupation" value={patientForm.occupation} onChange={(e) => setPatientForm({ ...patientForm, occupation: e.target.value })} />
+                </div>
+                <input className="input" placeholder="Referred by" value={patientForm.refBy} onChange={(e) => setPatientForm({ ...patientForm, refBy: e.target.value })} />
+                <button className="btn-primary" onClick={handleAddPatient}>
+                  <i className="fa-solid fa-plus"></i> Add Patient
+                </button>
+              </div>
             </div>
           </div>
-          <button className="btn-primary" onClick={handleAddPatient}>
-            <i className="fa-solid fa-plus"></i> Add Patient
-          </button>
-        </div>
 
-        <div className="list-panel">
-          <h3><i className="fa-solid fa-list"></i> Patient List ({filteredPatients.length})</h3>
-          <div className="patient-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Reg No</th>
-                  <th>Name</th>
-                  <th>Phone</th>
-                  <th>Age/Gender</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPatients.map(p => (
-                  <tr key={p.id}>
-                    <td>{p.regNo}</td>
-                    <td>{p.name}</td>
-                    <td>{p.phone}</td>
-                    <td>{p.age || '-'} / {p.gender || '-'}</td>
-                    <td className="action-cell">
-                      <button className="btn-icon" title="View" onClick={() => selectPatientForView(p)}><i className="fa-solid fa-eye"></i></button>
-                      <button className="btn-icon" title="Prescription" onClick={() => selectPatientForPrescription(p)}><i className="fa-solid fa-prescription"></i></button>
-                      <button className="btn-icon" title="Appointment" onClick={() => { setAppointmentForm({ ...appointmentForm, patientId: p.id }); setActiveNav('appointments'); }}><i className="fa-solid fa-calendar-plus"></i></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {filteredPatients.length === 0 && <p className="empty-state">No patients found</p>}
+          <div className="dashboard-card">
+            <div className="card-header">
+              <h3><i className="fa-solid fa-list"></i> Patient List</h3>
+              <div style={{ fontSize: 12, color: 'var(--neo-text-muted)' }}>{filtered.length} / {patients.length}</div>
+            </div>
+            <div className="card-body" style={{ padding: 0 }}>
+              {filtered.length === 0 ? (
+                <div className="empty-state" style={{ padding: 18 }}>
+                  <p style={{ position: 'relative', zIndex: 1 }}>No patients found</p>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Reg No</th>
+                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Name</th>
+                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Phone</th>
+                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Age</th>
+                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Gender</th>
+                        <th style={{ textAlign: 'right', padding: '12px 14px' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((p) => (
+                        <tr key={p.id} style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                          <td style={{ padding: '10px 14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>{p.regNo || '-'}</td>
+                          <td style={{ padding: '10px 14px', fontWeight: 600 }}>{p.name}</td>
+                          <td style={{ padding: '10px 14px' }}>{p.phone}</td>
+                          <td style={{ padding: '10px 14px' }}>{p.age || '-'}</td>
+                          <td style={{ padding: '10px 14px' }}>{p.gender || '-'}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <button className="btn-sm" onClick={() => { setSelectedPatient(p); setActiveNav('patient-detail'); }}>
+                              <i className="fa-solid fa-eye"></i> View
+                            </button>{' '}
+                            <button className="btn-sm" onClick={() => selectPatientForPrescription(p)} style={{ marginLeft: 6 }}>
+                              <i className="fa-solid fa-prescription"></i> Rx
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-
-  const handleSaveMedicalHistory = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!selectedPatient) return;
-    const form = e.currentTarget;
-    const fd = new FormData(form);
-    const data: MedicalHistory = {
-      bloodPressure: fd.get('bloodPressure') === 'on',
-      heartProblems: fd.get('heartProblems') === 'on',
-      cardiacHtnMiPacemaker: fd.get('cardiacHtnMiPacemaker') === 'on',
-      rheumaticFever: fd.get('rheumaticFever') === 'on',
-      diabetes: fd.get('diabetes') === 'on',
-      pepticUlcer: fd.get('pepticUlcer') === 'on',
-      jaundice: fd.get('jaundice') === 'on',
-      asthma: fd.get('asthma') === 'on',
-      tuberculosis: fd.get('tuberculosis') === 'on',
-      kidneyDiseases: fd.get('kidneyDiseases') === 'on',
-      aids: fd.get('aids') === 'on',
-      thyroid: fd.get('thyroid') === 'on',
-      hepatitis: fd.get('hepatitis') === 'on',
-      stroke: fd.get('stroke') === 'on',
-      bleedingDisorder: fd.get('bleedingDisorder') === 'on',
-      otherDiseases: String(fd.get('otherDiseases') ?? ''),
-      isPregnant: fd.get('isPregnant') === 'on',
-      isLactating: fd.get('isLactating') === 'on',
-      allergyPenicillin: fd.get('allergyPenicillin') === 'on',
-      allergySulphur: fd.get('allergySulphur') === 'on',
-      allergyAspirin: fd.get('allergyAspirin') === 'on',
-      allergyLocalAnaesthesia: fd.get('allergyLocalAnaesthesia') === 'on',
-      allergyOther: String(fd.get('allergyOther') ?? ''),
-      takingAspirinBloodThinner: fd.get('takingAspirinBloodThinner') === 'on',
-      takingAntihypertensive: fd.get('takingAntihypertensive') === 'on',
-      takingInhaler: fd.get('takingInhaler') === 'on',
-      takingOther: String(fd.get('takingOther') ?? ''),
-      habitSmoking: fd.get('habitSmoking') === 'on',
-      habitBetelLeaf: fd.get('habitBetelLeaf') === 'on',
-      habitAlcohol: fd.get('habitAlcohol') === 'on',
-      habitOther: String(fd.get('habitOther') ?? ''),
-      details: String(fd.get('details') ?? ''),
-    };
-    saveMedicalHistory(selectedPatient.id, data);
-    setShowMedicalHistoryModal(false);
-    showToast('Medical history saved!');
+    );
   };
 
   const handleSaveTreatmentPlan = (e: React.FormEvent<HTMLFormElement>) => {
@@ -1169,13 +1580,24 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     if (!selectedPatient) return;
     const form = e.currentTarget;
     const fd = new FormData(form);
+    const treatmentDone = String(fd.get('treatmentDone') ?? '').trim();
+    if (!treatmentDone) {
+      showToast('Treatment Done is required');
+      return;
+    }
     const record: TreatmentRecord = {
       id: editingRecord?.id ?? crypto.randomUUID(),
       date: String(fd.get('date') ?? new Date().toISOString().split('T')[0]),
-      treatmentDone: String(fd.get('treatmentDone') ?? ''),
+      treatmentDone,
       cost: String(fd.get('cost') ?? '0'),
       paid: String(fd.get('paid') ?? '0'),
-      due: String(fd.get('due') ?? '0'),
+      // Due must always be derived from Cost - Paid to avoid inconsistent UI data.
+      due: (() => {
+        const costNum = parseFloat(String(fd.get('cost') ?? '0')) || 0;
+        const paidNum = parseFloat(String(fd.get('paid') ?? '0')) || 0;
+        const dueNum = Math.max(0, costNum - paidNum);
+        return String(dueNum);
+      })(),
       patientSignature: String(fd.get('patientSignature') ?? ''),
       doctorSignature: String(fd.get('doctorSignature') ?? ''),
     };
@@ -1405,13 +1827,22 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
           {/* Profile Tabs */}
           <div className="profile-tabs-section">
             <div className="profile-tabs">
-              <button className={`profile-tab ${patientProfileTab === 'treatment' ? 'active' : ''}`} onClick={() => setPatientProfileTab('treatment')}>
+              <button
+                className={`profile-tab ${patientProfileTab === 'treatment' ? 'active' : ''}`}
+                onClick={() => setPatientProfileTab('treatment')}
+              >
                 <i className="fa-solid fa-clipboard-list"></i> Treatment Plan & Cost
               </button>
-              <button className={`profile-tab ${patientProfileTab === 'ledger' ? 'active' : ''}`} onClick={() => setPatientProfileTab('ledger')}>
+              <button
+                className={`profile-tab ${patientProfileTab === 'ledger' ? 'active' : ''}`}
+                onClick={() => setPatientProfileTab('ledger')}
+              >
                 <i className="fa-solid fa-book"></i> Payment Ledger
               </button>
-              <button className={`profile-tab ${patientProfileTab === 'consent' ? 'active' : ''}`} onClick={() => setPatientProfileTab('consent')}>
+              <button
+                className={`profile-tab ${patientProfileTab === 'consent' ? 'active' : ''}`}
+                onClick={() => setPatientProfileTab('consent')}
+              >
                 <i className="fa-solid fa-file-signature"></i> Consent
               </button>
             </div>
@@ -1419,48 +1850,50 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
             {/* Treatment Plan Tab */}
             {patientProfileTab === 'treatment' && (
               <div className="tab-content">
-                <div className="tab-header">
-                  <h3>Treatment Plan & Cost for {selectedPatient.name}</h3>
-                  <button className="btn-primary" onClick={() => { setEditingPlan(null); setShowTreatmentPlanModal(true); }}>
-                    <i className="fa-solid fa-plus"></i> Add Treatment
-                  </button>
-                </div>
                 <div className="treatment-table-wrap">
                   <table className="treatment-table">
                     <thead>
                       <tr>
                         <th>Tooth</th>
                         <th>Diagnosis</th>
-                        <th>Treatment</th>
+                        <th>Procedure</th>
                         <th>Cost (TK)</th>
-                        <th>Status</th>
-                        <th>Actions</th>
+                        <th>CC</th>
+                        <th>CF</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {treatmentPlans.map(plan => (
-                        <tr key={plan.id}>
-                          <td>{plan.toothNumber || '-'}</td>
-                          <td>{plan.diagnosis}</td>
-                          <td>{plan.procedure}</td>
-                          <td>{parseFloat(plan.cost || '0').toLocaleString()}</td>
-                          <td><span className={`status-badge ${plan.status.toLowerCase().replace(' ', '-')}`}>{plan.status}</span></td>
-                          <td className="action-cell">
-                            <button className="btn-icon" onClick={() => { setEditingPlan(plan); setShowTreatmentPlanModal(true); }}><i className="fa-solid fa-edit"></i></button>
-                            <button className="btn-icon danger" onClick={() => handleDeleteTreatmentPlan(plan)}><i className="fa-solid fa-trash"></i></button>
-                          </td>
+                      {treatmentPlans.map((p) => (
+                        <tr key={p.id}>
+                          <td>{p.toothNumber}</td>
+                          <td>{p.diagnosis}</td>
+                          <td>{p.procedure}</td>
+                          <td>{p.cost}</td>
+                          <td>{p.cc}</td>
+                          <td>{p.cf}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr>
-                        <td colSpan={3}><strong>Total</strong></td>
-                        <td><strong>{treatmentPlans.reduce((sum, p) => sum + (parseFloat(p.cost) || 0), 0).toLocaleString()} TK</strong></td>
+                        <td colSpan={3}>
+                          <strong>Total</strong>
+                        </td>
+                        <td>
+                          <strong>
+                            {treatmentPlans
+                              .reduce((sum, p) => sum + (parseFloat(p.cost) || 0), 0)
+                              .toLocaleString()}{' '}
+                            TK
+                          </strong>
+                        </td>
                         <td colSpan={2}></td>
                       </tr>
                     </tfoot>
                   </table>
-                  {treatmentPlans.length === 0 && <p className="empty-state">No treatment plans yet</p>}
+                  {treatmentPlans.length === 0 && (
+                    <p className="empty-state">No treatment plans yet</p>
+                  )}
                 </div>
               </div>
             )}
@@ -1471,7 +1904,7 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                 <div className="tab-header">
                   <h3>Payment Ledger for {selectedPatient.name}</h3>
                   <button className="btn-primary" onClick={() => { setEditingRecord(null); setShowTreatmentRecordModal(true); }}>
-                    <i className="fa-solid fa-plus"></i> Add Record
+                    <i className="fa-solid fa-plus"></i> Add Payment Record
                   </button>
                 </div>
                 <div className="treatment-table-wrap">
@@ -1708,46 +2141,95 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                 <h2><i className="fa-solid fa-book"></i> {editingRecord ? 'Edit' : 'Add'} Payment Record</h2>
                 <button className="modal-close" onClick={() => { setShowTreatmentRecordModal(false); setEditingRecord(null); }}><i className="fa-solid fa-times"></i></button>
               </div>
+              <p style={{ margin: '12px 24px 0', color: 'var(--neo-text-muted)', fontSize: 12 }}>
+                Cost and Paid are in TK. Due is auto-calculated as <strong>Cost - Paid</strong>.
+              </p>
               <form onSubmit={handleSaveTreatmentRecord} className="treatment-form">
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Date</label>
-                    <input type="date" name="date" defaultValue={editingRecord?.date || new Date().toISOString().split('T')[0]} />
+                    <label>Date (Payment Date)</label>
+                    <input
+                      type="date"
+                      name="date"
+                      required
+                      defaultValue={editingRecord?.date || new Date().toISOString().split('T')[0]}
+                    />
                   </div>
                   <div className="form-group">
-                    <label>Treatment Done</label>
-                    <input type="text" name="treatmentDone" placeholder="Treatment done" defaultValue={editingRecord?.treatmentDone} />
+                    <label>Treatment Done (short note)</label>
+                    <input
+                      type="text"
+                      name="treatmentDone"
+                      required
+                      placeholder="e.g., Treatment completed"
+                      defaultValue={editingRecord?.treatmentDone}
+                    />
                   </div>
                 </div>
                 <div className="form-row">
                   <div className="form-group">
                     <label>Cost (TK)</label>
-                    <input type="number" name="cost" placeholder="0" defaultValue={editingRecord?.cost} />
+                    <input
+                      type="number"
+                      name="cost"
+                      min={0}
+                      step="0.01"
+                      required
+                      placeholder="0"
+                      value={paymentCostInput}
+                      onChange={(e) => setPaymentCostInput(e.target.value)}
+                    />
                   </div>
                   <div className="form-group">
                     <label>Paid (TK)</label>
-                    <input type="number" name="paid" placeholder="0" defaultValue={editingRecord?.paid} />
+                    <input
+                      type="number"
+                      name="paid"
+                      min={0}
+                      step="0.01"
+                      required
+                      placeholder="0"
+                      value={paymentPaidInput}
+                      onChange={(e) => setPaymentPaidInput(e.target.value)}
+                    />
                   </div>
                 </div>
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Due (TK)</label>
-                    <input type="number" name="due" placeholder="0" defaultValue={editingRecord?.due} />
+                    <label>Due (Auto)</label>
+                    <input
+                      type="number"
+                      name="due"
+                      min={0}
+                      step="0.01"
+                      readOnly
+                      value={paymentDuePreview}
+                    />
                   </div>
                   <div className="form-group">
-                    <label>Pat. Sign (Patient / Attendant)</label>
-                    <input type="text" name="patientSignature" placeholder="Patient or attendant signature" defaultValue={editingRecord?.patientSignature} />
+                    <label>Patient/Attendant Sign (name)</label>
+                    <input
+                      type="text"
+                      name="patientSignature"
+                      placeholder="Patient or attendant name"
+                      defaultValue={editingRecord?.patientSignature}
+                    />
                   </div>
                 </div>
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Signature of Doctor</label>
-                    <input type="text" name="doctorSignature" placeholder="Doctor name" defaultValue={editingRecord?.doctorSignature} />
+                    <label>Doctor Signature (name)</label>
+                    <input
+                      type="text"
+                      name="doctorSignature"
+                      placeholder="Doctor name"
+                      defaultValue={editingRecord?.doctorSignature}
+                    />
                   </div>
                 </div>
                 <div className="modal-actions">
                   <button type="button" className="btn-secondary" onClick={() => { setShowTreatmentRecordModal(false); setEditingRecord(null); }}>Cancel</button>
-                  <button type="submit" className="btn-primary">{editingRecord ? 'Update' : 'Add'} Record</button>
+                  <button type="submit" className="btn-primary">{editingRecord ? 'Update' : 'Add'} Payment Record</button>
                 </div>
               </form>
             </div>
@@ -1985,11 +2467,13 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     <div className="dashboard-content">
       <div className="page-header">
         <h1><i className="fa-solid fa-calendar-check"></i> Appointments</h1>
+        <p><span className="highlight">Schedule Appointment</span></p>
       </div>
 
-      <div className="two-column-layout">
+      <div className="appointments-page-card">
+        <div className="appointments-inner-grid">
         <div className="form-panel">
-          <h3><i className="fa-solid fa-calendar-plus"></i> Schedule Appointment</h3>
+          <h3><i className="fa-solid fa-calendar-plus"></i> Appointment Details</h3>
           <div className="form-grid">
             <div className="form-group full-width">
               <label>Patient *</label>
@@ -2043,6 +2527,24 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                   </div>
                   <div className="apt-actions">
                     <span className={`apt-status status-${apt.status.toLowerCase()}`}>{apt.status}</span>
+                    <a
+                      className="btn-icon"
+                      style={{ textDecoration: 'none' }}
+                      title="Add to Google Calendar"
+                      href={getGoogleCalendarUrl(apt)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <i className="fa-solid fa-calendar-plus"></i>
+                    </a>
+                    <button
+                      className="btn-icon"
+                      title="Download ICS (Apple Calendar / others)"
+                      type="button"
+                      onClick={() => downloadAppointmentIcs(apt)}
+                    >
+                      <span style={{ fontSize: '0.95rem' }}>ICS</span>
+                    </button>
                     <button className="btn-icon" title="Send Reminder"><i className="fa-solid fa-bell"></i></button>
                   </div>
                 </div>
@@ -2050,105 +2552,73 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
             )}
           </div>
         </div>
+        </div>
       </div>
     </div>
   );
 
+  const handleAddCustomLine = () => {
+    const desc = customLineDescription.trim();
+    const amount = parseFloat(customLineAmount) || 0;
+    if (!desc) return;
+    setInvoiceForm({ ...invoiceForm, items: [...invoiceForm.items, { description: desc, amount }] });
+    setCustomLineDescription('');
+    setCustomLineAmount('');
+  };
+
   const renderBilling = () => (
     <div className="dashboard-content">
-      <div className="page-header">
-        <h1><i className="fa-solid fa-file-invoice-dollar"></i> Billing & Invoices</h1>
-        <div className="header-actions">
-          <div className="form-group header-patient-select">
-            <label>Patient *</label>
-            <select
-              value={invoiceForm.patientId}
-              onChange={(e) => setInvoiceForm({ ...invoiceForm, patientId: e.target.value })}
-            >
-              <option value="">-- Select Patient --</option>
-              {patients.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button className="btn-primary" onClick={handleCreateInvoice}>
-            <i className="fa-solid fa-file-invoice"></i> Create Invoice
-          </button>
-        </div>
-      </div>
-
-      <div className="two-column-layout">
-        <div className="form-panel">
-          <h3><i className="fa-solid fa-plus"></i> Add Procedures & Items</h3>
-          <div className="invoice-items">
-            <h4>Quick add procedures</h4>
-            <div className="billing-service-editor">
-              <div className="billing-service-input">
+      <div className="billing-page-layout">
+        <div className="billing-form-card">
+          <h1 className="billing-title"><i className="fa-solid fa-file-invoice-dollar"></i> Billing & Invoices</h1>
+          <form className="billing-form-vertical" onSubmit={e => { e.preventDefault(); handleCreateInvoice(); }}>
+            <div className="form-field">
+              <label>Patient</label>
+              <select
+                className="billing-select"
+                value={invoiceForm.patientId}
+                onChange={(e) => setInvoiceForm({ ...invoiceForm, patientId: e.target.value })}
+                required
+              >
+                <option value="">-- Select Patient --</option>
+                {patients.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label>Custom add service</label>
+              <div className="billing-custom-row">
                 <input
                   type="text"
-                  value={newBillingProcedure}
-                  onChange={(e) => setNewBillingProcedure(e.target.value)}
-                  placeholder="Add custom service (e.g. Ortho Review)"
+                  className="billing-input"
+                  placeholder="Service name"
+                  value={customLineDescription}
+                  onChange={(e) => setCustomLineDescription(e.target.value)}
                 />
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    const label = newBillingProcedure.trim();
-                    if (!label) return;
-                    if (billingProcedures.includes(label)) {
-                      setNewBillingProcedure('');
-                      return;
-                    }
-                    const updated = [...billingProcedures, label];
-                    setBillingProcedures(updated);
-                    try {
-                      window.localStorage.setItem(BILLING_PROCEDURES_KEY, JSON.stringify(updated));
-                    } catch {
-                      // ignore storage errors
-                    }
-                    setNewBillingProcedure('');
-                  }}
-                >
-                  Add
+                <input
+                  type="number"
+                  className="billing-input billing-amount"
+                  placeholder="Amount"
+                  min={0}
+                  step={1}
+                  value={customLineAmount}
+                  onChange={(e) => setCustomLineAmount(e.target.value)}
+                />
+                <button type="button" className="btn-primary billing-add-btn" onClick={handleAddCustomLine}>
+                  <i className="fa-solid fa-plus"></i> Add
                 </button>
               </div>
-              {billingProcedures.length > 0 && (
-                <div className="billing-service-tags">
-                  {billingProcedures.map((proc) => (
-                    <button
-                      key={proc}
-                      type="button"
-                      className="billing-service-tag"
-                      onClick={() => {
-                        const updated = billingProcedures.filter((p) => p !== proc);
-                        setBillingProcedures(updated.length ? updated : DEFAULT_DENTAL_PROCEDURES);
-                        try {
-                          window.localStorage.setItem(
-                            BILLING_PROCEDURES_KEY,
-                            JSON.stringify(updated.length ? updated : DEFAULT_DENTAL_PROCEDURES),
-                          );
-                        } catch {
-                          // ignore
-                        }
-                      }}
-                      title="Click to remove from list"
-                    >
-                      <span>{proc}</span>
-                      <i className="fa-solid fa-times"></i>
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
-            <div className="procedure-buttons">
-              {billingProcedures.map((proc) => (
-                <button key={proc} className="procedure-btn" onClick={() => setInvoiceForm({ ...invoiceForm, items: [...invoiceForm.items, { description: proc, amount: 500 }] })}>
-                  {proc}
-                </button>
-              ))}
+            <div className="form-field">
+              <label>Quick add procedures</label>
+              <div className="procedure-buttons">
+                {billingProcedures.map((proc) => (
+                  <button key={proc} className="procedure-btn" type="button" onClick={() => setInvoiceForm({ ...invoiceForm, items: [...invoiceForm.items, { description: proc, amount: 500 }] })}>
+                    {proc}
+                  </button>
+                ))}
+              </div>
             </div>
             {invoiceForm.items.length > 0 && (
               <div className="invoice-items-list">
@@ -2170,16 +2640,30 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                 </div>
               </div>
             )}
-          </div>
+            <div className="billing-actions">
+              <button type="submit" className="btn-primary">
+                <i className="fa-solid fa-file-invoice"></i> Create Invoice
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  if (!invoices.length) { showToast('No invoices to print yet'); return; }
+                  handlePrintInvoice(invoices[0]);
+                }}
+              >
+                <i className="fa-solid fa-print"></i> Print
+              </button>
+            </div>
+          </form>
         </div>
-
-        <div className="list-panel">
+        <div className="billing-list-card">
           <h3><i className="fa-solid fa-list"></i> Recent Invoices</h3>
           <div className="invoices-list">
             {invoices.length === 0 ? (
               <p className="empty-state">No invoices yet</p>
             ) : (
-              <table>
+              <table className="billing-table">
                 <thead>
                   <tr>
                     <th>Invoice #</th>
@@ -2201,15 +2685,26 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                       <td>৳{inv.due}</td>
                       <td><span className={`status-badge status-${inv.status.toLowerCase()}`}>{inv.status}</span></td>
                       <td className="invoice-actions-cell">
-                        <button
-                          type="button"
-                          className="btn-primary btn-sm"
-                          onClick={() => handlePrintInvoice(inv)}
-                          title="Print Mushak 6.3 & clinic invoice"
-                        >
-                          <i className="fa-solid fa-print"></i>
-                          <span>Print (2 copies)</span>
-                        </button>
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="btn-secondary btn-sm"
+                            onClick={() => handlePrintMushok63(inv)}
+                            title="Print Mushok 6.3"
+                          >
+                            <i className="fa-solid fa-print"></i>
+                            <span>Print Mushok 6.3</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-primary btn-sm"
+                            onClick={() => handlePrintInvoice(inv)}
+                            title="Print Invoice"
+                          >
+                            <i className="fa-solid fa-print"></i>
+                            <span>Print Invoice</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2228,58 +2723,96 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
         <h1><i className="fa-solid fa-flask"></i> Lab Orders</h1>
       </div>
 
-      <div className="two-column-layout">
-        <div className="form-panel">
+      <div className="lab-form-only-layout">
+        <div className="form-panel lab-form-panel-full">
           <h3><i className="fa-solid fa-plus"></i> Create Lab Order</h3>
-          <div className="form-grid">
-            <div className="form-group full-width">
-              <label>Patient *</label>
-              <select value={labForm.patientId} onChange={(e) => setLabForm({ ...labForm, patientId: e.target.value })}>
-                <option value="">-- Select Patient --</option>
-                {patients.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+
+          <div className="lab-form-sections">
+            <div className="lab-form-section">
+              <div className="lab-form-section-title">
+                <i className="fa-solid fa-clipboard-check"></i> Order Details
+              </div>
+
+              <div className="form-grid lab-order-grid">
+                <div className="form-group full-width">
+                  <label>Patient *</label>
+                  <select value={labForm.patientId} onChange={(e) => setLabForm({ ...labForm, patientId: e.target.value })}>
+                    <option value="">-- Select Patient --</option>
+                    {patients.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Work Type *</label>
+                  <select value={labForm.workType} onChange={(e) => setLabForm({ ...labForm, workType: e.target.value })}>
+                    <option value="Crown">Crown</option>
+                    <option value="Bridge">Bridge</option>
+                    <option value="Denture">Denture (Complete)</option>
+                    <option value="Partial Denture">Partial Denture</option>
+                    <option value="Aligners">Aligners</option>
+                    <option value="Retainer">Retainer</option>
+                    <option value="Night Guard">Night Guard</option>
+                    <option value="Veneer">Veneer</option>
+                    <option value="Implant Crown">Implant Crown</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Tooth Number</label>
+                  <input
+                    type="text"
+                    value={labForm.toothNumber}
+                    onChange={(e) => setLabForm({ ...labForm, toothNumber: e.target.value })}
+                    placeholder="e.g., 11, 21"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Shade</label>
+                  <input
+                    type="text"
+                    value={labForm.shade}
+                    onChange={(e) => setLabForm({ ...labForm, shade: e.target.value })}
+                    placeholder="e.g., A2, B1"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="form-group">
-              <label>Work Type *</label>
-              <select value={labForm.workType} onChange={(e) => setLabForm({ ...labForm, workType: e.target.value })}>
-                <option value="Crown">Crown</option>
-                <option value="Bridge">Bridge</option>
-                <option value="Denture">Denture (Complete)</option>
-                <option value="Partial Denture">Partial Denture</option>
-                <option value="Aligners">Aligners</option>
-                <option value="Retainer">Retainer</option>
-                <option value="Night Guard">Night Guard</option>
-                <option value="Veneer">Veneer</option>
-                <option value="Implant Crown">Implant Crown</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Tooth Number</label>
-              <input type="text" value={labForm.toothNumber} onChange={(e) => setLabForm({ ...labForm, toothNumber: e.target.value })} placeholder="e.g., 11, 21" />
-            </div>
-            <div className="form-group">
-              <label>Shade</label>
-              <input type="text" value={labForm.shade} onChange={(e) => setLabForm({ ...labForm, shade: e.target.value })} placeholder="e.g., A2, B1" />
-            </div>
-            <div className="form-group full-width">
-              <label>Description</label>
-              <textarea value={labForm.description} onChange={(e) => setLabForm({ ...labForm, description: e.target.value })} placeholder="Additional details..." />
+
+            <div className="lab-form-section">
+              <div className="lab-form-section-title">
+                <i className="fa-solid fa-notes-medical"></i> Additional Notes
+              </div>
+
+              <div className="form-grid">
+                <div className="form-group full-width">
+                  <label>Description</label>
+                  <textarea
+                    value={labForm.description}
+                    onChange={(e) => setLabForm({ ...labForm, description: e.target.value })}
+                    placeholder="Additional details..."
+                  />
+                </div>
+              </div>
             </div>
           </div>
-          <button className="btn-primary" onClick={handleCreateLabOrder}>
-            <i className="fa-solid fa-plus"></i> Create Lab Order
-          </button>
+
+          <div className="lab-form-submit-row">
+            <button className="btn-primary" onClick={handleCreateLabOrder}>
+              <i className="fa-solid fa-plus"></i> Create Lab Order
+            </button>
+          </div>
         </div>
 
-        <div className="list-panel">
+        <div className="list-panel lab-orders-list-panel">
           <h3><i className="fa-solid fa-list"></i> Lab Orders</h3>
           <div className="lab-orders-list">
             {labOrders.length === 0 ? (
               <p className="empty-state">No lab orders yet</p>
             ) : (
-              <table>
+              <table className="lab-orders-table">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -2296,8 +2829,27 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
                       <td>{order.patientName}</td>
                       <td>{order.workType}</td>
                       <td><span className={`status-badge status-${order.status.toLowerCase()}`}>{order.status}</span></td>
-                      <td className="action-cell">
-                        <button className="btn-sm" onClick={() => { const newOrders = labOrders.map(o => o.id === order.id ? { ...o, status: 'DELIVERED' } : o); saveLabOrders(newOrders); }}>Mark Delivered</button>
+                      <td className="lab-actions-cell">
+                        <button
+                          className="btn-sm lab-action-btn"
+                          onClick={async () => {
+                            if (api.getToken()) {
+                              try {
+                                await api.lab.markDelivered(order.id);
+                                showToast('Lab order marked delivered');
+                                loadData();
+                              } catch (e: any) {
+                                showToast(e?.message ?? 'Failed to update lab order');
+                              }
+                              return;
+                            }
+
+                            const newOrders = labOrders.map(o => (o.id === order.id ? { ...o, status: 'DELIVERED' } : o));
+                            saveLabOrders(newOrders);
+                          }}
+                        >
+                          Mark Delivered
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -2457,6 +3009,165 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
     </div>
   );
 
+  const renderSuperAdmin = () => {
+    const tabs = [
+      { id: 'overview' as const, label: 'Overview', icon: 'fa-chart-pie' },
+      { id: 'clinics' as const, label: 'Clinics & branches', icon: 'fa-building' },
+      { id: 'revenue' as const, label: 'Revenue by branch', icon: 'fa-money-bill-wave' },
+      { id: 'utilization' as const, label: 'Chair utilization', icon: 'fa-chair' },
+      { id: 'logs' as const, label: 'Activity logs', icon: 'fa-list' },
+    ];
+    return (
+      <div className="dashboard-content">
+        <div className="dashboard-header">
+          <h1><i className="fa-solid fa-shield-halved"></i> Super Admin Panel</h1>
+          <p style={{ color: 'var(--text-secondary)', marginTop: 4 }}>Manage all clinics, view branch-wise revenue and activity logs</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              className={superAdminTab === t.id ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setSuperAdminTab(t.id)}
+            >
+              <i className={`fa-solid ${t.icon}`}></i> {t.label}
+            </button>
+          ))}
+        </div>
+        {superAdminLoading ? (
+          <div style={{ padding: 40, textAlign: 'center' }}><i className="fa-solid fa-spinner fa-spin"></i> Loading...</div>
+        ) : superAdminTab === 'overview' && superAdminStats ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
+            <div className="stat-card" style={{ padding: 16, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--primary)' }}>{superAdminStats.totalClinics ?? 0}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Clinics</div>
+            </div>
+            <div className="stat-card" style={{ padding: 16, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>{superAdminStats.totalPatients ?? 0}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Patients</div>
+            </div>
+            <div className="stat-card" style={{ padding: 16, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>{superAdminStats.totalAppointments ?? 0}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Appointments</div>
+            </div>
+            <div className="stat-card" style={{ padding: 16, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>{superAdminStats.totalPrescriptions ?? 0}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Prescriptions</div>
+            </div>
+            <div className="stat-card" style={{ padding: 16, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>৳{Number(superAdminStats.totalRevenue ?? 0).toLocaleString()}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Total revenue</div>
+            </div>
+            <div className="stat-card" style={{ padding: 16, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>{superAdminStats.activityLogCount ?? 0}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Activity logs</div>
+            </div>
+          </div>
+        ) : superAdminTab === 'clinics' ? (
+          <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Clinic / Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Patients</th>
+                  <th>Appointments</th>
+                  <th>Prescriptions</th>
+                  <th>Invoices</th>
+                </tr>
+              </thead>
+              <tbody>
+                {superAdminClinics.map((c: any) => (
+                  <tr key={c.id}>
+                    <td><strong>{c.clinicName || c.name || '—'}</strong><br /><span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.name}</span></td>
+                    <td>{c.email}</td>
+                    <td>{c.role}</td>
+                    <td>{c._count?.patients ?? 0}</td>
+                    <td>{c._count?.appointments ?? 0}</td>
+                    <td>{c._count?.prescriptions ?? 0}</td>
+                    <td>{c._count?.invoices ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : superAdminTab === 'revenue' ? (
+          <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Branch / Clinic</th>
+                  <th>Contact</th>
+                  <th>Revenue (paid)</th>
+                  <th>Invoiced</th>
+                  <th>Invoices</th>
+                </tr>
+              </thead>
+              <tbody>
+                {superAdminRevenue.map((b: any) => (
+                  <tr key={b.userId}>
+                    <td><strong>{b.clinicName || b.name || '—'}</strong></td>
+                    <td>{b.email}</td>
+                    <td>৳{Number(b.revenue).toLocaleString()}</td>
+                    <td>৳{Number(b.totalInvoiced).toLocaleString()}</td>
+                    <td>{b.invoiceCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : superAdminTab === 'utilization' ? (
+          <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Clinic</th>
+                  <th>User</th>
+                  <th>Appointments (period)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {superAdminUtilization.map((u: any) => (
+                  <tr key={u.userId}>
+                    <td>{u.clinicName || '—'}</td>
+                    <td>{u.userName}</td>
+                    <td>{u.appointmentCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : superAdminTab === 'logs' ? (
+          <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>User / Clinic</th>
+                  <th>Action</th>
+                  <th>Entity</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {superAdminLogs.map((log: any) => (
+                  <tr key={log.id}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{log.createdAt ? new Date(log.createdAt).toLocaleString() : '—'}</td>
+                    <td>{log.user?.name} {log.user?.clinicName ? `(${log.user.clinicName})` : ''}</td>
+                    <td>{log.action}</td>
+                    <td>{log.entity || '—'}</td>
+                    <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.details || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (activeNav) {
       case 'dashboard': return renderDashboard();
@@ -2470,6 +3181,7 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
       case 'drugs': return renderDrugs();
       case 'sms': return renderSMS();
       case 'settings': return renderSettings();
+      case 'super-admin': return renderSuperAdmin();
       default: return renderDashboard();
     }
   };
@@ -2477,7 +3189,18 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor' }
   return (
     <div className="dashboard-layout">
       {renderSidebar()}
-      <main className="dashboard-main">
+      <main className="dashboard-main" style={{ position: 'relative' }}>
+        {apiError && (
+          <div className="dashboard-api-error" style={{ padding: '10px 16px', background: '#fef2f2', color: '#b91c1c', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span>{apiError}</span>
+            <button type="button" onClick={() => { setApiError(null); loadData(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retry</button>
+          </div>
+        )}
+        {dataLoading && (
+          <div className="dashboard-loading" style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
+            <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: 28, color: 'var(--primary)' }}></i>
+          </div>
+        )}
         {renderContent()}
       </main>
       {showNotice && (

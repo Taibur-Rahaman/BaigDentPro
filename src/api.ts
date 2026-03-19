@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/api' : 'http://localhost:3001/api');
 
 interface ApiOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -53,8 +53,31 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || 'Request failed');
+      const status = response.status;
+      const errorBody = await response.json().catch(() => ({ error: 'Request failed' }));
+      const message = errorBody?.error || 'Request failed';
+
+      // If the token is invalid/expired, clear auth state but don't hard-redirect.
+      if (status === 401 && this.token) {
+        const errorText = String(message).toLowerCase();
+        if (
+          errorText.includes('invalid token') ||
+          errorText.includes('no token provided') ||
+          errorText.includes('user not found') ||
+          errorText.includes('unauthorized')
+        ) {
+          this.setToken(null);
+          if (typeof window !== 'undefined') {
+            try {
+              window.localStorage.removeItem('baigdentpro:user');
+            } catch {
+              // ignore storage errors
+            }
+          }
+        }
+      }
+
+      throw new Error(message);
     }
 
     return response.json();
@@ -376,6 +399,38 @@ class ApiClient {
 
     updateUser: (id: string, data: { role?: string; clinicName?: string; phone?: string }) =>
       this.request<any>(`/admin/users/${id}`, { method: 'PUT', body: data }),
+  };
+
+  superAdmin = {
+    stats: () => this.request<any>('/super-admin/stats'),
+    clinics: (params?: { search?: string; page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.search) query.set('search', params.search ?? '');
+      if (params?.page) query.set('page', String(params.page ?? 1));
+      if (params?.limit) query.set('limit', String(params.limit ?? 20));
+      return this.request<{ clinics: any[]; total: number; page: number; limit: number }>(`/super-admin/clinics?${query}`);
+    },
+    revenueByBranch: (params?: { startDate?: string; endDate?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.startDate) query.set('startDate', params.startDate);
+      if (params?.endDate) query.set('endDate', params.endDate);
+      return this.request<{ branches: any[]; start: string; end: string }>(`/super-admin/revenue-by-branch?${query}`);
+    },
+    chairUtilization: (params?: { startDate?: string; endDate?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.startDate) query.set('startDate', params.startDate);
+      if (params?.endDate) query.set('endDate', params.endDate);
+      return this.request<{ utilization: any[]; start: string; end: string }>(`/super-admin/chair-utilization?${query}`);
+    },
+    activityLogs: (params?: { userId?: string; action?: string; entity?: string; page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.userId) query.set('userId', params.userId);
+      if (params?.action) query.set('action', params.action);
+      if (params?.entity) query.set('entity', params.entity);
+      if (params?.page) query.set('page', String(params?.page ?? 1));
+      if (params?.limit) query.set('limit', String(params?.limit ?? 50));
+      return this.request<{ logs: any[]; total: number; page: number; limit: number }>(`/super-admin/activity-logs?${query}`);
+    },
   };
 }
 

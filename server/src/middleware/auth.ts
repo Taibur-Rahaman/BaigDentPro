@@ -1,29 +1,39 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../index.js';
+import { JWT_SECRET } from '../utils/config.js';
+
+// Centralized in config.ts
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  clinicId?: string | null;
+}
 
 export interface AuthRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    name: string;
-    role: string;
-  };
+  user?: AuthUser;
 }
 
 export const authenticate = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    const authHeader = req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    const token = authHeader.substring(7);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as any;
+
+    if (!decoded.userId) {
+      return res.status(401).json({ error: 'Invalid token payload' });
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, name: true, role: true },
+      select: { id: true, email: true, name: true, role: true, clinicId: true },
     });
 
     if (!user) {
@@ -32,24 +42,32 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 
     req.user = user;
     next();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    }
+    console.error('Auth error:', error.message);
     return res.status(401).json({ error: 'Invalid token' });
   }
 };
 
 export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: { id: true, email: true, name: true, role: true },
-      });
-      if (user) req.user = user;
+    const authHeader = req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as any;
+      if (decoded.userId) {
+        const user = await prisma.user.findUnique({
+          where: { id: decoded.userId },
+          select: { id: true, email: true, name: true, role: true, clinicId: true },
+        });
+        if (user) req.user = user;
+      }
     }
-  } catch {}
+  } catch (error: any) {
+    console.error('Optional auth error:', error.message);
+  }
   next();
 };
 
@@ -59,8 +77,19 @@ export const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction
   if (!req.user) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  if (req.user.role !== 'ADMIN') {
+  if (req.user.role !== 'CLINIC_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
     return res.status(403).json({ error: 'Admin access required' });
   }
   return next();
 };
+
+export const requireSuperAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  if (req.user.role !== 'SUPER_ADMIN') {
+    return res.status(403).json({ error: 'Super admin access required' });
+  }
+  return next();
+};
+

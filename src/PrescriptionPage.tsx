@@ -512,18 +512,21 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
 
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Prescription</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   *{box-sizing:border-box;}
   @page{size: ${printSetup.pageWidthCm}cm ${printSetup.pageHeightCm}cm; margin: 0;}
-  body{font-family:Arial,sans-serif;font-size:${fontSizePt}pt;line-height:1.45;color:#000;background:#fff;margin:0;padding:0;}
-  .page{width:${printSetup.pageWidthCm}cm;min-height:${printSetup.pageHeightCm}cm;margin:0 auto;padding:0.4cm;}
+  body{font-family:'Noto Sans Bengali', Arial, sans-serif;font-size:${fontSizePt}pt;line-height:1.45;color:#000;background:#fff;margin:0;padding:0;}
+  .page{width:${printSetup.pageWidthCm}cm;min-height:${printSetup.pageHeightCm}cm;margin:0 auto;padding:0.4cm;display:flex;flex-direction:column;}
   .print-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:8px;min-height:${printSetup.headerHeightCm}cm;${withoutHeader ? 'display:none;' : ''}}
   .print-header-left{text-align:left;font-size:13px;}
   .print-header-right{text-align:right;font-size:13px;}
   .print-header-left .doc-name,.print-header-right .chamber-label{font-weight:bold;font-size:14px;display:block;margin-bottom:2px;}
   .patient-line{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 20px;margin-bottom:10px;padding:6px 0;border-bottom:1px solid #000;font-size:12px;min-height:${printSetup.patientInfoHeightCm}cm;${printSetup.printPatientInfo ? '' : 'display:none;'}}
   .patient-line span{white-space:nowrap;}
-  .print-body{display:flex;gap:0.4cm;margin-top:10px;}
+  .print-body{display:flex;gap:0.4cm;margin-top:10px;flex:1;}
   .print-left{min-width:0;width:${printSetup.leftWidthCm}cm;min-height:${printSetup.leftHeightCm}cm;}
   .print-right{min-width:0;width:${printSetup.rightWidthCm}cm;min-height:${printSetup.rightHeightCm}cm;border-left:2px solid #000;padding-left:0.35cm;position:relative;}
   .print-left .section{margin-bottom:10px;}
@@ -537,10 +540,10 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   .rx-line1{font-weight:bold;}
   .rx-line2{color:#000;}
   .diagnosis{margin-top:12px;font-weight:bold;}
-  .print-footer{margin-top:0.35cm;padding-top:0.2cm;border-top:1px solid #000;font-size:12px;text-align:center;min-height:${printSetup.footerHeightCm}cm;${showFooter ? '' : 'display:none;'}}
+  .print-footer{margin-top:auto;padding-top:0.2cm;border-top:1px solid #000;font-size:12px;text-align:center;min-height:${printSetup.footerHeightCm}cm;letter-spacing:0;word-spacing:0;font-family:'Noto Sans Bengali', Arial, sans-serif;${showFooter ? '' : 'display:none;'}}
   .barcode-rt{position:absolute;top:0;right:0;text-align:right;}
   .barcode-rt img{height:36px;display:block;}
-  @media print{body{padding:10px;} .print-header,.patient-line,.print-body,.print-footer{break-inside:avoid;}}
+  @media print{body{padding:10px;} .print-header,.patient-line{break-inside:avoid;}}
 </style></head>
 <body>
   <div class="page">
@@ -943,13 +946,13 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-          <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--primary-color)' }}>12</div>
-            <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Today's Appointments</div>
+          <div className="stat-card stat-primary">
+            <div className="stat-value">12</div>
+            <div className="stat-label">Today's Appointments</div>
           </div>
-          <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--success-color)' }}>5</div>
-            <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Completed</div>
+          <div className="stat-card stat-success">
+            <div className="stat-value">5</div>
+            <div className="stat-label">Completed</div>
           </div>
           <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
             <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--warning-color)' }}>4</div>
@@ -1015,16 +1018,16 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
         <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
-          <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--primary-color)' }}>45,000</div>
-          <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Today's Income</div>
+          <div className="stat-value stat-primary">45,000</div>
+          <div className="stat-label">Today's Income</div>
         </div>
         <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
-          <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--success-color)' }}>3,500</div>
-          <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>This Week</div>
+          <div className="stat-value stat-success">3,500</div>
+          <div className="stat-label">This Week</div>
         </div>
         <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
-          <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--secondary-color)' }}>12,500</div>
-          <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>This Month</div>
+          <div className="stat-value stat-secondary">12,500</div>
+          <div className="stat-label">This Month</div>
         </div>
         <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
           <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--danger-color)' }}>8,000</div>

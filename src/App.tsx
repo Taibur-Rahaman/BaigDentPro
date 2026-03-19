@@ -5,9 +5,11 @@ import api from './api';
 
 export type View = 'home' | 'login' | 'dashboard';
 
+type UserState = { name: string; role?: string; clinicId?: string | null } | null;
+
 export const App: React.FC = () => {
   const [view, setView] = useState<View>('home');
-  const [userName, setUserName] = useState('');
+  const [user, setUser] = useState<UserState>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [isRegister, setIsRegister] = useState(false);
@@ -24,8 +26,8 @@ export const App: React.FC = () => {
     const savedUser = localStorage.getItem('baigdentpro:user');
     if (token && savedUser) {
       try {
-        const user = JSON.parse(savedUser);
-        setUserName(user.name);
+        const u = JSON.parse(savedUser);
+        setUser({ name: u.name || '', role: u.role, clinicId: u.clinicId });
       } catch {}
     }
   }, []);
@@ -42,15 +44,10 @@ export const App: React.FC = () => {
     try {
       const result = await api.auth.login(email, password);
       localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
-      setUserName(result.user.name);
+      setUser({ name: result.user.name, role: result.user.role, clinicId: result.user.clinicId });
       setView('dashboard');
     } catch (err: any) {
-      if (email && password) {
-        setUserName(email.split('@')[0] || 'User');
-        setView('dashboard');
-      } else {
-        setError(err.message || 'Login failed');
-      }
+      setError(err.message || 'Login failed');
     } finally {
       setIsLoading(false);
     }
@@ -64,7 +61,7 @@ export const App: React.FC = () => {
     try {
       const result = await api.auth.register(registerData);
       localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
-      setUserName(result.user.name);
+      setUser({ name: result.user.name, role: result.user.role, clinicId: result.user.clinicId });
       setView('dashboard');
     } catch (err: any) {
       setError(err.message || 'Registration failed');
@@ -76,7 +73,7 @@ export const App: React.FC = () => {
   const handleLogout = () => {
     api.auth.logout();
     localStorage.removeItem('baigdentpro:user');
-    setUserName('');
+    setUser(null);
     setView('home');
   };
 
@@ -85,7 +82,7 @@ export const App: React.FC = () => {
   }
 
   if (view === 'dashboard') {
-    return <DashboardPage onLogout={handleLogout} userName={userName || undefined} />;
+    return <DashboardPage onLogout={handleLogout} userName={user?.name} userRole={user?.role} />;
   }
 
   return (

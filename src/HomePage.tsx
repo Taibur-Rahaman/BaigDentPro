@@ -495,15 +495,15 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
               <div className="neo-pricing-most-popular">Most popular</div>
               <div className="neo-pricing-card-header">
                 <h3 className="neo-pricing-name">Premium</h3>
-                <p className="neo-pricing-desc">For busy clinics with multiple rooms</p>
-                <div className="neo-pricing-discount-pill">Up to 3 devices</div>
+                <p className="neo-pricing-desc">For busy clinics with multiple rooms and branches</p>
+                <div className="neo-pricing-discount-pill">5+ devices and branches</div>
               </div>
               <div className="neo-pricing-price-block">
                 <div className="neo-pricing-price-main">
                   <span className="neo-pricing-price-value">৳1,000</span>
                   <span className="neo-pricing-price-period">/month</span>
                 </div>
-                <p className="neo-pricing-small">Billed monthly in BDT. Ideal when you have separate reception, doctor and counselor PCs.</p>
+                <p className="neo-pricing-small">Billed monthly in BDT. Ideal when you have separate reception, doctor and counselor PCs or multiple locations.</p>
               </div>
               <button
                 className="neo-btn neo-btn-primary neo-btn-block"
@@ -513,11 +513,11 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
               </button>
               <ul className="neo-pricing-features">
                 <li><i className="fa-solid fa-check"></i>Everything in Platinum</li>
-                <li><i className="fa-solid fa-check"></i>Access from up to 3 clinic devices</li>
-                <li><i className="fa-solid fa-check"></i>Full appointment calendar with chair view</li>
-                <li><i className="fa-solid fa-check"></i>Automatic recall & follow‑up reminders</li>
-                <li><i className="fa-solid fa-check"></i>Monthly income, due & patient reports</li>
-                <li><i className="fa-solid fa-check"></i>Priority WhatsApp / phone support</li>
+                <li><i className="fa-solid fa-check"></i>Access from 5+ devices and branches</li>
+                <li><i className="fa-solid fa-check"></i>Role‑based access & activity logs</li>
+                <li><i className="fa-solid fa-check"></i>Branch‑wise revenue & chair utilization</li>
+                <li><i className="fa-solid fa-check"></i>Custom branding on reports & prescriptions</li>
+                <li><i className="fa-solid fa-check"></i>Dedicated onboarding & success manager</li>
               </ul>
             </div>
 

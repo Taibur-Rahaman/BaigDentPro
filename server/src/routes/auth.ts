@@ -3,6 +3,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
+import { JWT_SECRET, JWT_EXPIRES_IN } from '../utils/config.js';
+
+// Centralized in config.ts
 
 const router = Router();
 
@@ -17,6 +20,14 @@ router.post('/register', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // For now, each registration creates a personal clinic for the user.
+    const clinic = await prisma.clinic.create({
+      data: {
+        name: clinicName || `${name}'s Clinic`,
+        phone,
+      },
+    });
+
     const user = await prisma.user.create({
       data: {
         email,
@@ -24,14 +35,16 @@ router.post('/register', async (req, res) => {
         name,
         clinicName,
         phone,
+        role: 'CLINIC_ADMIN',
+        clinicId: clinic.id,
       },
-      select: { id: true, email: true, name: true, role: true, clinicName: true },
+      select: { id: true, email: true, name: true, role: true, clinicName: true, clinicId: true },
     });
 
     const token = jwt.sign(
-      { userId: user.id },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      { userId: user.id, role: user.role, clinicId: user.clinicId },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     res.status(201).json({ user, token });
@@ -55,10 +68,12 @@ router.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { userId: user.id },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      { userId: user.id, role: user.role, clinicId: user.clinicId },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
     );
+
+    await prisma.activityLog.create({ data: { userId: user.id, action: 'LOGIN', entity: 'USER', entityId: user.id } }).catch(() => {});
 
     res.json({
       user: {
@@ -66,6 +81,7 @@ router.post('/login', async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        clinicId: user.clinicId,
         clinicName: user.clinicName,
         clinicAddress: user.clinicAddress,
         clinicPhone: user.clinicPhone,

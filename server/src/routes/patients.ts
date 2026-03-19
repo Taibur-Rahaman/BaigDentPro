@@ -1,20 +1,49 @@
+ 
 import { Router } from 'express';
-import { prisma } from '../index.js';
+import { prisma, Prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 
+type PatientListParams = {
+  search?: string;
+  page?: string;
+  limit?: string;
+};
+
+type CreatePatientInput = {
+  name: string;
+  phone: string;
+  age?: number;
+  gender?: string;
+  email?: string;
+  address?: string;
+  bloodGroup?: string;
+  occupation?: string;
+  referredBy?: string;
+  phoneType?: string;
+  notes?: string;
+};
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
-    const { search, page = '1', limit = '50' } = req.query;
-    const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+    const params: PatientListParams = {
+      search: req.query.search as string,
+      page: req.query.page as string || '1',
+      limit: req.query.limit as string || '50',
+    };
 
-    const where: any = { userId: req.user!.id };
-    if (search) {
+    const skip = (parseInt(params.page) - 1) * parseInt(params.limit);
+    const take = parseInt(params.limit);
+
+    const where: Prisma.PatientWhereInput = { 
+      userId: req.user!.id 
+    };
+
+    if (params.search) {
       where.OR = [
-        { name: { contains: search as string, mode: 'insensitive' } },
-        { phone: { contains: search as string } },
-        { regNo: { contains: search as string, mode: 'insensitive' } },
+        { name: { contains: params.search, mode: 'insensitive' } },
+        { phone: { contains: params.search } },
+        { regNo: { contains: params.search, mode: 'insensitive' } },
       ];
     }
 
@@ -22,7 +51,7 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       prisma.patient.findMany({
         where,
         skip,
-        take: parseInt(limit as string),
+        take,
         orderBy: { createdAt: 'desc' },
         include: {
           medicalHistory: true,
@@ -34,9 +63,10 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       prisma.patient.count({ where }),
     ]);
 
-    res.json({ patients, total, page: parseInt(page as string), limit: parseInt(limit as string) });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.json({ patients, total, page: parseInt(params.page), limit: take });
+  } catch (error) {
+    console.error('Patients list error:', error);
+    res.status(500).json({ error: 'Failed to fetch patients' });
   }
 });
 

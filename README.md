@@ -4,12 +4,38 @@ Professional dental clinic management – prescription panel, patient records, a
 
 ## Setup
 
+### Frontend only
+
 ```bash
 npm install
 npm run dev
 ```
 
-Open the URL from Vite (e.g. `http://localhost:5173`).
+Open the URL from Vite (e.g. `http://localhost:5173`). Data is stored in the browser (localStorage).
+
+### Full stack (frontend + backend)
+
+1. **Backend**
+   ```bash
+   cd server
+   npm install
+   cp .env.example .env   # optional; server/.env with JWT_SECRET already exists for dev
+   npx prisma db push
+   npm run db:seed
+   npm run dev
+   ```
+   API runs at `http://localhost:3001`.
+
+2. **Frontend** (in another terminal)
+   ```bash
+   npm install
+   npm run dev
+   ```
+   App runs at `http://localhost:5173`. Use **Sign In** with:
+   - Email: `demo@baigdentpro.com`
+   - Password: `password123`
+
+   After login, the dashboard loads and saves patients, appointments, prescriptions, invoices, and lab orders via the API.
 
 ## Features
 

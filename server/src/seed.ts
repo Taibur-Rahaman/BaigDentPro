@@ -25,6 +25,19 @@ async function main() {
 
   console.log('✅ Created demo user:', demoUser.email);
 
+  const superAdmin = await prisma.user.upsert({
+    where: { email: 'superadmin@baigdentpro.com' },
+    update: {},
+    create: {
+      email: 'superadmin@baigdentpro.com',
+      password: await bcrypt.hash('super123', 12),
+      name: 'Super Admin',
+      role: 'SUPER_ADMIN',
+      clinicName: 'BaigDentPro Platform',
+    },
+  });
+  console.log('✅ Created super admin:', superAdmin.email);
+
   const products = [
     { name: 'Oral-B Electric Toothbrush', slug: 'oral-b-electric-toothbrush', price: 2500, category: 'TOOTHBRUSH', description: 'Advanced electric toothbrush with smart timer', stock: 50, isFeatured: true },
     { name: 'Colgate Total Toothpaste', slug: 'colgate-total-toothpaste', price: 180, category: 'TOOTHPASTE', description: '12-hour protection toothpaste', stock: 100 },
