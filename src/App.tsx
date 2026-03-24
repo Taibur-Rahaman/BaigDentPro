@@ -5,13 +5,14 @@ import api from './api';
 
 export type View = 'home' | 'login' | 'dashboard';
 
-type UserState = { name: string; role?: string; clinicId?: string | null } | null;
+type UserState = { id?: string; name: string; role?: string; clinicId?: string | null } | null;
 
 export const App: React.FC = () => {
   const [view, setView] = useState<View>('home');
   const [user, setUser] = useState<UserState>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [registerInfo, setRegisterInfo] = useState('');
   const [isRegister, setIsRegister] = useState(false);
   const [registerData, setRegisterData] = useState({
     email: '',
@@ -24,17 +25,35 @@ export const App: React.FC = () => {
   useEffect(() => {
     const token = localStorage.getItem('baigdentpro:token');
     const savedUser = localStorage.getItem('baigdentpro:user');
-    if (token && savedUser) {
+    if (!token) return;
+
+    if (savedUser) {
       try {
         const u = JSON.parse(savedUser);
-        setUser({ name: u.name || '', role: u.role, clinicId: u.clinicId });
-      } catch {}
+        setUser({ id: u.id, name: u.name || '', role: u.role, clinicId: u.clinicId });
+        setView('dashboard');
+      } catch {
+        localStorage.removeItem('baigdentpro:user');
+      }
+      return;
     }
+
+    api.auth
+      .me()
+      .then((u) => {
+        localStorage.setItem('baigdentpro:user', JSON.stringify(u));
+        setUser({ id: u.id, name: u.name || '', role: u.role, clinicId: u.clinicId });
+        setView('dashboard');
+      })
+      .catch(() => {
+        api.auth.logout();
+      });
   }, []);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
+    setRegisterInfo('');
     setIsLoading(true);
 
     const form = e.currentTarget;
@@ -44,7 +63,12 @@ export const App: React.FC = () => {
     try {
       const result = await api.auth.login(email, password);
       localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
-      setUser({ name: result.user.name, role: result.user.role, clinicId: result.user.clinicId });
+      setUser({
+        id: result.user.id,
+        name: result.user.name,
+        role: result.user.role,
+        clinicId: result.user.clinicId,
+      });
       setView('dashboard');
     } catch (err: any) {
       setError(err.message || 'Login failed');
@@ -60,8 +84,30 @@ export const App: React.FC = () => {
 
     try {
       const result = await api.auth.register(registerData);
+      if (result.pendingApproval || !result.token) {
+        setRegisterInfo(
+          result.message ||
+            'Your account was created and is pending approval by a platform administrator. You cannot sign in until it is approved.'
+        );
+        setError('');
+        setIsRegister(false);
+        setRegisterData({
+          email: '',
+          password: '',
+          name: '',
+          clinicName: '',
+          phone: '',
+        });
+        return;
+      }
       localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
-      setUser({ name: result.user.name, role: result.user.role, clinicId: result.user.clinicId });
+      setUser({
+        id: result.user.id,
+        name: result.user.name,
+        role: result.user.role,
+        clinicId: result.user.clinicId,
+      });
+      setRegisterInfo('');
       setView('dashboard');
     } catch (err: any) {
       setError(err.message || 'Registration failed');
@@ -82,7 +128,15 @@ export const App: React.FC = () => {
   }
 
   if (view === 'dashboard') {
-    return <DashboardPage onLogout={handleLogout} userName={user?.name} userRole={user?.role} />;
+    return (
+      <DashboardPage
+        onLogout={handleLogout}
+        userName={user?.name}
+        userRole={user?.role}
+        userClinicId={user?.clinicId ?? undefined}
+        currentUserId={user?.id}
+      />
+    );
   }
 
   return (
@@ -183,8 +237,23 @@ export const App: React.FC = () => {
               </div>
             )}
 
+            {!isRegister && registerInfo && (
+              <div className="neo-auth-info-box" style={{ borderColor: 'rgba(13, 148, 136, 0.35)', background: 'rgba(236, 253, 245, 0.5)' }}>
+                <div className="neo-auth-info-icon">
+                  <i className="fa-solid fa-hourglass-half"></i>
+                </div>
+                <div className="neo-auth-info-content">
+                  <h4>Pending approval</h4>
+                  <p>{registerInfo}</p>
+                </div>
+              </div>
+            )}
+
             {isRegister ? (
               <form onSubmit={handleRegister} className="neo-auth-form">
+                <p style={{ margin: '0 0 16px', fontSize: 14, color: '#64748b', lineHeight: 1.5 }}>
+                  After you submit this form, a platform super admin must approve your clinic before you can sign in.
+                </p>
                 <div className="neo-form-group">
                   <label>Full Name</label>
                   <div className="neo-input-wrapper">
@@ -299,7 +368,16 @@ export const App: React.FC = () => {
                 </button>
                 <p className="neo-auth-switch">
                   New to BaigDentPro?{' '}
-                  <button type="button" onClick={() => setIsRegister(true)}>Create Account</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRegister(true);
+                      setRegisterInfo('');
+                      setError('');
+                    }}
+                  >
+                    Create Account
+                  </button>
                 </p>
               </form>
             )}

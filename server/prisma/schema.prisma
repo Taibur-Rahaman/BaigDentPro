@@ -3,8 +3,11 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  // For production, ALWAYS point this to a managed PostgreSQL instance
+  // via the DATABASE_URL environment variable, e.g.:
+  // DATABASE_URL="postgresql://user:password@host:5432/baigdentpro?connection_limit=10&pool_timeout=30"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ============== USER & AUTH ==============
@@ -26,6 +29,10 @@ model User {
   degree        String?
   specialization String?
   licenseNo     String?
+  /// When false, login and API access are blocked (clinic admin / super admin controlled).
+  isActive      Boolean   @default(true)
+  /// Self-service signups start false until SUPER_ADMIN approves. Staff created by admins are true.
+  isApproved    Boolean   @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

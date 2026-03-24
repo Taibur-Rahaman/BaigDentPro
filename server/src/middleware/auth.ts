@@ -11,6 +11,7 @@ export interface AuthUser {
   name: string;
   role: string;
   clinicId?: string | null;
+  isActive?: boolean;
 }
 
 export interface AuthRequest extends Request {
@@ -33,11 +34,23 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, name: true, role: true, clinicId: true },
+      select: { id: true, email: true, name: true, role: true, clinicId: true, isActive: true, isApproved: true },
     });
 
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        error: 'Your account access has been disabled. Contact your clinic administrator.',
+      });
+    }
+
+    if (!user.isApproved) {
+      return res.status(403).json({
+        error: 'Your account is not approved yet. Contact your platform administrator.',
+      });
     }
 
     req.user = user;
@@ -60,9 +73,9 @@ export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFu
       if (decoded.userId) {
         const user = await prisma.user.findUnique({
           where: { id: decoded.userId },
-          select: { id: true, email: true, name: true, role: true, clinicId: true },
+          select: { id: true, email: true, name: true, role: true, clinicId: true, isActive: true, isApproved: true },
         });
-        if (user) req.user = user;
+        if (user?.isActive && user?.isApproved) req.user = user;
       }
     }
   } catch (error: any) {

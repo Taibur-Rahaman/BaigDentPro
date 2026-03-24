@@ -1,0 +1,25 @@
+# Local PostgreSQL for BaigDentPro (matches server/.env DATABASE_URL by default)
+# Usage: docker compose up -d
+# Then: cd server && npx prisma db push && npm run db:seed
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: baigdentpro-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: baigdentpro
+      POSTGRES_USER: baigdentpro
+      POSTGRES_PASSWORD: baigdentpro
+    volumes:
+      - baigdentpro_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baigdentpro -d baigdentpro"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  baigdentpro_pgdata:

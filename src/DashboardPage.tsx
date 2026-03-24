@@ -57,6 +57,8 @@ interface Invoice {
   paid: number;
   due: number;
   date: string;
+  /** YYYY-MM-DD when set on server */
+  dueDate?: string;
   status: string;
 }
 
@@ -134,10 +136,68 @@ interface PatientConsent {
   agreed: boolean;
 }
 
+type YesNo = 'Yes' | 'No' | '';
+
+interface PatientRecordFormData {
+  regNo: string;
+  name: string;
+  occupation: string;
+  mobile: string;
+  address: string;
+  refBy: string;
+  age: string;
+
+  // Medical history (extends existing modal data)
+  bloodPressureReading: string; // "High/Low" numeric pair if provided
+  femalePregnant: YesNo;
+
+  // Diagnosis / plan
+  diagnosisText: string;
+  examinationNotes: string;
+
+  // Treatment plan checklist
+  treatmentChecklist: Record<
+    | 'Examination'
+    | 'XRayRVG'
+    | 'Consultation'
+    | 'Calculus'
+    | 'Scaling'
+    | 'Caries'
+    | 'Filling'
+    | 'DeepCaries'
+    | 'RootCanal'
+    | 'BDR_BDC_Fracture'
+    | 'Missing'
+    | 'Extraction_SurgicalExt'
+    | 'Denture_Implant'
+    | 'Mobility'
+    | 'MucosalLesion'
+    | 'Implant'
+    | 'FixedOrthodontics'
+    | 'TakingDrug_AspirinBloodThinner'
+    | 'TakingDrug_Antihypertensive'
+    | 'TakingDrug_Inhaler'
+    | 'TakingDrug_Others',
+    boolean
+  >;
+
+  takingDrugOtherText: string;
+
+  // Cost & agreement
+  costTotal: string;
+  costPayerText: string; // "of myself/my ____"
+  agreeToTreatment: boolean;
+  explainedComplications: boolean;
+  consentDate: string;
+  signatureName: string;
+}
+
 interface Props {
   onLogout: () => void;
   userName?: string;
   userRole?: string;
+  userClinicId?: string;
+  currentUserId?: string;
 }
 
 const STORAGE_KEYS = {
@@ -147,6 +207,74 @@ const STORAGE_KEYS = {
   invoices: 'baigdentpro:invoices',
   labOrders: 'baigdentpro:labOrders',
 };
+
+const PATIENT_RECORD_FORM_KEY = (patientId: string) => `baigdentpro:patient-record-form:${patientId}`;
+
+function getDefaultPatientRecordFormData(): PatientRecordFormData {
+  return {
+    regNo: '',
+    name: '',
+    occupation: '',
+    mobile: '',
+    address: '',
+    refBy: '',
+    age: '',
+    bloodPressureReading: '',
+    femalePregnant: '',
+    diagnosisText: '',
+    examinationNotes: '',
+    treatmentChecklist: {
+      Examination: false,
+      XRayRVG: false,
+      Consultation: false,
+      Calculus: false,
+      Scaling: false,
+      Caries: false,
+      Filling: false,
+      DeepCaries: false,
+      RootCanal: false,
+      BDR_BDC_Fracture: false,
+      Missing: false,
+      Extraction_SurgicalExt: false,
+      Denture_Implant: false,
+      Mobility: false,
+      MucosalLesion: false,
+      Implant: false,
+      FixedOrthodontics: false,
+      TakingDrug_AspirinBloodThinner: false,
+      TakingDrug_Antihypertensive: false,
+      TakingDrug_Inhaler: false,
+      TakingDrug_Others: false,
+    },
+    takingDrugOtherText: '',
+    costTotal: '',
+    costPayerText: '',
+    agreeToTreatment: false,
+    explainedComplications: false,
+    consentDate: new Date().toISOString().slice(0, 10),
+    signatureName: '',
+  };
+}
+
+/** Calendar date in the user's local timezone (avoids UTC "today" drift vs appointments). */
+function formatLocalYMD(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function prettifyAppointmentStatus(status: string): string {
+  const s = String(status || '').trim();
+  if (!s) return 'Scheduled';
+  return s
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
 function mapPatientFromApi(p: any): Patient {
   return {
@@ -167,7 +295,7 @@ function mapPatientFromApi(p: any): Patient {
 
 function mapAppointmentFromApi(a: any): Appointment {
   const d = a.date ? new Date(a.date) : new Date();
-  const dateStr = d.toISOString().split('T')[0];
+  const dateStr = formatLocalYMD(d);
   return {
     id: a.id,
     patientId: a.patientId,
@@ -184,7 +312,7 @@ function mapAppointmentFromApi(a: any): Appointment {
 
 function mapPrescriptionFromApi(p: any): Prescription {
   const d = p.date ? new Date(p.date) : new Date();
-  const dateStr = d.toISOString().split('T')[0];
+  const dateStr = formatLocalYMD(d);
   return {
     id: p.id,
     patientId: p.patientId,
@@ -205,7 +333,8 @@ function mapPrescriptionFromApi(p: any): Prescription {
 
 function mapInvoiceFromApi(i: any): Invoice {
   const d = i.date ? new Date(i.date) : new Date();
-  const dateStr = d.toISOString().split('T')[0];
+  const dateStr = formatLocalYMD(d);
+  const dueD = i.dueDate ? new Date(i.dueDate) : null;
   return {
     id: i.id,
     invoiceNo: i.invoiceNo,
@@ -214,13 +343,21 @@ function mapInvoiceFromApi(i: any): Invoice {
     paid: Number(i.paid ?? 0),
     due: Number(i.due ?? 0),
     date: dateStr,
+    dueDate: dueD ? formatLocalYMD(dueD) : undefined,
     status: i.status ?? 'PENDING',
   };
 }
 
+function invoiceIsOverdue(inv: Invoice): boolean {
+  if (inv.status === 'PAID' || inv.due <= 0) return false;
+  const todayYmd = formatLocalYMD(new Date());
+  if (inv.dueDate) return inv.dueDate < todayYmd;
+  return inv.status === 'OVERDUE';
+}
+
 function mapLabOrderFromApi(l: any): LabOrder {
   const d = l.orderDate ? new Date(l.orderDate) : new Date();
-  const dateStr = d.toISOString().split('T')[0];
+  const dateStr = formatLocalYMD(d);
   return {
     id: l.id,
     patientName: l.patient?.name ?? 'Unknown',
@@ -360,10 +497,81 @@ function getGoogleCalendarUrl(a: Appointment): string {
 }
 
 const MEDICAL_HISTORY_KEY = (patientId: string) => `baigdentpro:medicalHistory:${patientId}`;
+const DENTAL_CHART_KEY = (patientId: string) => `baigdentpro:dentalChart:${patientId}`;
 const TREATMENT_PLANS_KEY = (patientId: string) => `baigdentpro:treatmentPlans:${patientId}`;
 const TREATMENT_RECORDS_KEY = (patientId: string) => `baigdentpro:treatmentRecords:${patientId}`;
 const CONSENT_KEY = (patientId: string) => `baigdentpro:consent:${patientId}`;
 const BILLING_PROCEDURES_KEY = 'baigdentpro:billingProcedures';
+
+/** Remove browser-stored profile data for a patient (offline / after local delete). */
+function clearPatientLocalStorage(patientId: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(PATIENT_RECORD_FORM_KEY(patientId));
+    localStorage.removeItem(MEDICAL_HISTORY_KEY(patientId));
+    localStorage.removeItem(DENTAL_CHART_KEY(patientId));
+    localStorage.removeItem(TREATMENT_PLANS_KEY(patientId));
+    localStorage.removeItem(TREATMENT_RECORDS_KEY(patientId));
+    localStorage.removeItem(CONSENT_KEY(patientId));
+  } catch {
+    /* ignore */
+  }
+}
+
+type PatientSortKey = 'name' | 'regNo' | 'phone' | 'createdAt';
+
+/** Patient profile card: all checkbox flags in the same order as the Medical History modal. */
+const MEDICAL_HISTORY_DISPLAY_ORDER: ReadonlyArray<{
+  key: keyof MedicalHistory;
+  label: string;
+  tagClass?: string;
+}> = [
+  { key: 'bloodPressure', label: 'Blood Pressure' },
+  { key: 'heartProblems', label: 'Heart Problems' },
+  { key: 'cardiacHtnMiPacemaker', label: 'Cardiac (HTN/MI/Pacemaker)' },
+  { key: 'rheumaticFever', label: 'Rheumatic Fever' },
+  { key: 'diabetes', label: 'Diabetes' },
+  { key: 'pepticUlcer', label: 'Peptic Ulcer / Acidity' },
+  { key: 'jaundice', label: 'Jaundice / Liver' },
+  { key: 'asthma', label: 'Asthma' },
+  { key: 'tuberculosis', label: 'Tuberculosis' },
+  { key: 'kidneyDiseases', label: 'Kidney Diseases' },
+  { key: 'aids', label: 'AIDS' },
+  { key: 'thyroid', label: 'Thyroid' },
+  { key: 'hepatitis', label: 'Hepatitis' },
+  { key: 'stroke', label: 'Stroke' },
+  { key: 'bleedingDisorder', label: 'Bleeding Disorder' },
+  { key: 'isPregnant', label: 'Pregnant', tagClass: 'pregnant' },
+  { key: 'isLactating', label: 'Lactating', tagClass: 'pregnant' },
+  { key: 'allergyPenicillin', label: 'Penicillin Allergy', tagClass: 'allergy' },
+  { key: 'allergySulphur', label: 'Sulphur Allergy', tagClass: 'allergy' },
+  { key: 'allergyAspirin', label: 'Aspirin Allergy', tagClass: 'allergy' },
+  { key: 'allergyLocalAnaesthesia', label: 'LA Allergy', tagClass: 'allergy' },
+  { key: 'takingAspirinBloodThinner', label: 'Blood Thinner', tagClass: 'drug' },
+  { key: 'takingAntihypertensive', label: 'Antihypertensive', tagClass: 'drug' },
+  { key: 'takingInhaler', label: 'Inhaler', tagClass: 'drug' },
+  { key: 'habitSmoking', label: 'Smoking', tagClass: 'habit' },
+  { key: 'habitBetelLeaf', label: 'Betel Leaf', tagClass: 'habit' },
+  { key: 'habitAlcohol', label: 'Alcohol', tagClass: 'habit' },
+];
+
+/** Free-text fields from the same modal (shown when not empty). */
+const MEDICAL_HISTORY_TEXT_DISPLAY: ReadonlyArray<{ key: keyof MedicalHistory; title: string }> = [
+  { key: 'otherDiseases', title: 'Other diseases' },
+  { key: 'allergyOther', title: 'Other allergies' },
+  { key: 'takingOther', title: 'Other medications' },
+  { key: 'habitOther', title: 'Other habits' },
+  { key: 'details', title: 'Additional details' },
+];
+
+function hasDisplayedMedicalHistory(mh: MedicalHistory): boolean {
+  const anyFlag = MEDICAL_HISTORY_DISPLAY_ORDER.some(({ key }) => Boolean(mh[key]));
+  const anyText = MEDICAL_HISTORY_TEXT_DISPLAY.some(({ key }) => {
+    const v = mh[key];
+    return typeof v === 'string' && v.trim().length > 0;
+  });
+  return anyFlag || anyText;
+}
 
 const DIAGNOSIS_OPTIONS = [
   'Examination', 'X-Ray/RVG', 'Calculus', 'Caries', 'Deep Caries',
@@ -442,9 +650,29 @@ const TOOTH_CHART = {
 };
 
 type NavSection = 'dashboard' | 'patients' | 'patient-detail' | 'prescription' | 'prescriptions-list' | 
-  'appointments' | 'billing' | 'lab' | 'drugs' | 'sms' | 'settings' | 'super-admin';
+  'appointments' | 'billing' | 'lab' | 'drugs' | 'sms' | 'settings' | 'clinic-admin' | 'super-admin';
 
-export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', userRole }) => {
+type ServerDashboardStats = {
+  totalPatients: number;
+  newPatientsThisMonth: number;
+  todayAppointments: number;
+  upcomingAppointments: number;
+  monthlyRevenue: number;
+  pendingDue: number;
+  pendingLabOrders: number;
+  prescriptionsThisMonth: number;
+  pendingInvoicesCount: number;
+  /** Added in API v2; older servers may omit (we fall back to client count). */
+  overdueInvoicesCount?: number;
+};
+
+export const DashboardPage: React.FC<Props> = ({
+  onLogout,
+  userName = 'Doctor',
+  userRole,
+  userClinicId,
+  currentUserId,
+}) => {
   const [activeNav, setActiveNav] = useState<NavSection>('dashboard');
   const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -453,22 +681,142 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [labOrders, setLabOrders] = useState<LabOrder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  /** When set, patient list uses server search results (API mode). */
+  const [patientsSearchOverride, setPatientsSearchOverride] = useState<Patient[] | null>(null);
+  const [patientSearchLoading, setPatientSearchLoading] = useState(false);
+  const [billingInvoiceFilter, setBillingInvoiceFilter] = useState<'all' | 'open' | 'overdue' | 'paid'>('all');
+  const [appointmentScheduleFilter, setAppointmentScheduleFilter] = useState<'upcoming' | 'today' | 'week' | 'all'>('upcoming');
+  const [patientSortKey, setPatientSortKey] = useState<PatientSortKey>('name');
+  const [patientSortDir, setPatientSortDir] = useState<'asc' | 'desc'>('asc');
+  const [patientListPage, setPatientListPage] = useState(1);
+  const [patientListPageSize, setPatientListPageSize] = useState(25);
   const [showNotice, setShowNotice] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // Settings persistence (used by PrescriptionPage header/print templates)
+  const HEADER_SETTINGS_STORAGE_KEY = 'baigdentpro:headerSettings';
+  const PRINT_SETUP_OVERRIDES_KEY = 'baigdentpro:printSetupOverrides';
+
+  const [dashboardHeaderDraft, setDashboardHeaderDraft] = useState({
+    clinicName: '',
+    address: '',
+    phone: '',
+    clinicLogo: '',
+    doctorName: userName,
+    degree: '',
+    specialization: '',
+    doctorLogo: '',
+  });
+
+  const [dashboardPrintDraft, setDashboardPrintDraft] = useState({
+    paperSize: 'A4' as 'A4' | 'A5' | 'Letter',
+    // Stored in the dashboard UI as a raw number; PrescriptionPage will interpret/validate.
+    headerHeight: 100,
+  });
+
+  useEffect(() => {
+    // Load persisted dashboard settings (so they affect other pages/printing).
+    try {
+      const raw = localStorage.getItem(HEADER_SETTINGS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<{
+          clinicName: string;
+          address: string;
+          phone: string;
+          clinicLogo: string;
+          doctorName: string;
+          qualification: string;
+          specialization: string;
+          doctorLogo: string;
+        }>;
+        setDashboardHeaderDraft((prev) => ({
+          ...prev,
+          clinicName: parsed.clinicName ?? prev.clinicName,
+          address: parsed.address ?? prev.address,
+          phone: parsed.phone ?? prev.phone,
+          clinicLogo: parsed.clinicLogo ?? prev.clinicLogo,
+          doctorName: parsed.doctorName ?? prev.doctorName,
+          degree: parsed.qualification ?? prev.degree,
+          specialization: parsed.specialization ?? prev.specialization,
+          doctorLogo: parsed.doctorLogo ?? prev.doctorLogo,
+        }));
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      const raw = localStorage.getItem(PRINT_SETUP_OVERRIDES_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<{ paperSize: 'A4' | 'A5' | 'Letter'; headerHeight: number }>;
+        setDashboardPrintDraft((prev) => ({
+          ...prev,
+          paperSize: parsed.paperSize ?? prev.paperSize,
+          headerHeight: typeof parsed.headerHeight === 'number' ? parsed.headerHeight : prev.headerHeight,
+        }));
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userName]);
+  /** Server-aggregated KPIs (aligned with /api/dashboard/stats — closer to how PMS leaders report). */
+  const [dashboardApiStats, setDashboardApiStats] = useState<ServerDashboardStats | null>(null);
+  const [dashboardRecentPatients, setDashboardRecentPatients] = useState<Patient[] | null>(null);
+  const [dashboardRevenueChart, setDashboardRevenueChart] = useState<{ date: string; revenue: number }[]>([]);
+  const [dashboardAppointmentChart, setDashboardAppointmentChart] = useState<{ date: string; count: number }[]>([]);
   const [superAdminStats, setSuperAdminStats] = useState<any>(null);
   const [superAdminClinics, setSuperAdminClinics] = useState<any[]>([]);
   const [superAdminRevenue, setSuperAdminRevenue] = useState<any[]>([]);
   const [superAdminUtilization, setSuperAdminUtilization] = useState<any[]>([]);
   const [superAdminLogs, setSuperAdminLogs] = useState<any[]>([]);
+  const [superAdminDoctors, setSuperAdminDoctors] = useState<any[]>([]);
+  const [superAdminPatients, setSuperAdminPatients] = useState<any[]>([]);
+  const [superAdminPrescriptions, setSuperAdminPrescriptions] = useState<any[]>([]);
+  const [superAdminDoctorSearch, setSuperAdminDoctorSearch] = useState('');
+  const [superAdminPatientSearch, setSuperAdminPatientSearch] = useState('');
   const [superAdminLoading, setSuperAdminLoading] = useState(false);
-  const [superAdminTab, setSuperAdminTab] = useState<'overview' | 'clinics' | 'revenue' | 'utilization' | 'logs'>('overview');
+  const [superAdminTab, setSuperAdminTab] = useState<
+    | 'overview'
+    | 'approvals'
+    | 'clinics'
+    | 'doctor-control'
+    | 'patient-control'
+    | 'prescription-control'
+    | 'revenue'
+    | 'utilization'
+    | 'logs'
+  >('overview');
+  const [superAdminPending, setSuperAdminPending] = useState<any[]>([]);
+
+  const [clinicAdminUsers, setClinicAdminUsers] = useState<any[]>([]);
+  const [clinicAdminTotal, setClinicAdminTotal] = useState(0);
+  const [clinicAdminLoading, setClinicAdminLoading] = useState(false);
+  const [clinicAdminSearchInput, setClinicAdminSearchInput] = useState('');
+  const [clinicAdminSearch, setClinicAdminSearch] = useState('');
+  const [clinicAdminPage, setClinicAdminPage] = useState(1);
+  const [adminFilterClinicId, setAdminFilterClinicId] = useState('');
+  const [adminClinicOptions, setAdminClinicOptions] = useState<{ id: string; name: string }[]>([]);
+  const [newStaffForm, setNewStaffForm] = useState({
+    email: '',
+    password: '',
+    name: '',
+    phone: '',
+    role: 'DOCTOR' as 'DOCTOR' | 'CLINIC_ADMIN',
+    clinicId: '',
+  });
   
   // Form states
   const [patientForm, setPatientForm] = useState({ name: '', phone: '', age: '', gender: '', email: '', address: '', bloodGroup: '', occupation: '', refBy: '' });
   const [appointmentForm, setAppointmentForm] = useState({ patientId: '', date: '', time: '', type: 'Checkup' });
   const [prescriptionForm, setPrescriptionForm] = useState({ patientId: '', diagnosis: '', advice: '', drugs: [] as DrugItem[] });
-  const [invoiceForm, setInvoiceForm] = useState({ patientId: '', items: [] as { description: string; amount: number }[], discount: 0 });
+  const [invoiceForm, setInvoiceForm] = useState({
+    patientId: '',
+    items: [] as { description: string; amount: number }[],
+    discount: 0,
+    dueDate: '',
+  });
   const [labForm, setLabForm] = useState({ patientId: '', workType: 'Crown', description: '', toothNumber: '', shade: '' });
   const [billingProcedures, setBillingProcedures] = useState<string[]>(() => {
     if (typeof window === 'undefined') return DEFAULT_DENTAL_PROCEDURES;
@@ -497,7 +845,7 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
   const [selectedTeeth, setSelectedTeeth] = useState<number[]>([]);
 
   // Patient profile states
-  const [patientProfileTab, setPatientProfileTab] = useState<'info' | 'treatment' | 'ledger' | 'consent'>('info');
+  const [patientProfileTab, setPatientProfileTab] = useState<'info' | 'treatment' | 'ledger' | 'consent' | 'record-form'>('info');
   const [toothNumberingSystem, setToothNumberingSystem] = useState<'fdi' | 'universal'>('fdi');
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [clinicalFindings, setClinicalFindings] = useState('');
@@ -507,6 +855,210 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
   const [treatmentPlans, setTreatmentPlans] = useState<TreatmentPlan[]>([]);
   const [treatmentRecords, setTreatmentRecords] = useState<TreatmentRecord[]>([]);
   const [consent, setConsent] = useState<PatientConsent | null>(null);
+
+  const [patientRecordForm, setPatientRecordForm] = useState<PatientRecordFormData>(() =>
+    getDefaultPatientRecordFormData()
+  );
+
+  const getPatientRecordFormPrintHtml = useCallback(
+    (patientNameForTitle: string) => {
+      const esc = (s: any) =>
+        String(s ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+
+      const yesNo = (v: YesNo) => (v === 'Yes' ? 'Yes' : v === 'No' ? 'No' : '—');
+      const tick = (b: boolean) => (b ? '☑' : '☐');
+      const mh = medicalHistory || {};
+
+      const checklist = patientRecordForm.treatmentChecklist;
+
+      const diseases: Array<[string, boolean]> = [
+        ['Blood Pressure (High/Low)', Boolean(mh.bloodPressure)],
+        ['Heart Problems (e.g. Rheumatic Fever)', Boolean(mh.heartProblems) || Boolean(mh.rheumaticFever)],
+        ['Diabetes', Boolean(mh.diabetes)],
+        ['Peptic Ulcer / Acidity', Boolean(mh.pepticUlcer)],
+        ['Jaundice/Liver Diseases', Boolean(mh.jaundice) || Boolean(mh.hepatitis)],
+        ['Asthma', Boolean(mh.asthma)],
+        ['Tuberculosis', Boolean(mh.tuberculosis)],
+        ['Kidney Diseases', Boolean(mh.kidneyDiseases)],
+        ['AIDS', Boolean(mh.aids)],
+        ['Thyroid', Boolean(mh.thyroid)],
+        ['Other Problems (Please Specify)', Boolean(mh.otherDiseases)],
+      ];
+
+      const allergies: Array<[string, boolean]> = [
+        ['Penicillin', Boolean(mh.allergyPenicillin)],
+        ['Sulphur', Boolean(mh.allergySulphur)],
+        ['Aspirin', Boolean(mh.allergyAspirin)],
+        ['Local Anaesthesia', Boolean(mh.allergyLocalAnaesthesia)],
+        ['Others (Please Specify)', Boolean(mh.allergyOther)],
+      ];
+
+      const habits: Array<[string, boolean]> = [
+        ['Smoking', Boolean(mh.habitSmoking)],
+        ['Chewing Betel Leaf/Nut', Boolean(mh.habitBetelLeaf)],
+        ['Alcohol', Boolean(mh.habitAlcohol)],
+        ['Others (Please Specify)', Boolean(mh.habitOther)],
+      ];
+
+      const planLines: Array<[string, boolean]> = [
+        ['Examination', checklist.Examination],
+        ['X-Ray/RVG', checklist.XRayRVG],
+        ['Consultation', checklist.Consultation],
+        ['Calculus', checklist.Calculus],
+        ['Scaling', checklist.Scaling],
+        ['Caries', checklist.Caries],
+        ['Filling', checklist.Filling],
+        ['Deep Caries', checklist.DeepCaries],
+        ['Root Canal', checklist.RootCanal],
+        ['BDR/BDC/Fracture', checklist.BDR_BDC_Fracture],
+        ['Missing', checklist.Missing],
+        ['Extraction/Surgical Ext', checklist.Extraction_SurgicalExt],
+        ['Partial/Complete Denture/Implant', checklist.Denture_Implant],
+        ['Mobility', checklist.Mobility],
+        ['Mucosal Lesion', checklist.MucosalLesion],
+        ['Implant', checklist.Implant],
+        ['Fixed Orthodontics', checklist.FixedOrthodontics],
+      ];
+
+      const takingDrugLines: Array<[string, boolean]> = [
+        ['Aspirin/Blood Thinner', checklist.TakingDrug_AspirinBloodThinner],
+        ['Antihypertensive', checklist.TakingDrug_Antihypertensive],
+        ['Inhaler', checklist.TakingDrug_Inhaler],
+        ['Others', checklist.TakingDrug_Others],
+      ];
+
+      const twoCol = (pairs: Array<[string, boolean]>) => {
+        const left: string[] = [];
+        const right: string[] = [];
+        pairs.forEach((p, idx) => (idx % 2 === 0 ? left : right).push(`<div class="check">${tick(p[1])} ${esc(p[0])}</div>`));
+        return `<div class="two-col"><div>${left.join('')}</div><div>${right.join('')}</div></div>`;
+      };
+
+      return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Edit Patient Profile - ${esc(patientNameForTitle)}</title>
+  <style>
+    *{box-sizing:border-box;}
+    body{font-family: Arial, sans-serif; color:#000; margin:0; background:#fff;}
+    .page{max-width: 900px; margin: 0 auto; padding: 18px;}
+    h1{font-size:18px; margin:0 0 10px; text-align:center; letter-spacing:0.3px;}
+    h2{font-size:14px; margin:16px 0 8px; border-bottom:1px solid #000; padding-bottom:4px;}
+    .grid{display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px;}
+    .field{border:1px solid #000; padding:8px; min-height:40px;}
+    .label{font-size:11px; font-weight:bold; margin-bottom:4px;}
+    .val{font-size:13px; white-space:pre-wrap;}
+    .two-col{display:grid; grid-template-columns: 1fr 1fr; gap:8px 24px;}
+    .check{font-size:13px; padding:2px 0;}
+    .small{font-size:12px;}
+    .box{border:1px solid #000; padding:10px;}
+    .sign-grid{display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px;}
+    .line{border-bottom:1px solid #000; min-height:18px;}
+    @media print{
+      .page{padding:0.6cm;}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>PATIENT RECORD FORM</h1>
+
+    <div class="grid">
+      <div class="field"><div class="label">Reg. No.</div><div class="val">${esc(patientRecordForm.regNo)}</div></div>
+      <div class="field"><div class="label">Name</div><div class="val">${esc(patientRecordForm.name)}</div></div>
+      <div class="field"><div class="label">Occupation</div><div class="val">${esc(patientRecordForm.occupation)}</div></div>
+      <div class="field"><div class="label">Mob.</div><div class="val">${esc(patientRecordForm.mobile)}</div></div>
+      <div class="field"><div class="label">Address</div><div class="val">${esc(patientRecordForm.address)}</div></div>
+      <div class="field"><div class="label">Ref.: ....</div><div class="val">${esc(patientRecordForm.refBy)}</div></div>
+      <div class="field"><div class="label">Age</div><div class="val">${esc(patientRecordForm.age)}</div></div>
+      <div class="field"><div class="label">Blood Pressure (High/Low)</div><div class="val">${esc(patientRecordForm.bloodPressureReading)}</div></div>
+    </div>
+
+    <h2>MEDICAL HISTORY</h2>
+    <div class="box">
+      <div class="small"><b>Diseases Like</b></div>
+      ${twoCol(diseases)}
+
+      <div style="margin-top:10px" class="small"><b>Other Problems (Please Specify)</b></div>
+      <div class="val">${esc(mh.otherDiseases || '')}</div>
+
+      <div style="margin-top:10px" class="small"><b>If Female, Are you pregnant?</b> ${esc(yesNo(patientRecordForm.femalePregnant))}</div>
+
+      <div style="margin-top:10px" class="small"><b>Allergic to</b></div>
+      ${twoCol(allergies)}
+      <div class="val">${esc(mh.allergyOther || '')}</div>
+
+      <div style="margin-top:10px" class="small"><b>Bad Habit Like</b></div>
+      ${twoCol(habits)}
+      <div class="val">${esc(mh.habitOther || '')}</div>
+    </div>
+
+    <h2>DIAGNOSIS</h2>
+    <div class="box"><div class="val">${esc(patientRecordForm.diagnosisText)}</div></div>
+
+    <h2>TREATMENT PLAN</h2>
+    <div class="box">
+      ${twoCol(planLines)}
+      <div style="margin-top:10px" class="small"><b>Taking Drug</b></div>
+      ${twoCol(takingDrugLines)}
+      <div class="val">${esc(patientRecordForm.takingDrugOtherText)}</div>
+
+      <div style="margin-top:10px" class="small"><b>Examination</b></div>
+      <div class="val">${esc(patientRecordForm.examinationNotes)}</div>
+    </div>
+
+    <h2>COST</h2>
+    <div class="box">
+      <div class="grid">
+        <div class="field"><div class="label">Total=</div><div class="val">${esc(patientRecordForm.costTotal)}</div></div>
+        <div class="field"><div class="label">of myself/my.</div><div class="val">${esc(patientRecordForm.costPayerText)}</div></div>
+      </div>
+    </div>
+
+    <h2>CONSENT</h2>
+    <div class="box">
+      <div class="check">${tick(patientRecordForm.agreeToTreatment)} I do hereby agree to undergo necessary treatment</div>
+      <div class="check">${tick(patientRecordForm.explainedComplications)} The procedure & the potential complications (if any) were explained to me.</div>
+      <div style="margin-top:10px" class="sign-grid">
+        <div>
+          <div class="small"><b>Date:</b> ${esc(patientRecordForm.consentDate)}</div>
+          <div class="line"></div>
+        </div>
+        <div>
+          <div class="small"><b>Signature/Name:</b> ${esc(patientRecordForm.signatureName)}</div>
+          <div class="line"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+    },
+    [medicalHistory, patientRecordForm]
+  );
+
+  const openPatientRecordFormPrint = useCallback(() => {
+    if (!selectedPatient) return;
+    // Always save before printing so data isn't lost
+    savePatientRecordForm(selectedPatient.id, patientRecordForm);
+    const html = getPatientRecordFormPrintHtml(selectedPatient.name || 'Patient');
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!w) {
+      showToast('Popups blocked. Allow popups to print/save PDF.');
+      URL.revokeObjectURL(url);
+      return;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }, [selectedPatient, patientRecordForm, getPatientRecordFormPrintHtml]);
   
   // Modals
   const [showMedicalHistoryModal, setShowMedicalHistoryModal] = useState(false);
@@ -528,6 +1080,10 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
 
   const loadData = useCallback(async () => {
     if (!api.getToken()) {
+      setDashboardApiStats(null);
+      setDashboardRecentPatients(null);
+      setDashboardRevenueChart([]);
+      setDashboardAppointmentChart([]);
       try {
         setPatients(JSON.parse(localStorage.getItem(STORAGE_KEYS.patients) || '[]'));
         setPrescriptions(JSON.parse(localStorage.getItem(STORAGE_KEYS.prescriptions) || '[]'));
@@ -560,9 +1116,30 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
       setPrescriptions(prescriptionsList.map(mapPrescriptionFromApi));
       setInvoices(invoicesList.map(mapInvoiceFromApi));
       setLabOrders(labList.map(mapLabOrderFromApi));
+
+      const [dashStats, dashRecent, revC, apptC] = await Promise.all([
+        api.dashboard.stats().catch(() => null),
+        api.dashboard.recentPatients().catch(() => null),
+        api.dashboard.revenueChart('daily').catch(() => null),
+        api.dashboard.appointmentChart().catch(() => null),
+      ]);
+      if (dashStats && typeof dashStats === 'object') {
+        setDashboardApiStats(dashStats as ServerDashboardStats);
+      } else {
+        setDashboardApiStats(null);
+      }
+      setDashboardRecentPatients(
+        Array.isArray(dashRecent) ? dashRecent.map(mapPatientFromApi) : null
+      );
+      setDashboardRevenueChart(Array.isArray(revC) ? revC : []);
+      setDashboardAppointmentChart(Array.isArray(apptC) ? apptC : []);
     } catch (e: any) {
       console.error('API load error:', e);
       setApiError(e?.message ?? 'Failed to load data');
+      setDashboardApiStats(null);
+      setDashboardRecentPatients(null);
+      setDashboardRevenueChart([]);
+      setDashboardAppointmentChart([]);
       try {
         setPatients(JSON.parse(localStorage.getItem(STORAGE_KEYS.patients) || '[]'));
         setPrescriptions(JSON.parse(localStorage.getItem(STORAGE_KEYS.prescriptions) || '[]'));
@@ -614,6 +1191,51 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
     })();
     return () => { cancelled = true; };
   }, [activeNav, userRole]);
+
+  useEffect(() => {
+    if (activeNav !== 'super-admin' || userRole !== 'SUPER_ADMIN' || !api.getToken()) return;
+    if (superAdminTab !== 'approvals') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.superAdmin.pendingSignups();
+        if (!cancelled) setSuperAdminPending(res.pending ?? []);
+      } catch {
+        if (!cancelled) showToast('Failed to load pending signups');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeNav, userRole, superAdminTab]);
+
+  useEffect(() => {
+    if (activeNav !== 'super-admin' || userRole !== 'SUPER_ADMIN' || !api.getToken()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (superAdminTab === 'doctor-control') {
+          const res = await api.superAdmin.doctors({ search: superAdminDoctorSearch, limit: 200 });
+          if (!cancelled) setSuperAdminDoctors(res.doctors ?? []);
+          return;
+        }
+        if (superAdminTab === 'patient-control') {
+          const res = await api.superAdmin.patients({ search: superAdminPatientSearch, limit: 200 });
+          if (!cancelled) setSuperAdminPatients(res.patients ?? []);
+          return;
+        }
+        if (superAdminTab === 'prescription-control') {
+          const res = await api.superAdmin.prescriptions({ limit: 200 });
+          if (!cancelled) setSuperAdminPrescriptions(res.prescriptions ?? []);
+        }
+      } catch {
+        if (!cancelled) showToast('Failed to load super admin management data');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeNav, userRole, superAdminTab, superAdminDoctorSearch, superAdminPatientSearch]);
 
   const savePatients = (data: Patient[]) => {
     localStorage.setItem(STORAGE_KEYS.patients, JSON.stringify(data));
@@ -683,6 +1305,53 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
     } catch { setConsent(null); }
   };
 
+  const loadPatientRecordForm = (patient: Patient) => {
+    const defaults = getDefaultPatientRecordFormData();
+    try {
+      const raw = localStorage.getItem(PATIENT_RECORD_FORM_KEY(patient.id));
+      if (raw) {
+        const parsed = JSON.parse(raw) as PatientRecordFormData;
+        // Merge into fresh defaults — never spread previous patient's form state.
+        setPatientRecordForm({
+          ...defaults,
+          ...parsed,
+          treatmentChecklist: {
+            ...defaults.treatmentChecklist,
+            ...(parsed.treatmentChecklist ?? {}),
+          },
+          regNo: parsed.regNo ?? patient.regNo ?? '',
+          name: parsed.name ?? patient.name ?? '',
+          occupation: parsed.occupation ?? patient.occupation ?? '',
+          mobile: parsed.mobile ?? patient.phone ?? '',
+          address: parsed.address ?? patient.address ?? '',
+          refBy: parsed.refBy ?? patient.refBy ?? '',
+          age: parsed.age ?? patient.age ?? '',
+        });
+        return;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Default from patient profile (no saved draft for this patient)
+    setPatientRecordForm({
+      ...defaults,
+      regNo: patient.regNo ?? '',
+      name: patient.name ?? '',
+      occupation: patient.occupation ?? '',
+      mobile: patient.phone ?? '',
+      address: patient.address ?? '',
+      refBy: patient.refBy ?? '',
+      age: patient.age ?? '',
+      diagnosisText: '',
+    });
+  };
+
+  const savePatientRecordForm = (patientId: string, data: PatientRecordFormData) => {
+    localStorage.setItem(PATIENT_RECORD_FORM_KEY(patientId), JSON.stringify(data));
+    setPatientRecordForm(data);
+  };
+
   const saveConsent = (patientId: string, data: PatientConsent) => {
     localStorage.setItem(CONSENT_KEY(patientId), JSON.stringify(data));
     setConsent(data);
@@ -700,14 +1369,154 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
   };
 
   const filteredPatients = useMemo(() => {
+    if (activeNav === 'patients' && patientsSearchOverride !== null && searchQuery.trim()) {
+      return patientsSearchOverride;
+    }
     if (!searchQuery) return patients;
     const q = searchQuery.toLowerCase();
-    return patients.filter(p => 
-      p.name.toLowerCase().includes(q) || 
+    return patients.filter(p =>
+      p.name.toLowerCase().includes(q) ||
       p.phone.includes(q) ||
-      p.regNo?.toLowerCase().includes(q)
+      p.regNo?.toLowerCase().includes(q) ||
+      (p.email?.toLowerCase().includes(q) ?? false)
     );
-  }, [patients, searchQuery]);
+  }, [patients, searchQuery, patientsSearchOverride, activeNav]);
+
+  useEffect(() => {
+    if (activeNav !== 'patients') {
+      setPatientsSearchOverride(null);
+      setPatientSearchLoading(false);
+      return;
+    }
+    if (!api.getToken()) {
+      setPatientsSearchOverride(null);
+      setPatientSearchLoading(false);
+      return;
+    }
+    const q = searchQuery.trim();
+    if (!q) {
+      setPatientsSearchOverride(null);
+      setPatientSearchLoading(false);
+      return;
+    }
+    setPatientSearchLoading(true);
+    const t = window.setTimeout(() => {
+      api.patients
+        .list({ search: q, limit: 200 })
+        .then((res) => {
+          const list = (res as { patients: any[] }).patients ?? [];
+          setPatientsSearchOverride(list.map(mapPatientFromApi));
+        })
+        .catch(() => setPatientsSearchOverride(null))
+        .finally(() => setPatientSearchLoading(false));
+    }, 320);
+    return () => window.clearTimeout(t);
+  }, [searchQuery, activeNav]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setClinicAdminSearch(clinicAdminSearchInput), 400);
+    return () => window.clearTimeout(t);
+  }, [clinicAdminSearchInput]);
+
+  useEffect(() => {
+    setClinicAdminPage(1);
+  }, [clinicAdminSearch, adminFilterClinicId]);
+
+  useEffect(() => {
+    if (userRole === 'SUPER_ADMIN' && adminClinicOptions.length > 0) {
+      setNewStaffForm((f) => (f.clinicId ? f : { ...f, clinicId: adminClinicOptions[0].id }));
+    }
+  }, [userRole, adminClinicOptions]);
+
+  useEffect(() => {
+    if (activeNav !== 'clinic-admin' || !api.getToken()) return;
+    if (userRole !== 'CLINIC_ADMIN' && userRole !== 'SUPER_ADMIN') return;
+    let cancelled = false;
+    setClinicAdminLoading(true);
+    (async () => {
+      try {
+        if (userRole === 'SUPER_ADMIN') {
+          const cres = await api.admin.clinics();
+          if (!cancelled) setAdminClinicOptions(cres.clinics ?? []);
+        } else if (!cancelled) {
+          setAdminClinicOptions([]);
+        }
+        const res = await api.admin.users({
+          search: clinicAdminSearch.trim() || undefined,
+          page: clinicAdminPage,
+          limit: 25,
+          clinicId: userRole === 'SUPER_ADMIN' && adminFilterClinicId ? adminFilterClinicId : undefined,
+        });
+        if (cancelled) return;
+        setClinicAdminUsers(res.users ?? []);
+        setClinicAdminTotal(res.total ?? 0);
+      } catch {
+        if (!cancelled) showToast('Failed to load team');
+      } finally {
+        if (!cancelled) setClinicAdminLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeNav, userRole, clinicAdminSearch, clinicAdminPage, adminFilterClinicId]);
+
+  const filteredAppointments = useMemo(() => {
+    const todayYmd = formatLocalYMD(new Date());
+    const weekEnd = new Date();
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    const weekEndYmd = formatLocalYMD(weekEnd);
+    const notCancelled = (a: Appointment) => {
+      const s = String(a.status).toUpperCase();
+      return s !== 'CANCELLED' && s !== 'CANCELED';
+    };
+    let list = appointments.filter(notCancelled);
+    if (appointmentScheduleFilter === 'today') list = list.filter((a) => a.date === todayYmd);
+    else if (appointmentScheduleFilter === 'upcoming') list = list.filter((a) => a.date >= todayYmd);
+    else if (appointmentScheduleFilter === 'week') {
+      list = list.filter((a) => a.date >= todayYmd && a.date <= weekEndYmd);
+    }
+    return [...list].sort((a, b) => {
+      const c = a.date.localeCompare(b.date);
+      return c !== 0 ? c : (a.time || '').localeCompare(b.time || '');
+    });
+  }, [appointments, appointmentScheduleFilter]);
+
+  const filteredInvoicesForBilling = useMemo(() => {
+    return invoices.filter((inv) => {
+      if (billingInvoiceFilter === 'paid') return inv.status === 'PAID';
+      if (billingInvoiceFilter === 'open') return inv.status !== 'PAID';
+      if (billingInvoiceFilter === 'overdue') return invoiceIsOverdue(inv);
+      return true;
+    });
+  }, [invoices, billingInvoiceFilter]);
+
+  const patientsSortedForList = useMemo(() => {
+    const list = [...filteredPatients];
+    const mul = patientSortDir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      switch (patientSortKey) {
+        case 'name':
+          return mul * a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        case 'regNo':
+          return mul * (a.regNo || '').localeCompare(b.regNo || '', undefined, { numeric: true });
+        case 'phone':
+          return mul * a.phone.localeCompare(b.phone);
+        case 'createdAt':
+          return mul * (a.createdAt - b.createdAt);
+        default:
+          return 0;
+      }
+    });
+    return list;
+  }, [filteredPatients, patientSortKey, patientSortDir]);
+
+  const patientListTotalPages = Math.max(1, Math.ceil(patientsSortedForList.length / patientListPageSize));
+
+  const patientsPageSlice = useMemo(() => {
+    const start = (patientListPage - 1) * patientListPageSize;
+    return patientsSortedForList.slice(start, start + patientListPageSize);
+  }, [patientsSortedForList, patientListPage, patientListPageSize]);
 
   const filteredDrugs = useMemo(() => {
     if (!drugSearch) return DRUG_DATABASE;
@@ -720,18 +1529,52 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
   }, [drugSearch]);
 
   const todayAppointments = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    return appointments.filter(a => a.date === today);
+    const today = formatLocalYMD(new Date());
+    return appointments.filter((a) => a.date === today);
   }, [appointments]);
 
-  const stats = useMemo(() => ({
-    totalPatients: patients.length,
-    todayAppointments: todayAppointments.length,
-    totalPrescriptions: prescriptions.length,
-    pendingInvoices: invoices.filter(i => i.status !== 'PAID').length,
-    pendingLab: labOrders.filter(l => l.status !== 'DELIVERED').length,
-    monthlyRevenue: invoices.reduce((sum, i) => sum + i.paid, 0),
-  }), [patients, todayAppointments, prescriptions, invoices, labOrders]);
+  const stats = useMemo(() => {
+    if (dashboardApiStats) {
+      return {
+        totalPatients: dashboardApiStats.totalPatients,
+        todayAppointments: dashboardApiStats.todayAppointments,
+        totalPrescriptions: dashboardApiStats.prescriptionsThisMonth,
+        prescriptionStatLabel: 'Prescriptions (this month)',
+        pendingInvoices: dashboardApiStats.pendingInvoicesCount,
+        overdueInvoices: dashboardApiStats.overdueInvoicesCount ?? invoices.filter(invoiceIsOverdue).length,
+        pendingLab: dashboardApiStats.pendingLabOrders,
+        monthlyRevenue: dashboardApiStats.monthlyRevenue,
+        revenueStatLabel: 'Collected (this month)',
+        pendingDue: dashboardApiStats.pendingDue,
+        upcomingAppointments: dashboardApiStats.upcomingAppointments,
+        newPatientsThisMonth: dashboardApiStats.newPatientsThisMonth,
+      };
+    }
+    return {
+      totalPatients: patients.length,
+      todayAppointments: todayAppointments.length,
+      totalPrescriptions: prescriptions.length,
+      prescriptionStatLabel: 'Prescriptions',
+      pendingInvoices: invoices.filter((i) => i.status !== 'PAID').length,
+      overdueInvoices: invoices.filter(invoiceIsOverdue).length,
+      pendingLab: labOrders.filter((l) => l.status !== 'DELIVERED').length,
+      monthlyRevenue: invoices.reduce((sum, i) => sum + i.paid, 0),
+      revenueStatLabel: 'Total collected (loaded)',
+      pendingDue: invoices.filter((i) => i.status !== 'PAID').reduce((sum, i) => sum + i.due, 0),
+      upcomingAppointments: appointments.filter((a) => a.status === 'SCHEDULED' || a.status === 'CONFIRMED').length,
+      newPatientsThisMonth: 0,
+    };
+  }, [dashboardApiStats, patients, todayAppointments, prescriptions, invoices, labOrders, appointments]);
+
+  useEffect(() => {
+    setPatientListPage(1);
+  }, [searchQuery, patientSortKey, patientSortDir]);
+
+  useEffect(() => {
+    if (patientListPage > patientListTotalPages) {
+      setPatientListPage(patientListTotalPages);
+    }
+  }, [patientListPage, patientListTotalPages]);
 
   // Handlers
   const handleAddPatient = async () => {
@@ -777,6 +1620,186 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
     savePatients([newPatient, ...patients]);
     setPatientForm({ name: '', phone: '', age: '', gender: '', email: '', address: '', bloodGroup: '', occupation: '', refBy: '' });
     showToast('Patient added successfully');
+  };
+
+  const togglePatientSort = (key: PatientSortKey) => {
+    setPatientSortKey((prevKey) => {
+      if (prevKey === key) {
+        setPatientSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+        return prevKey;
+      }
+      setPatientSortDir('asc');
+      return key;
+    });
+  };
+
+  const exportPatientsListCsv = () => {
+    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+    const lines = [
+      ['Reg No', 'Name', 'Phone', 'Age', 'Gender', 'Created (ISO)'].join(','),
+      ...patientsSortedForList.map((p) =>
+        [
+          esc(p.regNo || ''),
+          esc(p.name),
+          esc(p.phone),
+          esc(p.age || ''),
+          esc(p.gender || ''),
+          esc(new Date(p.createdAt).toISOString()),
+        ].join(','),
+      ),
+    ];
+    const blob = new Blob(['\ufeff', lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `patients-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV exported');
+  };
+
+  const exportInvoicesCsv = () => {
+    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+    const list = filteredInvoicesForBilling;
+    const lines = [
+      ['Invoice No', 'Patient', 'Date', 'Due date', 'Total', 'Paid', 'Due', 'Status'].join(','),
+      ...list.map((inv) =>
+        [
+          esc(inv.invoiceNo),
+          esc(inv.patientName),
+          esc(inv.date),
+          esc(inv.dueDate || ''),
+          String(inv.total),
+          String(inv.paid),
+          String(inv.due),
+          esc(inv.status),
+        ].join(','),
+      ),
+    ];
+    const blob = new Blob(['\ufeff', lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoices-${formatLocalYMD(new Date())}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Invoices exported');
+  };
+
+  const exportAppointmentsCsv = () => {
+    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+    const lines = [
+      ['Date', 'Time', 'Patient', 'Phone', 'Type', 'Status', 'Duration (min)'].join(','),
+      ...filteredAppointments.map((a) =>
+        [
+          esc(a.date),
+          esc(a.time),
+          esc(a.patientName),
+          esc(a.patientPhone || ''),
+          esc(a.type),
+          esc(a.status),
+          String(a.duration ?? 30),
+        ].join(','),
+      ),
+    ];
+    const blob = new Blob(['\ufeff', lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `appointments-${formatLocalYMD(new Date())}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Appointments exported');
+  };
+
+  const handleSendAppointmentReminder = async (appointmentId: string) => {
+    if (api.getToken()) {
+      try {
+        await api.communication.sendAppointmentReminder(appointmentId);
+        showToast('Appointment reminder sent');
+      } catch (e: any) {
+        showToast(e?.message ?? 'Failed to send reminder');
+      }
+      return;
+    }
+
+    showToast('Login to send appointment reminders');
+  };
+
+  const setLocalAppointmentStatus = (appointmentId: string, status: string) => {
+    const next = appointments.map((a) => (a.id === appointmentId ? { ...a, status } : a));
+    saveAppointments(next);
+  };
+
+  const handleConfirmAppointment = async (appointmentId: string) => {
+    if (!api.getToken()) {
+      setLocalAppointmentStatus(appointmentId, 'CONFIRMED');
+      showToast('Appointment confirmed');
+      return;
+    }
+    try {
+      await api.appointments.confirm(appointmentId);
+      showToast('Appointment confirmed');
+      await loadData();
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed to confirm appointment');
+    }
+  };
+
+  const handleCancelAppointment = async (appointmentId: string) => {
+    if (!api.getToken()) {
+      setLocalAppointmentStatus(appointmentId, 'CANCELLED');
+      showToast('Appointment cancelled');
+      return;
+    }
+    try {
+      await api.appointments.cancel(appointmentId);
+      showToast('Appointment cancelled');
+      await loadData();
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed to cancel appointment');
+    }
+  };
+
+  const handleCompleteAppointment = async (appointmentId: string) => {
+    if (!api.getToken()) {
+      setLocalAppointmentStatus(appointmentId, 'COMPLETED');
+      showToast('Appointment completed');
+      return;
+    }
+    try {
+      await api.appointments.complete(appointmentId);
+      showToast('Appointment completed');
+      await loadData();
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed to complete appointment');
+    }
+  };
+
+  const handleDeletePatient = async (p: Patient) => {
+    if (!window.confirm(`Delete patient "${p.name}" (${p.regNo || p.phone})? This cannot be undone.`)) return;
+    if (api.getToken()) {
+      try {
+        await api.patients.delete(p.id);
+        if (selectedPatient?.id === p.id) {
+          setSelectedPatient(null);
+          setActiveNav('patients');
+        }
+        showToast('Patient deleted');
+        await loadData();
+      } catch (e: any) {
+        showToast(e?.message ?? 'Failed to delete patient');
+      }
+      return;
+    }
+    const next = patients.filter((x) => x.id !== p.id);
+    savePatients(next);
+    clearPatientLocalStorage(p.id);
+    if (selectedPatient?.id === p.id) {
+      setSelectedPatient(null);
+      setActiveNav('patients');
+    }
+    showToast('Patient deleted');
   };
 
   const handleAddAppointment = async () => {
@@ -888,13 +1911,14 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
         await api.invoices.create({
           patientId: invoiceForm.patientId,
           discount: invoiceForm.discount,
+          dueDate: invoiceForm.dueDate ? invoiceForm.dueDate : undefined,
           items: invoiceForm.items.map((item) => ({
             description: item.description,
             quantity: 1,
             unitPrice: item.amount,
           })),
         });
-        setInvoiceForm({ patientId: '', items: [], discount: 0 });
+        setInvoiceForm({ patientId: '', items: [], discount: 0, dueDate: '' });
         showToast('Invoice created');
         loadData();
       } catch (e: any) {
@@ -911,11 +1935,12 @@ export const DashboardPage: React.FC<Props> = ({ onLogout, userName = 'Doctor', 
       total,
       paid: 0,
       due: total,
-      date: new Date().toISOString().split('T')[0],
+      date: formatLocalYMD(new Date()),
+      dueDate: invoiceForm.dueDate || undefined,
       status: 'PENDING',
     };
     saveInvoices([newInvoice, ...invoices]);
-    setInvoiceForm({ patientId: '', items: [], discount: 0 });
+    setInvoiceForm({ patientId: '', items: [], discount: 0, dueDate: '' });
     showToast('Invoice created');
   };
 
@@ -1183,26 +2208,63 @@ const printHtml = (title: string, html: string) => {
     showToast('Lab order created');
   };
 
+  const loadDentalChart = (patientId: string) => {
+    try {
+      const raw = localStorage.getItem(DENTAL_CHART_KEY(patientId));
+      setSelectedTeeth(raw ? JSON.parse(raw) : []);
+    } catch {
+      setSelectedTeeth([]);
+    }
+  };
+
+  const saveDentalChart = (patientId: string, teeth: number[]) => {
+    localStorage.setItem(DENTAL_CHART_KEY(patientId), JSON.stringify(teeth));
+    setSelectedTeeth(teeth);
+  };
+
   const selectPatientForView = (patient: Patient) => {
     setSelectedPatient(patient);
     setPatientProfileTab('info');
+    setChiefComplaint('');
+    setClinicalFindings('');
+    setInvestigation('');
+    setDiagnosis('');
     loadPatientMedicalHistory(patient.id);
     loadTreatmentPlans(patient.id);
     loadTreatmentRecords(patient.id);
     loadConsent(patient.id);
+    loadDentalChart(patient.id);
+    loadPatientRecordForm(patient);
     setActiveNav('patient-detail');
   };
 
-  const selectPatientForPrescription = (patient: Patient) => {
-    setPrescriptionForm({ ...prescriptionForm, patientId: patient.id });
+  const startNewPrescriptionForPatient = (patient: Patient | null) => {
+    setPrescriptionForm({
+      patientId: patient ? patient.id : '',
+      diagnosis: '',
+      advice: '',
+      drugs: [],
+    });
     setSelectedPatient(patient);
     setActiveNav('prescription');
   };
 
+  const selectPatientForPrescription = (patient: Patient) => {
+    startNewPrescriptionForPatient(patient);
+  };
+
   const toggleTooth = (num: number) => {
-    setSelectedTeeth(prev => 
-      prev.includes(num) ? prev.filter(t => t !== num) : [...prev, num]
-    );
+    setSelectedTeeth(prev => {
+      const next = prev.includes(num) ? prev.filter(t => t !== num) : [...prev, num];
+      if (selectedPatient) {
+        try {
+          localStorage.setItem(DENTAL_CHART_KEY(selectedPatient.id), JSON.stringify(next));
+        } catch {
+          // ignore storage errors
+        }
+      }
+      return next;
+    });
   };
 
   // Render functions
@@ -1249,6 +2311,16 @@ const printHtml = (title: string, html: string) => {
         <button className={`sidebar-item ${activeNav === 'settings' ? 'active' : ''}`} onClick={() => setActiveNav('settings')}>
           <i className="fa-solid fa-gear"></i> <span>Settings</span>
         </button>
+        {(userRole === 'CLINIC_ADMIN' || userRole === 'SUPER_ADMIN') && (
+          <button
+            type="button"
+            className={`sidebar-item ${activeNav === 'clinic-admin' ? 'active' : ''}`}
+            onClick={() => setActiveNav('clinic-admin')}
+            style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4 }}
+          >
+            <i className="fa-solid fa-user-shield"></i> <span>Clinic admin</span>
+          </button>
+        )}
         {userRole === 'SUPER_ADMIN' && (
           <button className={`sidebar-item ${activeNav === 'super-admin' ? 'active' : ''}`} onClick={() => setActiveNav('super-admin')} style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4 }}>
             <i className="fa-solid fa-shield-halved"></i> <span>Super Admin</span>
@@ -1267,8 +2339,25 @@ const printHtml = (title: string, html: string) => {
     <div className="dashboard-content">
       <div className="page-header">
         <div>
-          <h1><i className="fa-solid fa-grid-2"></i> Command Center</h1>
-          <p>Welcome back, <span className="highlight">Dr. {userName}</span> — Here's your clinic overview for today.</p>
+          <h1><i className="fa-solid fa-grid-2"></i> Dashboard</h1>
+          <p>
+            Welcome back, <span className="highlight">Dr. {userName}</span> — clinic overview for today
+            {dashboardApiStats ? (
+              <>
+                {' '}
+                · <strong>{stats.upcomingAppointments}</strong> upcoming appts ·{' '}
+                <strong>{stats.newPatientsThisMonth}</strong> new patients this month
+                {stats.overdueInvoices > 0 ? (
+                  <>
+                    {' '}
+                    · <strong style={{ color: '#b45309' }}>{stats.overdueInvoices}</strong> overdue invoice
+                    {stats.overdueInvoices === 1 ? '' : 's'}
+                  </>
+                ) : null}
+              </>
+            ) : null}
+            .
+          </p>
         </div>
         <div className="header-actions">
           <span style={{ color: 'var(--neo-text-muted)', fontSize: '0.9rem' }}>
@@ -1297,14 +2386,17 @@ const printHtml = (title: string, html: string) => {
           <div className="stat-icon"><i className="fa-solid fa-file-waveform"></i></div>
           <div className="stat-info">
             <span className="stat-value">{stats.totalPrescriptions}</span>
-            <span className="stat-label">Prescriptions</span>
+            <span className="stat-label">{stats.prescriptionStatLabel}</span>
           </div>
         </div>
         <div className="stat-card stat-warning">
           <div className="stat-icon"><i className="fa-solid fa-receipt"></i></div>
           <div className="stat-info">
             <span className="stat-value">{stats.pendingInvoices}</span>
-            <span className="stat-label">Pending Invoices</span>
+            <span className="stat-label">Open invoices</span>
+            {stats.pendingDue > 0 && (
+              <span className="stat-sublabel">৳{Math.round(stats.pendingDue).toLocaleString()} outstanding</span>
+            )}
           </div>
         </div>
         <div className="stat-card stat-danger">
@@ -1317,11 +2409,90 @@ const printHtml = (title: string, html: string) => {
         <div className="stat-card stat-revenue">
           <div className="stat-icon"><i className="fa-solid fa-sack-dollar"></i></div>
           <div className="stat-info">
-            <span className="stat-value">৳{stats.monthlyRevenue.toLocaleString()}</span>
-            <span className="stat-label">Total Revenue</span>
+            <span className="stat-value">৳{Math.round(stats.monthlyRevenue).toLocaleString()}</span>
+            <span className="stat-label">{stats.revenueStatLabel}</span>
           </div>
         </div>
       </div>
+
+      {dashboardApiStats && stats.pendingDue > 0 && (
+        <div className="dashboard-ar-banner" role="status">
+          <i className="fa-solid fa-circle-exclamation" aria-hidden />
+          <span>
+            Accounts receivable: <strong>৳{Math.round(stats.pendingDue).toLocaleString()}</strong> across open invoices
+            {stats.overdueInvoices > 0 ? (
+              <>
+                {' '}
+                (<strong>{stats.overdueInvoices}</strong> past due date)
+              </>
+            ) : null}
+            {' — '}
+            <button type="button" className="link-inline" onClick={() => { setBillingInvoiceFilter('overdue'); setActiveNav('billing'); }}>
+              Review overdue
+            </button>
+            {' · '}
+            <button type="button" className="link-inline" onClick={() => setActiveNav('billing')}>
+              Billing
+            </button>
+            .
+          </span>
+        </div>
+      )}
+
+      {(dashboardRevenueChart.length > 0 || dashboardAppointmentChart.length > 0) && (
+        <div className="dashboard-grid dashboard-charts-row">
+          {dashboardRevenueChart.length > 0 && (
+            <div className="dashboard-card dashboard-chart-card">
+              <div className="card-header">
+                <h3><i className="fa-solid fa-chart-column"></i> Collections (7 days)</h3>
+              </div>
+              <div className="card-body">
+                <div className="dashboard-mini-chart" aria-label="Daily collections">
+                  {(() => {
+                    const maxR = Math.max(...dashboardRevenueChart.map((d) => d.revenue), 1);
+                    return dashboardRevenueChart.map((d, i) => (
+                      <div key={i} className="dashboard-mini-chart-col" title={`${d.date}: ৳${d.revenue}`}>
+                        <div className="dashboard-mini-chart-plot">
+                          <div
+                            className="dashboard-mini-chart-bar dashboard-mini-chart-bar--revenue"
+                            style={{ height: `${Math.max(8, (d.revenue / maxR) * 100)}%` }}
+                          />
+                        </div>
+                        <span className="dashboard-mini-chart-label">{d.date}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+          {dashboardAppointmentChart.length > 0 && (
+            <div className="dashboard-card dashboard-chart-card">
+              <div className="card-header">
+                <h3><i className="fa-solid fa-chart-simple"></i> Appointments (7 days)</h3>
+              </div>
+              <div className="card-body">
+                <div className="dashboard-mini-chart" aria-label="Daily appointment count">
+                  {(() => {
+                    const maxC = Math.max(...dashboardAppointmentChart.map((d) => d.count), 1);
+                    return dashboardAppointmentChart.map((d, i) => (
+                      <div key={i} className="dashboard-mini-chart-col" title={`${d.date}: ${d.count} appts`}>
+                        <div className="dashboard-mini-chart-plot">
+                          <div
+                            className="dashboard-mini-chart-bar dashboard-mini-chart-bar--appts"
+                            style={{ height: `${Math.max(8, (d.count / maxC) * 100)}%` }}
+                          />
+                        </div>
+                        <span className="dashboard-mini-chart-label">{d.date}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="dashboard-grid">
         <div className="dashboard-card">
@@ -1357,13 +2528,13 @@ const printHtml = (title: string, html: string) => {
             <button className="btn-sm" onClick={() => setActiveNav('patients')}>View All</button>
           </div>
           <div className="card-body">
-            {patients.length === 0 ? (
+            {(dashboardRecentPatients ?? patients).length === 0 ? (
               <div className="empty-state">
                 <p style={{ position: 'relative', zIndex: 1 }}>No patients registered yet</p>
               </div>
             ) : (
               <div className="patient-list-mini">
-                {patients.slice(0, 5).map(p => (
+                {(dashboardRecentPatients ?? [...patients].sort((a, b) => b.createdAt - a.createdAt)).slice(0, 5).map(p => (
                   <div key={p.id} className="patient-item-mini" onClick={() => selectPatientForView(p)}>
                     <div className="patient-avatar">{p.name.charAt(0).toUpperCase()}</div>
                     <div className="patient-info-mini">
@@ -1409,7 +2580,7 @@ const printHtml = (title: string, html: string) => {
             <i className="fa-solid fa-user-plus"></i>
             <span>Add Patient</span>
           </button>
-          <button className="quick-action-btn" onClick={() => setActiveNav('prescription')}>
+          <button className="quick-action-btn" onClick={() => startNewPrescriptionForPatient(null)}>
             <i className="fa-solid fa-prescription"></i>
             <span>New Prescription</span>
           </button>
@@ -1435,27 +2606,47 @@ const printHtml = (title: string, html: string) => {
   );
 
   const renderPatients = () => {
-    const q = searchQuery.trim().toLowerCase();
-    const filtered = q
-      ? patients.filter((p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.phone.toLowerCase().includes(q) ||
-          (p.regNo || '').toLowerCase().includes(q)
-        )
-      : patients;
+    const listEmpty = patientsSortedForList.length === 0;
+    const showLoading = dataLoading && patients.length === 0;
+    const emptyMessage = showLoading
+      ? 'Loading patients…'
+      : patients.length === 0
+        ? 'No patients registered yet'
+        : searchQuery.trim()
+          ? 'No patients match your search'
+          : 'No patients found';
+
+    const thSort = (key: PatientSortKey, label: string, align: 'left' | 'right' = 'left') => (
+      <th
+        style={{ textAlign: align, padding: '12px 14px', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+        onClick={() => togglePatientSort(key)}
+        title="Sort"
+      >
+        {label}{' '}
+        {patientSortKey === key ? (patientSortDir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.35 }}>↕</span>}
+      </th>
+    );
 
     return (
       <div className="dashboard-content">
         <div className="page-header">
           <h1><i className="fa-solid fa-users"></i> Patients</h1>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               className="input"
-              placeholder="Search name / phone / reg no"
+              placeholder="Search name / phone / email / reg no"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ width: 280 }}
             />
+            {api.getToken() && patientSearchLoading && searchQuery.trim() ? (
+              <span className="patient-search-hint" style={{ fontSize: 12, color: 'var(--neo-text-muted)' }}>
+                Searching…
+              </span>
+            ) : null}
+            <button type="button" className="btn-secondary btn-sm" onClick={exportPatientsListCsv} disabled={patientsSortedForList.length === 0}>
+              <i className="fa-solid fa-file-csv"></i> Export CSV
+            </button>
           </div>
         </div>
 
@@ -1492,49 +2683,130 @@ const printHtml = (title: string, html: string) => {
           </div>
 
           <div className="dashboard-card">
-            <div className="card-header">
+            <div className="card-header" style={{ flexWrap: 'wrap', gap: 8 }}>
               <h3><i className="fa-solid fa-list"></i> Patient List</h3>
-              <div style={{ fontSize: 12, color: 'var(--neo-text-muted)' }}>{filtered.length} / {patients.length}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginLeft: 'auto' }}>
+                <label style={{ fontSize: 12, color: 'var(--neo-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Rows
+                  <select
+                    className="input"
+                    style={{ width: 72, padding: '4px 8px', fontSize: 12 }}
+                    value={patientListPageSize}
+                    onChange={(e) => {
+                      setPatientListPageSize(Number(e.target.value));
+                      setPatientListPage(1);
+                    }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </label>
+                <div style={{ fontSize: 12, color: 'var(--neo-text-muted)' }}>
+                  Showing {listEmpty ? 0 : (patientListPage - 1) * patientListPageSize + 1}–
+                  {listEmpty ? 0 : Math.min(patientListPage * patientListPageSize, patientsSortedForList.length)} of {patientsSortedForList.length}
+                  {searchQuery.trim() ? ` (filtered from ${patients.length})` : ` (${patients.length} total)`}
+                </div>
+              </div>
             </div>
             <div className="card-body" style={{ padding: 0 }}>
-              {filtered.length === 0 ? (
+              {listEmpty ? (
                 <div className="empty-state" style={{ padding: 18 }}>
-                  <p style={{ position: 'relative', zIndex: 1 }}>No patients found</p>
+                  <p style={{ position: 'relative', zIndex: 1 }}>{emptyMessage}</p>
                 </div>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr>
-                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Reg No</th>
-                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Name</th>
-                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Phone</th>
-                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Age</th>
-                        <th style={{ textAlign: 'left', padding: '12px 14px' }}>Gender</th>
-                        <th style={{ textAlign: 'right', padding: '12px 14px' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.map((p) => (
-                        <tr key={p.id} style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-                          <td style={{ padding: '10px 14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>{p.regNo || '-'}</td>
-                          <td style={{ padding: '10px 14px', fontWeight: 600 }}>{p.name}</td>
-                          <td style={{ padding: '10px 14px' }}>{p.phone}</td>
-                          <td style={{ padding: '10px 14px' }}>{p.age || '-'}</td>
-                          <td style={{ padding: '10px 14px' }}>{p.gender || '-'}</td>
-                          <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                            <button className="btn-sm" onClick={() => { setSelectedPatient(p); setActiveNav('patient-detail'); }}>
-                              <i className="fa-solid fa-eye"></i> View
-                            </button>{' '}
-                            <button className="btn-sm" onClick={() => selectPatientForPrescription(p)} style={{ marginLeft: 6 }}>
-                              <i className="fa-solid fa-prescription"></i> Rx
-                            </button>
-                          </td>
+                <>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          {thSort('regNo', 'Reg No')}
+                          {thSort('name', 'Name')}
+                          {thSort('phone', 'Phone')}
+                          <th style={{ textAlign: 'left', padding: '12px 14px' }}>Age</th>
+                          <th style={{ textAlign: 'left', padding: '12px 14px' }}>Gender</th>
+                          {thSort('createdAt', 'Registered')}
+                          <th style={{ textAlign: 'right', padding: '12px 14px' }}>Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {patientsPageSlice.map((p) => (
+                          <tr
+                            key={p.id}
+                            style={{ borderTop: '1px solid rgba(0,0,0,0.06)', cursor: 'pointer' }}
+                            onClick={() => selectPatientForView(p)}
+                          >
+                            <td style={{ padding: '10px 14px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>{p.regNo || '-'}</td>
+                            <td style={{ padding: '10px 14px', fontWeight: 600 }}>{p.name}</td>
+                            <td style={{ padding: '10px 14px' }} onClick={(e) => e.stopPropagation()}>
+                              <a href={`tel:${p.phone.replace(/\s/g, '')}`} className="link-phone" style={{ color: 'inherit', textDecoration: 'underline' }}>
+                                {p.phone}
+                              </a>
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>{p.age || '-'}</td>
+                            <td style={{ padding: '10px 14px' }}>{p.gender || '-'}</td>
+                            <td style={{ padding: '10px 14px', fontSize: 12, color: 'var(--neo-text-muted)' }}>
+                              {new Date(p.createdAt).toLocaleDateString()}
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                              <button type="button" className="btn-sm" onClick={() => selectPatientForView(p)}>
+                                <i className="fa-solid fa-eye"></i> View
+                              </button>{' '}
+                              <button type="button" className="btn-sm" onClick={() => selectPatientForPrescription(p)} style={{ marginLeft: 6 }}>
+                                <i className="fa-solid fa-prescription"></i> Rx
+                              </button>{' '}
+                              <button
+                                type="button"
+                                className="btn-sm records-btn-danger"
+                                style={{ marginLeft: 6 }}
+                                onClick={() => handleDeletePatient(p)}
+                                title="Delete patient"
+                              >
+                                <i className="fa-solid fa-trash"></i>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {patientListTotalPages > 1 && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '12px 14px',
+                        borderTop: '1px solid rgba(0,0,0,0.06)',
+                        flexWrap: 'wrap',
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 13, color: 'var(--neo-text-muted)' }}>
+                        Page {patientListPage} of {patientListTotalPages}
+                      </span>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          disabled={patientListPage <= 1}
+                          onClick={() => setPatientListPage((n) => Math.max(1, n - 1))}
+                        >
+                          Previous
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          disabled={patientListPage >= patientListTotalPages}
+                          onClick={() => setPatientListPage((n) => Math.min(patientListTotalPages, n + 1))}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -1566,6 +2838,52 @@ const printHtml = (title: string, html: string) => {
     setShowTreatmentPlanModal(false);
     setEditingPlan(null);
     showToast('Treatment plan saved!');
+  };
+
+  const handleSaveMedicalHistory = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedPatient) return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+
+    const data: MedicalHistory = {
+      bloodPressure: fd.get('bloodPressure') === 'on',
+      heartProblems: fd.get('heartProblems') === 'on',
+      cardiacHtnMiPacemaker: fd.get('cardiacHtnMiPacemaker') === 'on',
+      rheumaticFever: fd.get('rheumaticFever') === 'on',
+      diabetes: fd.get('diabetes') === 'on',
+      pepticUlcer: fd.get('pepticUlcer') === 'on',
+      jaundice: fd.get('jaundice') === 'on',
+      asthma: fd.get('asthma') === 'on',
+      tuberculosis: fd.get('tuberculosis') === 'on',
+      kidneyDiseases: fd.get('kidneyDiseases') === 'on',
+      aids: fd.get('aids') === 'on',
+      thyroid: fd.get('thyroid') === 'on',
+      hepatitis: fd.get('hepatitis') === 'on',
+      stroke: fd.get('stroke') === 'on',
+      bleedingDisorder: fd.get('bleedingDisorder') === 'on',
+      otherDiseases: String(fd.get('otherDiseases') ?? '').trim() || undefined,
+      isPregnant: fd.get('isPregnant') === 'on',
+      isLactating: fd.get('isLactating') === 'on',
+      allergyPenicillin: fd.get('allergyPenicillin') === 'on',
+      allergySulphur: fd.get('allergySulphur') === 'on',
+      allergyAspirin: fd.get('allergyAspirin') === 'on',
+      allergyLocalAnaesthesia: fd.get('allergyLocalAnaesthesia') === 'on',
+      allergyOther: String(fd.get('allergyOther') ?? '').trim() || undefined,
+      takingAspirinBloodThinner: fd.get('takingAspirinBloodThinner') === 'on',
+      takingAntihypertensive: fd.get('takingAntihypertensive') === 'on',
+      takingInhaler: fd.get('takingInhaler') === 'on',
+      takingOther: String(fd.get('takingOther') ?? '').trim() || undefined,
+      habitSmoking: fd.get('habitSmoking') === 'on',
+      habitBetelLeaf: fd.get('habitBetelLeaf') === 'on',
+      habitAlcohol: fd.get('habitAlcohol') === 'on',
+      habitOther: String(fd.get('habitOther') ?? '').trim() || undefined,
+      details: String(fd.get('details') ?? '').trim() || undefined,
+    };
+
+    saveMedicalHistory(selectedPatient.id, data);
+    setShowMedicalHistoryModal(false);
+    showToast('Medical history saved!');
   };
 
   const handleDeleteTreatmentPlan = (plan: TreatmentPlan) => {
@@ -1642,7 +2960,8 @@ const printHtml = (title: string, html: string) => {
   const renderPatientDetail = () => {
     if (!selectedPatient) return null;
     const totals = calculateTotals();
-    
+    const treatmentPlansTotalTk = treatmentPlans.reduce((sum, p) => sum + (parseFloat(String(p.cost)) || 0), 0);
+
     return (
       <div className="dashboard-content">
         <div className="page-header">
@@ -1689,29 +3008,86 @@ const printHtml = (title: string, html: string) => {
             <div className="detail-card">
               <h4><i className="fa-solid fa-notes-medical"></i> Medical History</h4>
               <div className="medical-history-tags">
-                {medicalHistory.bloodPressure && <span className="history-tag">Blood Pressure</span>}
-                {medicalHistory.heartProblems && <span className="history-tag">Heart Problems</span>}
-                {medicalHistory.cardiacHtnMiPacemaker && <span className="history-tag">Cardiac (HTN/MI/Pacemaker)</span>}
-                {medicalHistory.rheumaticFever && <span className="history-tag">Rheumatic Fever</span>}
-                {medicalHistory.diabetes && <span className="history-tag">Diabetes</span>}
-                {medicalHistory.asthma && <span className="history-tag">Asthma</span>}
-                {medicalHistory.hepatitis && <span className="history-tag">Hepatitis</span>}
-                {medicalHistory.bleedingDisorder && <span className="history-tag">Bleeding Disorder</span>}
-                {medicalHistory.kidneyDiseases && <span className="history-tag">Kidney Diseases</span>}
-                {medicalHistory.isPregnant && <span className="history-tag pregnant">Pregnant</span>}
-                {medicalHistory.isLactating && <span className="history-tag pregnant">Lactating</span>}
-                {medicalHistory.allergyPenicillin && <span className="history-tag allergy">Penicillin Allergy</span>}
-                {medicalHistory.allergyLocalAnaesthesia && <span className="history-tag allergy">LA Allergy</span>}
-                {medicalHistory.allergySulphur && <span className="history-tag allergy">Sulphur Allergy</span>}
-                {medicalHistory.allergyAspirin && <span className="history-tag allergy">Aspirin Allergy</span>}
-                {medicalHistory.takingAspirinBloodThinner && <span className="history-tag drug">Blood Thinner</span>}
-                {medicalHistory.takingAntihypertensive && <span className="history-tag drug">Antihypertensive</span>}
-                {medicalHistory.takingInhaler && <span className="history-tag drug">Inhaler</span>}
-                {medicalHistory.habitSmoking && <span className="history-tag habit">Smoking</span>}
-                {medicalHistory.habitAlcohol && <span className="history-tag habit">Alcohol</span>}
-                {medicalHistory.habitBetelLeaf && <span className="history-tag habit">Betel Leaf</span>}
-                {!Object.values(medicalHistory).some(v => v) && <p className="empty-state-sm">No history recorded</p>}
+                {MEDICAL_HISTORY_DISPLAY_ORDER.map(({ key, label, tagClass }) => {
+                  if (!medicalHistory[key]) return null;
+                  const cls = ['history-tag', tagClass].filter(Boolean).join(' ');
+                  return (
+                    <span key={String(key)} className={cls}>
+                      {label}
+                    </span>
+                  );
+                })}
+                {MEDICAL_HISTORY_TEXT_DISPLAY.map(({ key, title }) => {
+                  const raw = medicalHistory[key];
+                  if (typeof raw !== 'string' || !raw.trim()) return null;
+                  return (
+                    <div key={String(key)} className="medical-history-text-note">
+                      <strong>{title}:</strong> <span>{raw.trim()}</span>
+                    </div>
+                  );
+                })}
+                {!hasDisplayedMedicalHistory(medicalHistory) && (
+                  <p className="empty-state-sm">No history recorded</p>
+                )}
               </div>
+
+              {/* Treatment plan snapshot (linked to Treatment Plan & Cost) */}
+              <div className="past-work" style={{ marginTop: 12 }}>
+                <p className="past-work-title">
+                  <i className="fa-solid fa-clipboard-list"></i> Treatment plan &amp; cost (summary)
+                </p>
+                {treatmentPlans.length > 0 ? (
+                  <>
+                    <p className="empty-state-sm" style={{ marginBottom: 8 }}>
+                      <strong>{treatmentPlans.length}</strong> line(s) ·{' '}
+                      <strong>{treatmentPlansTotalTk.toLocaleString()} TK</strong> planned total
+                    </p>
+                    <ul className="past-work-list">
+                      {treatmentPlans.slice(0, 4).map((p) => (
+                        <li key={p.id}>
+                          <span>Tooth {p.toothNumber || '—'}</span> — {p.procedure || p.diagnosis || '—'} ·{' '}
+                          <strong>{(parseFloat(String(p.cost)) || 0).toLocaleString()} TK</strong>
+                          {p.status ? <span style={{ opacity: 0.85 }}> ({p.status})</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                    {treatmentPlans.length > 4 && (
+                      <p className="empty-state-sm">+{treatmentPlans.length - 4} more in Treatment Plan &amp; Cost…</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="empty-state-sm">No treatment lines yet. Add a plan below or open the Treatment Plan tab.</p>
+                )}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="btn-primary btn-sm"
+                    onClick={() => {
+                      setEditingPlan(null);
+                      setShowTreatmentPlanModal(true);
+                    }}
+                  >
+                    <i className="fa-solid fa-plus"></i> Add treatment line
+                  </button>
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => setPatientProfileTab('treatment')}>
+                    <i className="fa-solid fa-table-list"></i> Open Treatment Plan &amp; Cost
+                  </button>
+                </div>
+              </div>
+
+              {treatmentRecords.length > 0 && (
+                <div className="past-work">
+                  <p className="past-work-title">Past dental work</p>
+                  <ul className="past-work-list">
+                    {treatmentRecords.slice(0, 3).map(record => (
+                      <li key={record.id}>
+                        <span>{record.date}</span>{' '}
+                        <span>— {record.treatmentDone}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <button className="btn-secondary btn-sm" onClick={() => setShowMedicalHistoryModal(true)}>
                 <i className="fa-solid fa-edit"></i> Edit History
               </button>
@@ -1741,7 +3117,6 @@ const printHtml = (title: string, html: string) => {
               <div className="dental-chart-visual teeth-chart-above">
                 <p className="dental-chart-visual-label">Tooth Numbering System (Front View / Side View)</p>
                 <img src="/tooth-numbering-views.png" alt="Tooth Numbering System – Dentists Use" className="dental-chart-image secondary" />
-                <img src="/dental-chart.png" alt="Dental Chart" className="dental-chart-image tertiary" />
               </div>
               
               <div className="dental-chart">
@@ -1767,9 +3142,21 @@ const printHtml = (title: string, html: string) => {
               {selectedTeeth.length > 0 && (
                 <div className="selected-teeth-section">
                   <p className="selected-teeth"><strong>Selected Teeth:</strong> {selectedTeeth.join(', ')}</p>
-                  <button className="btn-secondary btn-sm" onClick={() => setSelectedTeeth([])}>
-                    <i className="fa-solid fa-times"></i> Clear Selection
-                  </button>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn-secondary btn-sm" onClick={() => setSelectedTeeth([])}>
+                      <i className="fa-solid fa-times"></i> Clear Selection
+                    </button>
+                    <button
+                      className="btn-primary btn-sm"
+                      onClick={() => {
+                        if (!selectedPatient) return;
+                        setEditingPlan(null);
+                        setShowTreatmentPlanModal(true);
+                      }}
+                    >
+                      <i className="fa-solid fa-clipboard-list"></i> Add to Treatment Plan
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1840,6 +3227,12 @@ const printHtml = (title: string, html: string) => {
                 <i className="fa-solid fa-book"></i> Payment Ledger
               </button>
               <button
+                className={`profile-tab ${patientProfileTab === 'record-form' ? 'active' : ''}`}
+                onClick={() => setPatientProfileTab('record-form')}
+              >
+                <i className="fa-solid fa-id-card"></i> Edit Patient Profile
+              </button>
+              <button
                 className={`profile-tab ${patientProfileTab === 'consent' ? 'active' : ''}`}
                 onClick={() => setPatientProfileTab('consent')}
               >
@@ -1850,6 +3243,29 @@ const printHtml = (title: string, html: string) => {
             {/* Treatment Plan Tab */}
             {patientProfileTab === 'treatment' && (
               <div className="tab-content">
+                <div className="tab-header">
+                  <div>
+                    <h3>Treatment Plan &amp; Cost</h3>
+                    <p className="empty-state-sm" style={{ margin: '4px 0 0' }}>
+                      Planned treatments and costs for {selectedPatient.name}. Use actions to edit or remove a line.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => {
+                        setEditingPlan(null);
+                        setShowTreatmentPlanModal(true);
+                      }}
+                    >
+                      <i className="fa-solid fa-plus"></i> Add treatment line
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => setShowMedicalHistoryModal(true)}>
+                      <i className="fa-solid fa-notes-medical"></i> Medical History
+                    </button>
+                  </div>
+                </div>
                 <div className="treatment-table-wrap">
                   <table className="treatment-table">
                     <thead>
@@ -1860,6 +3276,8 @@ const printHtml = (title: string, html: string) => {
                         <th>Cost (TK)</th>
                         <th>CC</th>
                         <th>CF</th>
+                        <th>Status</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1871,6 +3289,34 @@ const printHtml = (title: string, html: string) => {
                           <td>{p.cost}</td>
                           <td>{p.cc}</td>
                           <td>{p.cf}</td>
+                          <td>{p.status || '—'}</td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="records-table-btn records-table-btn-view"
+                                title="Edit"
+                                onClick={() => {
+                                  setEditingPlan(p);
+                                  setShowTreatmentPlanModal(true);
+                                }}
+                              >
+                                <i className="fa-solid fa-pen"></i>
+                              </button>
+                              <button
+                                type="button"
+                                className="records-table-btn records-table-btn-delete"
+                                title="Delete"
+                                onClick={() => {
+                                  if (window.confirm('Delete this treatment plan line?')) {
+                                    handleDeleteTreatmentPlan(p);
+                                  }
+                                }}
+                              >
+                                <i className="fa-solid fa-trash"></i>
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1887,12 +3333,12 @@ const printHtml = (title: string, html: string) => {
                             TK
                           </strong>
                         </td>
-                        <td colSpan={2}></td>
+                        <td colSpan={4}></td>
                       </tr>
                     </tfoot>
                   </table>
                   {treatmentPlans.length === 0 && (
-                    <p className="empty-state">No treatment plans yet</p>
+                    <p className="empty-state">No treatment plans yet. Click &quot;Add treatment line&quot; to create one.</p>
                   )}
                 </div>
               </div>
@@ -1953,6 +3399,246 @@ const printHtml = (title: string, html: string) => {
               </div>
             )}
 
+            {/* Edit Patient Profile Tab */}
+            {patientProfileTab === 'record-form' && (
+              <div className="tab-content">
+                <div className="tab-header">
+                  <h3>Edit Patient Profile</h3>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button
+                      className="btn-secondary btn-sm"
+                      onClick={() => openPatientRecordFormPrint()}
+                      title="Opens a print-ready page. Use Print -> Save as PDF."
+                    >
+                      <i className="fa-solid fa-print"></i> Print / Save PDF
+                    </button>
+                    <button
+                      className="btn-primary"
+                      onClick={async () => {
+                        if (!selectedPatient) return;
+
+                        // Persist the lightweight profile form (for print, etc.)
+                        savePatientRecordForm(selectedPatient.id, patientRecordForm);
+
+                        // Update core patient profile so Patients list and header stay in sync
+                        const updatedPatient: Patient = {
+                          ...selectedPatient,
+                          regNo: patientRecordForm.regNo || selectedPatient.regNo,
+                          name: patientRecordForm.name || selectedPatient.name,
+                          age: patientRecordForm.age || selectedPatient.age,
+                          phone: patientRecordForm.mobile || selectedPatient.phone,
+                          address: patientRecordForm.address || selectedPatient.address,
+                          occupation: patientRecordForm.occupation || selectedPatient.occupation,
+                          refBy: patientRecordForm.refBy || selectedPatient.refBy,
+                        };
+
+                        try {
+                          if (api.getToken()) {
+                            await api.patients.update(updatedPatient.id, {
+                              name: updatedPatient.name,
+                              phone: updatedPatient.phone,
+                              age: updatedPatient.age ? parseInt(String(updatedPatient.age), 10) : undefined,
+                              gender: updatedPatient.gender || undefined,
+                              email: updatedPatient.email || undefined,
+                              address: updatedPatient.address || undefined,
+                              bloodGroup: updatedPatient.bloodGroup || undefined,
+                              occupation: updatedPatient.occupation || undefined,
+                              referredBy: updatedPatient.refBy || undefined,
+                              regNo: updatedPatient.regNo || undefined,
+                            });
+                            await loadData();
+                          } else {
+                            const nextPatients = patients.map(p => p.id === updatedPatient.id ? updatedPatient : p);
+                            savePatients(nextPatients);
+                          }
+
+                          setSelectedPatient(updatedPatient);
+                          showToast('Patient profile updated');
+                        } catch (e: any) {
+                          showToast(e?.message ?? 'Failed to update patient profile');
+                        }
+                      }}
+                    >
+                      <i className="fa-solid fa-save"></i> Save Profile
+                    </button>
+                  </div>
+                </div>
+
+                {/* Basic patient info – just the essentials */}
+                <div className="detail-card" style={{ marginTop: 12 }}>
+                  <div className="clinical-notes-grid">
+                    <div className="clinical-field">
+                      <label>Reg. No.</label>
+                      <input
+                        value={patientRecordForm.regNo}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, regNo: e.target.value }))}
+                        placeholder="Reg. No."
+                      />
+                    </div>
+                    <div className="clinical-field">
+                      <label>Name</label>
+                      <input
+                        value={patientRecordForm.name}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, name: e.target.value }))}
+                        placeholder="Patient name"
+                      />
+                    </div>
+                    <div className="clinical-field">
+                      <label>Age</label>
+                      <input
+                        value={patientRecordForm.age}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, age: e.target.value }))}
+                        placeholder="Age"
+                      />
+                    </div>
+                    <div className="clinical-field">
+                      <label>Mob.</label>
+                      <input
+                        value={patientRecordForm.mobile}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, mobile: e.target.value }))}
+                        placeholder="Mobile"
+                      />
+                    </div>
+                    <div className="clinical-field">
+                      <label>Address</label>
+                      <input
+                        value={patientRecordForm.address}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, address: e.target.value }))}
+                        placeholder="Address"
+                      />
+                    </div>
+                    <div className="clinical-field">
+                      <label>Ref.</label>
+                      <input
+                        value={patientRecordForm.refBy}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, refBy: e.target.value }))}
+                        placeholder="Ref.: ..."
+                      />
+                    </div>
+                    <div className="clinical-field">
+                      <label>Occupation</label>
+                      <input
+                        value={patientRecordForm.occupation}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, occupation: e.target.value }))}
+                        placeholder="Occupation"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Medical history lives in its own modal; keep only a link here */}
+                <div className="detail-card" style={{ marginTop: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <h4 style={{ margin: 0 }}><i className="fa-solid fa-notes-medical"></i> Medical History</h4>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button className="btn-secondary btn-sm" onClick={() => setShowMedicalHistoryModal(true)}>
+                        <i className="fa-solid fa-pen-to-square"></i> Edit Medical History
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        onClick={() => {
+                          setPatientProfileTab('treatment');
+                          setEditingPlan(null);
+                          setShowTreatmentPlanModal(true);
+                        }}
+                      >
+                        <i className="fa-solid fa-plus"></i> Add treatment / cost line
+                      </button>
+                    </div>
+                  </div>
+                  <p className="empty-state-sm" style={{ marginTop: 8 }}>
+                    Full medical history is in the popup. Treatment plans and costs are managed under the <strong>Treatment Plan &amp; Cost</strong> tab (summary also appears on the main patient view Medical History card).
+                  </p>
+                </div>
+
+                {/* Short clinical summary for real‑life use */}
+                <div className="detail-card" style={{ marginTop: 12 }}>
+                  <h4><i className="fa-solid fa-stethoscope"></i> Diagnosis</h4>
+                  <textarea
+                    value={patientRecordForm.diagnosisText}
+                    onChange={(e) => setPatientRecordForm((p) => ({ ...p, diagnosisText: e.target.value }))}
+                    placeholder="Diagnosis"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="detail-card" style={{ marginTop: 12 }}>
+                  <h4><i className="fa-solid fa-clipboard-list"></i> Examination Notes</h4>
+                  <textarea
+                    value={patientRecordForm.examinationNotes}
+                    onChange={(e) => setPatientRecordForm((p) => ({ ...p, examinationNotes: e.target.value }))}
+                    placeholder="Examination / important chairside notes"
+                    rows={3}
+                  />
+                </div>
+
+                {/* Simple cost + consent section kept for print */}
+                <div className="detail-card" style={{ marginTop: 12 }}>
+                  <h4><i className="fa-solid fa-calculator"></i> Cost</h4>
+                  <div className="clinical-notes-grid">
+                    <div className="clinical-field">
+                      <label>Total</label>
+                      <input
+                        value={patientRecordForm.costTotal}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, costTotal: e.target.value }))}
+                        placeholder="Total ="
+                      />
+                    </div>
+                    <div className="clinical-field">
+                      <label>Cost payer text</label>
+                      <input
+                        value={patientRecordForm.costPayerText}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, costPayerText: e.target.value }))}
+                        placeholder='of myself/my ____'
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="detail-card" style={{ marginTop: 12 }}>
+                  <h4><i className="fa-solid fa-file-signature"></i> Agreement</h4>
+                  <div className="checkbox-grid">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={patientRecordForm.agreeToTreatment}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, agreeToTreatment: e.target.checked }))}
+                      />{' '}
+                      I do hereby agree to undergo necessary treatment
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={patientRecordForm.explainedComplications}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, explainedComplications: e.target.checked }))}
+                      />{' '}
+                      The procedure & potential complications were explained to me
+                    </label>
+                  </div>
+
+                  <div className="clinical-notes-grid" style={{ marginTop: 10 }}>
+                    <div className="clinical-field">
+                      <label>Date</label>
+                      <input
+                        type="date"
+                        value={patientRecordForm.consentDate}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, consentDate: e.target.value }))}
+                      />
+                    </div>
+                    <div className="clinical-field">
+                      <label>Signature/Name</label>
+                      <input
+                        value={patientRecordForm.signatureName}
+                        onChange={(e) => setPatientRecordForm((p) => ({ ...p, signatureName: e.target.value }))}
+                        placeholder="Signature/Name"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Consent Tab */}
             {patientProfileTab === 'consent' && (
               <div className="tab-content">
@@ -1989,7 +3675,11 @@ const printHtml = (title: string, html: string) => {
                 <h2><i className="fa-solid fa-notes-medical"></i> Medical History</h2>
                 <button className="modal-close" onClick={() => setShowMedicalHistoryModal(false)}><i className="fa-solid fa-times"></i></button>
               </div>
-              <form onSubmit={handleSaveMedicalHistory} className="medical-history-form">
+              <form
+                key={selectedPatient ? `medical-history-${selectedPatient.id}` : 'medical-history'}
+                onSubmit={handleSaveMedicalHistory}
+                className="medical-history-form"
+              >
                 <div className="history-section">
                   <h4>Diseases Like</h4>
                   <div className="checkbox-grid">
@@ -2465,36 +4155,94 @@ const printHtml = (title: string, html: string) => {
 
   const renderAppointments = () => (
     <div className="dashboard-content">
-      <div className="page-header">
-        <h1><i className="fa-solid fa-calendar-check"></i> Appointments</h1>
-        <p><span className="highlight">Schedule Appointment</span></p>
+      <div className="page-header" style={{ flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1><i className="fa-solid fa-calendar-check"></i> Appointments</h1>
+          <p><span className="highlight">Schedule & filter</span> — {filteredAppointments.length} shown</p>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            className={`btn-secondary btn-sm ${appointmentScheduleFilter === 'upcoming' ? 'billing-filter-active' : ''}`}
+            onClick={() => setAppointmentScheduleFilter('upcoming')}
+          >
+            Upcoming
+          </button>
+          <button
+            type="button"
+            className={`btn-secondary btn-sm ${appointmentScheduleFilter === 'today' ? 'billing-filter-active' : ''}`}
+            onClick={() => setAppointmentScheduleFilter('today')}
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            className={`btn-secondary btn-sm ${appointmentScheduleFilter === 'week' ? 'billing-filter-active' : ''}`}
+            onClick={() => setAppointmentScheduleFilter('week')}
+          >
+            Next 7 days
+          </button>
+          <button
+            type="button"
+            className={`btn-secondary btn-sm ${appointmentScheduleFilter === 'all' ? 'billing-filter-active' : ''}`}
+            onClick={() => setAppointmentScheduleFilter('all')}
+          >
+            All
+          </button>
+          <button type="button" className="btn-secondary btn-sm" onClick={exportAppointmentsCsv} disabled={filteredAppointments.length === 0}>
+            <i className="fa-solid fa-file-csv"></i> Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="appointments-page-card">
         <div className="appointments-inner-grid">
-        <div className="form-panel">
+        <div className="form-panel appointments-form-panel">
           <h3><i className="fa-solid fa-calendar-plus"></i> Appointment Details</h3>
-          <div className="form-grid">
-            <div className="form-group full-width">
-              <label>Patient *</label>
-              <select value={appointmentForm.patientId} onChange={(e) => setAppointmentForm({ ...appointmentForm, patientId: e.target.value })}>
+          <div className="appointments-form-grid">
+            <div className="appointments-field appointments-field-full">
+              <label>Patient <span className="required">*</span></label>
+              <select
+                className="appointments-input"
+                value={appointmentForm.patientId}
+                onChange={(e) => setAppointmentForm({ ...appointmentForm, patientId: e.target.value })}
+              >
                 <option value="">-- Select Patient --</option>
-                {patients.map(p => (
-                  <option key={p.id} value={p.id}>{p.name} - {p.phone}</option>
+                {patients.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} - {p.phone}
+                  </option>
                 ))}
               </select>
             </div>
-            <div className="form-group">
-              <label>Date *</label>
-              <input type="date" value={appointmentForm.date} onChange={(e) => setAppointmentForm({ ...appointmentForm, date: e.target.value })} />
+
+            <div className="appointments-field">
+              <label>Date <span className="required">*</span></label>
+              <input
+                className="appointments-input"
+                type="date"
+                value={appointmentForm.date}
+                onChange={(e) => setAppointmentForm({ ...appointmentForm, date: e.target.value })}
+              />
             </div>
-            <div className="form-group">
-              <label>Time *</label>
-              <input type="time" value={appointmentForm.time} onChange={(e) => setAppointmentForm({ ...appointmentForm, time: e.target.value })} />
+
+            <div className="appointments-field">
+              <label>Time <span className="required">*</span></label>
+              <input
+                className="appointments-input"
+                type="time"
+                value={appointmentForm.time}
+                onChange={(e) => setAppointmentForm({ ...appointmentForm, time: e.target.value })}
+              />
             </div>
-            <div className="form-group full-width">
+
+            <div className="appointments-field">
               <label>Type</label>
-              <select value={appointmentForm.type} onChange={(e) => setAppointmentForm({ ...appointmentForm, type: e.target.value })}>
+              <select
+                className="appointments-input"
+                value={appointmentForm.type}
+                onChange={(e) => setAppointmentForm({ ...appointmentForm, type: e.target.value })}
+              >
                 <option value="Checkup">Checkup</option>
                 <option value="Treatment">Treatment</option>
                 <option value="Follow-up">Follow-up</option>
@@ -2502,23 +4250,35 @@ const printHtml = (title: string, html: string) => {
                 <option value="Consultation">Consultation</option>
               </select>
             </div>
+
+            <div className="appointments-field appointments-field-action">
+              <button className="btn-primary appointments-schedule-btn" onClick={handleAddAppointment} type="button">
+                <i className="fa-solid fa-plus" aria-hidden="true"></i> Schedule Appointment
+              </button>
+            </div>
           </div>
-          <button className="btn-primary" onClick={handleAddAppointment}>
-            <i className="fa-solid fa-plus"></i> Schedule Appointment
-          </button>
         </div>
 
         <div className="list-panel">
-          <h3><i className="fa-solid fa-list"></i> Upcoming Appointments</h3>
+          <h3><i className="fa-solid fa-list"></i> Appointment list</h3>
           <div className="appointments-list">
             {appointments.length === 0 ? (
               <p className="empty-state">No appointments scheduled</p>
+            ) : filteredAppointments.length === 0 ? (
+              <p className="empty-state">No appointments match this filter</p>
             ) : (
-              appointments.map(apt => (
+              filteredAppointments.map(apt => (
                 <div key={apt.id} className="appointment-card">
                   <div className="apt-date-block">
-                    <span className="apt-day">{new Date(apt.date).getDate()}</span>
-                    <span className="apt-month">{new Date(apt.date).toLocaleString('default', { month: 'short' })}</span>
+                    {(() => {
+                      const d0 = parseAppointmentStartLocal(apt);
+                      return (
+                        <>
+                          <span className="apt-day">{d0.getDate()}</span>
+                          <span className="apt-month">{d0.toLocaleString('default', { month: 'short' })}</span>
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="apt-details">
                     <strong>{apt.patientName}</strong>
@@ -2526,26 +4286,76 @@ const printHtml = (title: string, html: string) => {
                     <span><i className="fa-solid fa-tag"></i> {apt.type}</span>
                   </div>
                   <div className="apt-actions">
-                    <span className={`apt-status status-${apt.status.toLowerCase()}`}>{apt.status}</span>
-                    <a
-                      className="btn-icon"
-                      style={{ textDecoration: 'none' }}
-                      title="Add to Google Calendar"
-                      href={getGoogleCalendarUrl(apt)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <i className="fa-solid fa-calendar-plus"></i>
-                    </a>
+                  <span className={`apt-status status-${apt.status.toLowerCase()}`}>{prettifyAppointmentStatus(apt.status)}</span>
+
+                  <a
+                    className="apt-action-btn"
+                    style={{ textDecoration: 'none' }}
+                    title="Add to Google Calendar"
+                    href={getGoogleCalendarUrl(apt)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <i className="fa-solid fa-calendar-plus" aria-hidden="true"></i>
+                    Google
+                  </a>
+
+                  <button
+                    className="apt-action-btn"
+                    title="Download ICS (Apple Calendar / others)"
+                    type="button"
+                    onClick={() => downloadAppointmentIcs(apt)}
+                  >
+                    <i className="fa-solid fa-file-signature" aria-hidden="true"></i>
+                    ICS
+                  </button>
+
+                  <button
+                    className="apt-action-btn"
+                    title="Send appointment reminder"
+                    type="button"
+                    onClick={() => handleSendAppointmentReminder(apt.id)}
+                  >
+                    <i className="fa-solid fa-bell" aria-hidden="true"></i>
+                    Remind
+                  </button>
+
+                  {String(apt.status || '').toUpperCase() === 'SCHEDULED' && (
                     <button
-                      className="btn-icon"
-                      title="Download ICS (Apple Calendar / others)"
+                      className="apt-action-btn"
+                      title="Confirm appointment"
                       type="button"
-                      onClick={() => downloadAppointmentIcs(apt)}
+                      onClick={() => handleConfirmAppointment(apt.id)}
                     >
-                      <span style={{ fontSize: '0.95rem' }}>ICS</span>
+                      <i className="fa-solid fa-circle-check" aria-hidden="true"></i>
+                      Confirm
                     </button>
-                    <button className="btn-icon" title="Send Reminder"><i className="fa-solid fa-bell"></i></button>
+                  )}
+
+                  {(String(apt.status || '').toUpperCase() === 'SCHEDULED' ||
+                    String(apt.status || '').toUpperCase() === 'CONFIRMED') && (
+                    <button
+                      className="apt-action-btn apt-action-btn-danger"
+                      title="Cancel appointment"
+                      type="button"
+                      onClick={() => handleCancelAppointment(apt.id)}
+                    >
+                      <i className="fa-solid fa-xmark" aria-hidden="true"></i>
+                      Cancel
+                    </button>
+                  )}
+
+                  {String(apt.status || '').toUpperCase() === 'CONFIRMED' && (
+                    <button
+                      className="apt-action-btn"
+                      title="Mark appointment completed"
+                      type="button"
+                      onClick={() => handleCompleteAppointment(apt.id)}
+                    >
+                      <i className="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+                      Complete
+                    </button>
+                  )}
                   </div>
                 </div>
               ))
@@ -2585,6 +4395,18 @@ const printHtml = (title: string, html: string) => {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+            </div>
+            <div className="form-field">
+              <label>Due date (optional)</label>
+              <input
+                type="date"
+                className="billing-input"
+                value={invoiceForm.dueDate}
+                onChange={(e) => setInvoiceForm({ ...invoiceForm, dueDate: e.target.value })}
+              />
+              <span style={{ display: 'block', marginTop: 6, fontSize: 12, color: 'var(--neo-text-muted)' }}>
+                Used to flag overdue balances on the dashboard and invoice list.
+              </span>
             </div>
             <div className="form-field">
               <label>Custom add service</label>
@@ -2658,32 +4480,78 @@ const printHtml = (title: string, html: string) => {
           </form>
         </div>
         <div className="billing-list-card">
-          <h3><i className="fa-solid fa-list"></i> Recent Invoices</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+            <h3 style={{ margin: 0 }}><i className="fa-solid fa-list"></i> Invoices</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <button
+                type="button"
+                className={`btn-secondary btn-sm ${billingInvoiceFilter === 'all' ? 'billing-filter-active' : ''}`}
+                onClick={() => setBillingInvoiceFilter('all')}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                className={`btn-secondary btn-sm ${billingInvoiceFilter === 'open' ? 'billing-filter-active' : ''}`}
+                onClick={() => setBillingInvoiceFilter('open')}
+              >
+                Open
+              </button>
+              <button
+                type="button"
+                className={`btn-secondary btn-sm ${billingInvoiceFilter === 'overdue' ? 'billing-filter-active' : ''}`}
+                onClick={() => setBillingInvoiceFilter('overdue')}
+              >
+                Overdue
+              </button>
+              <button
+                type="button"
+                className={`btn-secondary btn-sm ${billingInvoiceFilter === 'paid' ? 'billing-filter-active' : ''}`}
+                onClick={() => setBillingInvoiceFilter('paid')}
+              >
+                Paid
+              </button>
+              <button type="button" className="btn-secondary btn-sm" onClick={exportInvoicesCsv} disabled={filteredInvoicesForBilling.length === 0}>
+                <i className="fa-solid fa-file-csv"></i> Export CSV
+              </button>
+            </div>
+          </div>
           <div className="invoices-list">
             {invoices.length === 0 ? (
               <p className="empty-state">No invoices yet</p>
+            ) : filteredInvoicesForBilling.length === 0 ? (
+              <p className="empty-state">No invoices in this view</p>
             ) : (
               <table className="billing-table">
                 <thead>
                   <tr>
                     <th>Invoice #</th>
                     <th>Patient</th>
+                    <th>Date</th>
+                    <th>Due</th>
                     <th>Total</th>
                     <th>Paid</th>
-                    <th>Due</th>
+                    <th>Balance</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {invoices.map(inv => (
-                    <tr key={inv.id}>
+                  {filteredInvoicesForBilling.map(inv => (
+                    <tr key={inv.id} className={invoiceIsOverdue(inv) ? 'invoice-row-overdue' : undefined}>
                       <td>{inv.invoiceNo}</td>
                       <td>{inv.patientName}</td>
+                      <td>{inv.date}</td>
+                      <td>{inv.dueDate || '—'}</td>
                       <td>৳{inv.total}</td>
                       <td>৳{inv.paid}</td>
                       <td>৳{inv.due}</td>
-                      <td><span className={`status-badge status-${inv.status.toLowerCase()}`}>{inv.status}</span></td>
+                      <td>
+                        <span className={`status-badge status-${inv.status.toLowerCase()}`}>{inv.status}</span>
+                        {invoiceIsOverdue(inv) ? (
+                          <span className="overdue-pill" title="Past due date or marked overdue">Overdue</span>
+                        ) : null}
+                      </td>
                       <td className="invoice-actions-cell">
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                           <button
@@ -2723,139 +4591,159 @@ const printHtml = (title: string, html: string) => {
         <h1><i className="fa-solid fa-flask"></i> Lab Orders</h1>
       </div>
 
-      <div className="lab-form-only-layout">
-        <div className="form-panel lab-form-panel-full">
-          <h3><i className="fa-solid fa-plus"></i> Create Lab Order</h3>
+      <div className="lab-orders-page-card">
+        <div className="lab-orders-inner-grid">
+          <div className="form-panel lab-form-panel-full lab-orders-form-panel">
+            <h3><i className="fa-solid fa-plus"></i> Create Lab Order</h3>
 
-          <div className="lab-form-sections">
-            <div className="lab-form-section">
-              <div className="lab-form-section-title">
-                <i className="fa-solid fa-clipboard-check"></i> Order Details
+            <div className="lab-form-sections">
+              <div className="lab-form-section">
+                <div className="lab-form-section-title">
+                  <i className="fa-solid fa-clipboard-check"></i> Order Details
+                </div>
+
+                <div className="appointments-form-grid lab-order-grid">
+                  <div className="appointments-field appointments-field-full">
+                    <label>Patient <span className="required">*</span></label>
+                    <select
+                      className="appointments-input"
+                      value={labForm.patientId}
+                      onChange={(e) => setLabForm({ ...labForm, patientId: e.target.value })}
+                    >
+                      <option value="">-- Select Patient --</option>
+                      {patients.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="appointments-field">
+                    <label>Work Type <span className="required">*</span></label>
+                    <select
+                      className="appointments-input"
+                      value={labForm.workType}
+                      onChange={(e) => setLabForm({ ...labForm, workType: e.target.value })}
+                    >
+                      <option value="Crown">Crown</option>
+                      <option value="Bridge">Bridge</option>
+                      <option value="Denture">Denture (Complete)</option>
+                      <option value="Partial Denture">Partial Denture</option>
+                      <option value="Aligners">Aligners</option>
+                      <option value="Retainer">Retainer</option>
+                      <option value="Night Guard">Night Guard</option>
+                      <option value="Veneer">Veneer</option>
+                      <option value="Implant Crown">Implant Crown</option>
+                    </select>
+                  </div>
+
+                  <div className="appointments-field">
+                    <label>Tooth Number</label>
+                    <input
+                      className="appointments-input"
+                      type="text"
+                      value={labForm.toothNumber}
+                      onChange={(e) => setLabForm({ ...labForm, toothNumber: e.target.value })}
+                      placeholder="e.g., 11, 21"
+                    />
+                  </div>
+
+                  <div className="appointments-field">
+                    <label>Shade</label>
+                    <input
+                      className="appointments-input"
+                      type="text"
+                      value={labForm.shade}
+                      onChange={(e) => setLabForm({ ...labForm, shade: e.target.value })}
+                      placeholder="e.g., A2, B1"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="form-grid lab-order-grid">
-                <div className="form-group full-width">
-                  <label>Patient *</label>
-                  <select value={labForm.patientId} onChange={(e) => setLabForm({ ...labForm, patientId: e.target.value })}>
-                    <option value="">-- Select Patient --</option>
-                    {patients.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
+              <div className="lab-form-section">
+                <div className="lab-form-section-title">
+                  <i className="fa-solid fa-notes-medical"></i> Additional Notes
                 </div>
 
-                <div className="form-group">
-                  <label>Work Type *</label>
-                  <select value={labForm.workType} onChange={(e) => setLabForm({ ...labForm, workType: e.target.value })}>
-                    <option value="Crown">Crown</option>
-                    <option value="Bridge">Bridge</option>
-                    <option value="Denture">Denture (Complete)</option>
-                    <option value="Partial Denture">Partial Denture</option>
-                    <option value="Aligners">Aligners</option>
-                    <option value="Retainer">Retainer</option>
-                    <option value="Night Guard">Night Guard</option>
-                    <option value="Veneer">Veneer</option>
-                    <option value="Implant Crown">Implant Crown</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label>Tooth Number</label>
-                  <input
-                    type="text"
-                    value={labForm.toothNumber}
-                    onChange={(e) => setLabForm({ ...labForm, toothNumber: e.target.value })}
-                    placeholder="e.g., 11, 21"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Shade</label>
-                  <input
-                    type="text"
-                    value={labForm.shade}
-                    onChange={(e) => setLabForm({ ...labForm, shade: e.target.value })}
-                    placeholder="e.g., A2, B1"
-                  />
+                <div className="appointments-form-grid lab-notes-grid">
+                  <div className="appointments-field appointments-field-full">
+                    <label>Description</label>
+                    <textarea
+                      className="appointments-input lab-textarea"
+                      value={labForm.description}
+                      onChange={(e) => setLabForm({ ...labForm, description: e.target.value })}
+                      placeholder="Additional details..."
+                    />
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="lab-form-section">
-              <div className="lab-form-section-title">
-                <i className="fa-solid fa-notes-medical"></i> Additional Notes
-              </div>
-
-              <div className="form-grid">
-                <div className="form-group full-width">
-                  <label>Description</label>
-                  <textarea
-                    value={labForm.description}
-                    onChange={(e) => setLabForm({ ...labForm, description: e.target.value })}
-                    placeholder="Additional details..."
-                  />
-                </div>
-              </div>
+            <div className="lab-form-submit-row">
+              <button className="btn-primary lab-create-btn" onClick={handleCreateLabOrder} type="button">
+                <i className="fa-solid fa-plus"></i> Create Lab Order
+              </button>
             </div>
           </div>
 
-          <div className="lab-form-submit-row">
-            <button className="btn-primary" onClick={handleCreateLabOrder}>
-              <i className="fa-solid fa-plus"></i> Create Lab Order
-            </button>
-          </div>
-        </div>
-
-        <div className="list-panel lab-orders-list-panel">
-          <h3><i className="fa-solid fa-list"></i> Lab Orders</h3>
-          <div className="lab-orders-list">
-            {labOrders.length === 0 ? (
-              <p className="empty-state">No lab orders yet</p>
-            ) : (
-              <table className="lab-orders-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Patient</th>
-                    <th>Work Type</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {labOrders.map(order => (
-                    <tr key={order.id}>
-                      <td>{order.orderDate}</td>
-                      <td>{order.patientName}</td>
-                      <td>{order.workType}</td>
-                      <td><span className={`status-badge status-${order.status.toLowerCase()}`}>{order.status}</span></td>
-                      <td className="lab-actions-cell">
-                        <button
-                          className="btn-sm lab-action-btn"
-                          onClick={async () => {
-                            if (api.getToken()) {
-                              try {
-                                await api.lab.markDelivered(order.id);
-                                showToast('Lab order marked delivered');
-                                loadData();
-                              } catch (e: any) {
-                                showToast(e?.message ?? 'Failed to update lab order');
-                              }
-                              return;
-                            }
-
-                            const newOrders = labOrders.map(o => (o.id === order.id ? { ...o, status: 'DELIVERED' } : o));
-                            saveLabOrders(newOrders);
-                          }}
-                        >
-                          Mark Delivered
-                        </button>
-                      </td>
+          <div className="list-panel lab-orders-list-panel">
+            <h3><i className="fa-solid fa-list"></i> Lab Orders</h3>
+            <div className="lab-orders-list">
+              {labOrders.length === 0 ? (
+                <p className="empty-state">No lab orders yet</p>
+              ) : (
+                <table className="lab-orders-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Patient</th>
+                      <th>Work Type</th>
+                      <th>Status</th>
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    {labOrders.map((order) => (
+                      <tr key={order.id}>
+                        <td>{order.orderDate}</td>
+                        <td>{order.patientName}</td>
+                        <td>{order.workType}</td>
+                        <td>
+                          <span className={`status-badge status-${order.status.toLowerCase()}`}>{order.status}</span>
+                        </td>
+                        <td className="lab-actions-cell">
+                          <button
+                            type="button"
+                            className="btn-sm lab-action-btn"
+                            onClick={async () => {
+                              if (api.getToken()) {
+                                try {
+                                  await api.lab.markDelivered(order.id);
+                                  showToast('Lab order marked delivered');
+                                  loadData();
+                                } catch (e: any) {
+                                  showToast(e?.message ?? 'Failed to update lab order');
+                                }
+                                return;
+                              }
+
+                              const newOrders = labOrders.map((o) =>
+                                o.id === order.id ? { ...o, status: 'DELIVERED' } : o
+                              );
+                              saveLabOrders(newOrders);
+                            }}
+                          >
+                            Mark Delivered
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -2959,41 +4847,178 @@ const printHtml = (title: string, html: string) => {
           <h3><i className="fa-solid fa-hospital"></i> Clinic Details</h3>
           <div className="form-group">
             <label>Clinic Name</label>
-            <input type="text" placeholder="Your Dental Clinic" />
+            <input
+              className="input"
+              type="text"
+              value={dashboardHeaderDraft.clinicName}
+              onChange={(e) => setDashboardHeaderDraft({ ...dashboardHeaderDraft, clinicName: e.target.value })}
+              placeholder="Your Dental Clinic"
+            />
           </div>
           <div className="form-group">
             <label>Address</label>
-            <textarea placeholder="Clinic address..." />
+            <textarea
+              className="input"
+              value={dashboardHeaderDraft.address}
+              onChange={(e) => setDashboardHeaderDraft({ ...dashboardHeaderDraft, address: e.target.value })}
+              placeholder="Clinic address..."
+            />
           </div>
           <div className="form-group">
             <label>Phone</label>
-            <input type="tel" placeholder="Clinic phone" />
+            <input
+              className="input"
+              type="tel"
+              value={dashboardHeaderDraft.phone}
+              onChange={(e) => setDashboardHeaderDraft({ ...dashboardHeaderDraft, phone: e.target.value })}
+              placeholder="Clinic phone"
+            />
           </div>
-          <button className="btn-primary">Save Changes</button>
+          <div className="form-group">
+            <label>Clinic Logo</label>
+            <input
+              className="input"
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const res = typeof reader.result === 'string' ? reader.result : '';
+                  setDashboardHeaderDraft((prev) => ({ ...prev, clinicLogo: res }));
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            {dashboardHeaderDraft.clinicLogo ? (
+              <img
+                src={dashboardHeaderDraft.clinicLogo}
+                alt="Clinic logo preview"
+                style={{ display: 'block', marginTop: 10, maxWidth: 160, maxHeight: 80, objectFit: 'contain', border: '1px solid rgba(226,232,240,1)', borderRadius: 12, padding: 8, background: '#fff' }}
+              />
+            ) : null}
+          </div>
+          <button
+            className="btn-primary"
+            type="button"
+            onClick={() => {
+              try {
+                const raw = localStorage.getItem(HEADER_SETTINGS_STORAGE_KEY);
+                const existing = raw ? JSON.parse(raw) : {};
+                localStorage.setItem(
+                  HEADER_SETTINGS_STORAGE_KEY,
+                  JSON.stringify({
+                    ...existing,
+                    clinicName: dashboardHeaderDraft.clinicName,
+                    address: dashboardHeaderDraft.address,
+                    phone: dashboardHeaderDraft.phone,
+                    clinicLogo: dashboardHeaderDraft.clinicLogo,
+                  })
+                );
+                showToast('Clinic settings saved');
+              } catch {
+                showToast('Failed to save clinic settings');
+              }
+            }}
+          >
+            Save Changes
+          </button>
         </div>
 
         <div className="settings-card">
           <h3><i className="fa-solid fa-user-doctor"></i> Doctor Profile</h3>
           <div className="form-group">
             <label>Name</label>
-            <input type="text" defaultValue={userName} />
+            <input
+              className="input"
+              type="text"
+              value={dashboardHeaderDraft.doctorName}
+              onChange={(e) => setDashboardHeaderDraft({ ...dashboardHeaderDraft, doctorName: e.target.value })}
+              placeholder="Doctor name"
+            />
           </div>
           <div className="form-group">
             <label>Degree</label>
-            <input type="text" placeholder="BDS, MDS" />
+            <input
+              className="input"
+              type="text"
+              value={dashboardHeaderDraft.degree}
+              onChange={(e) => setDashboardHeaderDraft({ ...dashboardHeaderDraft, degree: e.target.value })}
+              placeholder="BDS, MDS"
+            />
           </div>
           <div className="form-group">
             <label>Specialization</label>
-            <input type="text" placeholder="General Dentistry" />
+            <input
+              className="input"
+              type="text"
+              value={dashboardHeaderDraft.specialization}
+              onChange={(e) => setDashboardHeaderDraft({ ...dashboardHeaderDraft, specialization: e.target.value })}
+              placeholder="General Dentistry"
+            />
           </div>
-          <button className="btn-primary">Save Profile</button>
+          <div className="form-group">
+            <label>Doctor Logo</label>
+            <input
+              className="input"
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const res = typeof reader.result === 'string' ? reader.result : '';
+                  setDashboardHeaderDraft((prev) => ({ ...prev, doctorLogo: res }));
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            {dashboardHeaderDraft.doctorLogo ? (
+              <img
+                src={dashboardHeaderDraft.doctorLogo}
+                alt="Doctor logo preview"
+                style={{ display: 'block', marginTop: 10, maxWidth: 160, maxHeight: 80, objectFit: 'contain', border: '1px solid rgba(226,232,240,1)', borderRadius: 12, padding: 8, background: '#fff' }}
+              />
+            ) : null}
+          </div>
+          <button
+            className="btn-primary"
+            type="button"
+            onClick={() => {
+              try {
+                const raw = localStorage.getItem(HEADER_SETTINGS_STORAGE_KEY);
+                const existing = raw ? JSON.parse(raw) : {};
+                localStorage.setItem(
+                  HEADER_SETTINGS_STORAGE_KEY,
+                  JSON.stringify({
+                    ...existing,
+                    doctorName: dashboardHeaderDraft.doctorName,
+                    qualification: dashboardHeaderDraft.degree,
+                    specialization: dashboardHeaderDraft.specialization,
+                    doctorLogo: dashboardHeaderDraft.doctorLogo,
+                  })
+                );
+                showToast('Doctor profile saved');
+              } catch {
+                showToast('Failed to save doctor profile');
+              }
+            }}
+          >
+            Save Profile
+          </button>
         </div>
 
         <div className="settings-card">
           <h3><i className="fa-solid fa-print"></i> Print Settings</h3>
           <div className="form-group">
             <label>Paper Size</label>
-            <select>
+            <select
+              className="input"
+              value={dashboardPrintDraft.paperSize}
+              onChange={(e) => setDashboardPrintDraft({ ...dashboardPrintDraft, paperSize: e.target.value as any })}
+            >
               <option value="A4">A4</option>
               <option value="A5">A5</option>
               <option value="Letter">Letter</option>
@@ -3001,18 +5026,380 @@ const printHtml = (title: string, html: string) => {
           </div>
           <div className="form-group">
             <label>Header Height</label>
-            <input type="number" defaultValue={100} />
+            <input
+              className="input"
+              type="number"
+              value={dashboardPrintDraft.headerHeight}
+              onChange={(e) => setDashboardPrintDraft({ ...dashboardPrintDraft, headerHeight: Number(e.target.value) })}
+            />
           </div>
-          <button className="btn-primary">Save Settings</button>
+          <button
+            className="btn-primary"
+            type="button"
+            onClick={() => {
+              try {
+                localStorage.setItem(
+                  PRINT_SETUP_OVERRIDES_KEY,
+                  JSON.stringify({
+                    paperSize: dashboardPrintDraft.paperSize,
+                    headerHeight: dashboardPrintDraft.headerHeight,
+                  })
+                );
+                showToast('Print settings saved');
+              } catch {
+                showToast('Failed to save print settings');
+              }
+            }}
+          >
+            Save Settings
+          </button>
         </div>
       </div>
     </div>
   );
 
+  const handleCreateStaffUser = async () => {
+    if (!newStaffForm.email.trim() || !newStaffForm.password || !newStaffForm.name.trim()) {
+      showToast('Name, email, and password are required');
+      return;
+    }
+    if (userRole === 'SUPER_ADMIN' && !newStaffForm.clinicId) {
+      showToast('Select a clinic');
+      return;
+    }
+    try {
+      await api.admin.createUser({
+        email: newStaffForm.email.trim(),
+        password: newStaffForm.password,
+        name: newStaffForm.name.trim(),
+        phone: newStaffForm.phone.trim() || undefined,
+        role: newStaffForm.role,
+        clinicId: userRole === 'SUPER_ADMIN' ? newStaffForm.clinicId : undefined,
+      });
+      showToast('Team member created — they can sign in with this email and password');
+      setNewStaffForm({
+        email: '',
+        password: '',
+        name: '',
+        phone: '',
+        role: 'DOCTOR',
+        clinicId: userRole === 'SUPER_ADMIN' && adminClinicOptions[0] ? adminClinicOptions[0].id : '',
+      });
+      const res = await api.admin.users({
+        search: clinicAdminSearch.trim() || undefined,
+        page: clinicAdminPage,
+        limit: 25,
+        clinicId: userRole === 'SUPER_ADMIN' && adminFilterClinicId ? adminFilterClinicId : undefined,
+      });
+      setClinicAdminUsers(res.users ?? []);
+      setClinicAdminTotal(res.total ?? 0);
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed to create user');
+    }
+  };
+
+  const handleToggleStaffActive = async (u: any) => {
+    if (u.id === currentUserId) {
+      showToast('You cannot change your own access here');
+      return;
+    }
+    if (u.role === 'SUPER_ADMIN') {
+      showToast('Platform admins are managed separately');
+      return;
+    }
+    try {
+      await api.admin.updateUser(u.id, { isActive: !u.isActive });
+      showToast(!u.isActive ? 'Access enabled' : 'Access disabled');
+      setClinicAdminUsers((list) => list.map((row) => (row.id === u.id ? { ...row, isActive: !u.isActive } : row)));
+    } catch (e: any) {
+      showToast(e?.message ?? 'Update failed');
+    }
+  };
+
+  const handleStaffRoleChange = async (u: any, role: string) => {
+    if (u.id === currentUserId) {
+      showToast('You cannot change your own role here');
+      return;
+    }
+    if (u.role === 'SUPER_ADMIN') {
+      showToast('Cannot change platform admin role here');
+      return;
+    }
+    try {
+      await api.admin.updateUser(u.id, { role });
+      showToast('Role updated');
+      setClinicAdminUsers((list) => list.map((row) => (row.id === u.id ? { ...row, role } : row)));
+    } catch (e: any) {
+      showToast(e?.message ?? 'Update failed');
+    }
+  };
+
+  const renderClinicAdmin = () => {
+    if (!api.getToken()) {
+      return (
+        <div className="dashboard-content">
+          <div className="page-header">
+            <h1>Clinic admin</h1>
+            <p>Connect to the API and sign in to manage staff access.</p>
+          </div>
+        </div>
+      );
+    }
+    if (userRole !== 'CLINIC_ADMIN' && userRole !== 'SUPER_ADMIN') {
+      return (
+        <div className="dashboard-content">
+          <p>You do not have permission to open this page.</p>
+        </div>
+      );
+    }
+
+    const totalPages = Math.max(1, Math.ceil(clinicAdminTotal / 25));
+
+    return (
+      <div className="dashboard-content">
+        <div className="page-header" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <h1><i className="fa-solid fa-user-shield"></i> Clinic admin</h1>
+            <p style={{ color: 'var(--neo-text-muted)', marginTop: 6, maxWidth: 720 }}>
+              {userRole === 'SUPER_ADMIN'
+                ? 'Create accounts, assign clinic admin or doctor roles, and disable access for any clinic.'
+                : 'Manage who can sign in for your clinic. Disabled users cannot log in or call the API.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="dashboard-card" style={{ marginBottom: 20 }}>
+          <div className="card-header">
+            <h3><i className="fa-solid fa-user-plus"></i> Add staff account</h3>
+          </div>
+          <div className="card-body">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+              {userRole === 'SUPER_ADMIN' && (
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Clinic</label>
+                  <select
+                    className="input"
+                    value={newStaffForm.clinicId}
+                    onChange={(e) => setNewStaffForm({ ...newStaffForm, clinicId: e.target.value })}
+                  >
+                    {adminClinicOptions.length === 0 ? (
+                      <option value="">Loading clinics…</option>
+                    ) : (
+                      adminClinicOptions.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              )}
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Full name</label>
+                <input
+                  className="input"
+                  value={newStaffForm.name}
+                  onChange={(e) => setNewStaffForm({ ...newStaffForm, name: e.target.value })}
+                  placeholder="Dr. Name"
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Email (login)</label>
+                <input
+                  className="input"
+                  type="email"
+                  autoComplete="off"
+                  value={newStaffForm.email}
+                  onChange={(e) => setNewStaffForm({ ...newStaffForm, email: e.target.value })}
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Temporary password</label>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newStaffForm.password}
+                  onChange={(e) => setNewStaffForm({ ...newStaffForm, password: e.target.value })}
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Phone</label>
+                <input
+                  className="input"
+                  value={newStaffForm.phone}
+                  onChange={(e) => setNewStaffForm({ ...newStaffForm, phone: e.target.value })}
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Role</label>
+                <select
+                  className="input"
+                  value={newStaffForm.role}
+                  onChange={(e) =>
+                    setNewStaffForm({ ...newStaffForm, role: e.target.value as 'DOCTOR' | 'CLINIC_ADMIN' })
+                  }
+                >
+                  <option value="DOCTOR">Doctor</option>
+                  <option value="CLINIC_ADMIN">Clinic admin</option>
+                </select>
+              </div>
+            </div>
+            <button type="button" className="btn-primary" style={{ marginTop: 14 }} onClick={handleCreateStaffUser}>
+              <i className="fa-solid fa-plus"></i> Create account
+            </button>
+          </div>
+        </div>
+
+        <div className="dashboard-card">
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <h3 style={{ margin: 0 }}><i className="fa-solid fa-users-gear"></i> Team & access</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
+              {userRole === 'SUPER_ADMIN' && (
+                <select
+                  className="input"
+                  style={{ minWidth: 200 }}
+                  value={adminFilterClinicId}
+                  onChange={(e) => setAdminFilterClinicId(e.target.value)}
+                >
+                  <option value="">All clinics</option>
+                  {adminClinicOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <input
+                className="input"
+                placeholder="Search name or email…"
+                value={clinicAdminSearchInput}
+                onChange={(e) => setClinicAdminSearchInput(e.target.value)}
+                style={{ width: 220 }}
+              />
+            </div>
+          </div>
+          <div className="card-body" style={{ paddingTop: 0 }}>
+            {clinicAdminLoading ? (
+              <p style={{ padding: 24, textAlign: 'center', color: 'var(--neo-text-muted)' }}>
+                <i className="fa-solid fa-spinner fa-spin"></i> Loading…
+              </p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '10px 12px' }}>User</th>
+                      <th style={{ textAlign: 'left', padding: '10px 12px' }}>Role</th>
+                      {userRole === 'SUPER_ADMIN' ? (
+                        <th style={{ textAlign: 'left', padding: '10px 12px' }}>Clinic</th>
+                      ) : null}
+                      <th style={{ textAlign: 'left', padding: '10px 12px' }}>Access</th>
+                      <th style={{ textAlign: 'right', padding: '10px 12px' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clinicAdminUsers.map((u) => (
+                      <tr key={u.id} style={{ opacity: u.isActive === false ? 0.65 : 1 }}>
+                        <td style={{ padding: '10px 12px' }}>
+                          <strong>{u.name}</strong>
+                          <div style={{ fontSize: 12, color: 'var(--neo-text-muted)' }}>{u.email}</div>
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          {u.role === 'SUPER_ADMIN' ? (
+                            <span className="status-badge status-paid">Super admin</span>
+                          ) : (
+                            <select
+                              className="input"
+                              style={{ minWidth: 140, padding: '6px 8px', fontSize: 13 }}
+                              value={u.role}
+                              disabled={u.id === currentUserId || u.role === 'SUPER_ADMIN'}
+                              onChange={(e) => handleStaffRoleChange(u, e.target.value)}
+                            >
+                              <option value="DOCTOR">Doctor</option>
+                              <option value="CLINIC_ADMIN">Clinic admin</option>
+                            </select>
+                          )}
+                        </td>
+                        {userRole === 'SUPER_ADMIN' ? (
+                          <td style={{ padding: '10px 12px', fontSize: 13, color: 'var(--neo-text-secondary)' }}>
+                            {u.clinicName || u.clinicId || '—'}
+                          </td>
+                        ) : null}
+                        <td style={{ padding: '10px 12px' }}>
+                          {u.isActive === false ? (
+                            <span className="overdue-pill" style={{ background: 'rgba(185,28,28,0.12)', color: '#b91c1c' }}>
+                              Disabled
+                            </span>
+                          ) : (
+                            <span className="status-badge status-confirmed">Active</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                          {u.role !== 'SUPER_ADMIN' ? (
+                            <button
+                              type="button"
+                              className={u.isActive === false ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}
+                              disabled={u.id === currentUserId}
+                              onClick={() => handleToggleStaffActive(u)}
+                            >
+                              {u.isActive === false ? 'Enable access' : 'Disable access'}
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 12, color: 'var(--neo-text-muted)' }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {clinicAdminUsers.length === 0 && !clinicAdminLoading ? (
+                  <p className="empty-state" style={{ padding: 20 }}>
+                    No users in this view.
+                  </p>
+                ) : null}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', flexWrap: 'wrap', gap: 8 }}>
+                  <span style={{ fontSize: 13, color: 'var(--neo-text-muted)' }}>
+                    {clinicAdminTotal} user{clinicAdminTotal === 1 ? '' : 's'}
+                  </span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      disabled={clinicAdminPage <= 1}
+                      onClick={() => setClinicAdminPage((p) => Math.max(1, p - 1))}
+                    >
+                      Previous
+                    </button>
+                    <span style={{ fontSize: 13, alignSelf: 'center' }}>
+                      Page {clinicAdminPage} / {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      disabled={clinicAdminPage >= totalPages}
+                      onClick={() => setClinicAdminPage((p) => p + 1)}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderSuperAdmin = () => {
     const tabs = [
       { id: 'overview' as const, label: 'Overview', icon: 'fa-chart-pie' },
+      { id: 'approvals' as const, label: 'Pending signups', icon: 'fa-user-clock' },
       { id: 'clinics' as const, label: 'Clinics & branches', icon: 'fa-building' },
+      { id: 'doctor-control' as const, label: 'Doctor control', icon: 'fa-user-doctor' },
+      { id: 'patient-control' as const, label: 'Patient control', icon: 'fa-user-injured' },
+      { id: 'prescription-control' as const, label: 'Prescription control', icon: 'fa-file-prescription' },
       { id: 'revenue' as const, label: 'Revenue by branch', icon: 'fa-money-bill-wave' },
       { id: 'utilization' as const, label: 'Chair utilization', icon: 'fa-chair' },
       { id: 'logs' as const, label: 'Activity logs', icon: 'fa-list' },
@@ -3021,7 +5408,9 @@ const printHtml = (title: string, html: string) => {
       <div className="dashboard-content">
         <div className="dashboard-header">
           <h1><i className="fa-solid fa-shield-halved"></i> Super Admin Panel</h1>
-          <p style={{ color: 'var(--text-secondary)', marginTop: 4 }}>Manage all clinics, view branch-wise revenue and activity logs</p>
+          <p style={{ color: 'var(--text-secondary)', marginTop: 4 }}>
+            Separate platform portal to manage doctors, patients, and prescriptions globally
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           {tabs.map((t) => (
@@ -3034,8 +5423,84 @@ const printHtml = (title: string, html: string) => {
             </button>
           ))}
         </div>
-        {superAdminLoading ? (
+        {superAdminLoading && superAdminTab !== 'approvals' ? (
           <div style={{ padding: 40, textAlign: 'center' }}><i className="fa-solid fa-spinner fa-spin"></i> Loading...</div>
+        ) : superAdminTab === 'approvals' ? (
+          <div className="dashboard-card">
+            <div className="card-header">
+              <h3><i className="fa-solid fa-user-clock"></i> Awaiting approval</h3>
+              <p style={{ margin: 0, fontSize: 14, color: 'var(--neo-text-muted)' }}>
+                These users completed <strong>Create Account</strong> but cannot sign in until you approve.
+              </p>
+            </div>
+            <div className="card-body" style={{ paddingTop: 0 }}>
+              {superAdminPending.length === 0 ? (
+                <p className="empty-state" style={{ padding: 24 }}>No pending registrations.</p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left', padding: '10px 12px' }}>Name / Email</th>
+                        <th style={{ textAlign: 'left', padding: '10px 12px' }}>Clinic</th>
+                        <th style={{ textAlign: 'left', padding: '10px 12px' }}>Requested</th>
+                        <th style={{ textAlign: 'right', padding: '10px 12px' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {superAdminPending.map((p: any) => (
+                        <tr key={p.id}>
+                          <td style={{ padding: '10px 12px' }}>
+                            <strong>{p.name}</strong>
+                            <div style={{ fontSize: 12, color: 'var(--neo-text-muted)' }}>{p.email}</div>
+                            {p.phone ? <div style={{ fontSize: 12 }}>{p.phone}</div> : null}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>{p.clinic?.name || p.clinicName || '—'}</td>
+                          <td style={{ padding: '10px 12px', fontSize: 13 }}>
+                            {p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <button
+                              type="button"
+                              className="btn-primary btn-sm"
+                              style={{ marginRight: 8 }}
+                              onClick={async () => {
+                                try {
+                                  await api.superAdmin.approveSignup(p.id);
+                                  showToast('Approved — user can sign in now');
+                                  setSuperAdminPending((list) => list.filter((x) => x.id !== p.id));
+                                } catch (e: any) {
+                                  showToast(e?.message ?? 'Approve failed');
+                                }
+                              }}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-secondary btn-sm"
+                              onClick={async () => {
+                                if (!window.confirm(`Reject and delete registration for ${p.email}? The clinic will be removed if empty.`)) return;
+                                try {
+                                  await api.superAdmin.rejectSignup(p.id);
+                                  showToast('Registration rejected');
+                                  setSuperAdminPending((list) => list.filter((x) => x.id !== p.id));
+                                } catch (e: any) {
+                                  showToast(e?.message ?? 'Reject failed');
+                                }
+                              }}
+                            >
+                              Reject
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
         ) : superAdminTab === 'overview' && superAdminStats ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
             <div className="stat-card" style={{ padding: 16, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
@@ -3091,6 +5556,231 @@ const printHtml = (title: string, html: string) => {
                 ))}
               </tbody>
             </table>
+          </div>
+        ) : superAdminTab === 'doctor-control' ? (
+          <div className="dashboard-card">
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+              <h3><i className="fa-solid fa-user-doctor"></i> Doctor Management</h3>
+              <input
+                value={superAdminDoctorSearch}
+                onChange={(e) => setSuperAdminDoctorSearch(e.target.value)}
+                placeholder="Search doctor name, email, phone, clinic..."
+                style={{ minWidth: 280 }}
+              />
+            </div>
+            <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Doctor</th>
+                    <th>Clinic</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Patients</th>
+                    <th>Prescriptions</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {superAdminDoctors.map((d: any) => (
+                    <tr key={d.id}>
+                      <td>
+                        <strong>{d.name}</strong>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{d.email}</div>
+                        {d.phone ? <div style={{ fontSize: 12 }}>{d.phone}</div> : null}
+                      </td>
+                      <td>{d.clinicName || '—'}</td>
+                      <td>{d.role}</td>
+                      <td>{d.isActive ? 'Active' : 'Disabled'}</td>
+                      <td>{d._count?.patients ?? 0}</td>
+                      <td>{d._count?.prescriptions ?? 0}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          onClick={async () => {
+                            const name = window.prompt('Doctor name', d.name ?? '');
+                            if (name === null) return;
+                            const phone = window.prompt('Doctor phone', d.phone ?? '');
+                            if (phone === null) return;
+                            const clinicName = window.prompt('Clinic name', d.clinicName ?? '');
+                            if (clinicName === null) return;
+                            const roleInput = window.prompt('Role (DOCTOR or CLINIC_ADMIN)', d.role ?? 'DOCTOR');
+                            if (roleInput === null) return;
+                            const activeInput = window.prompt('Status (active/disabled)', d.isActive ? 'active' : 'disabled');
+                            if (activeInput === null) return;
+                            try {
+                              const updated = await api.superAdmin.updateDoctor(d.id, {
+                                name: name.trim(),
+                                phone: phone.trim(),
+                                clinicName: clinicName.trim(),
+                                role: roleInput.trim().toUpperCase() as 'DOCTOR' | 'CLINIC_ADMIN',
+                                isActive: activeInput.trim().toLowerCase() !== 'disabled',
+                              });
+                              setSuperAdminDoctors((list) => list.map((x: any) => (x.id === d.id ? { ...x, ...updated } : x)));
+                              showToast('Doctor updated successfully');
+                            } catch (e: any) {
+                              showToast(e?.message ?? 'Failed to update doctor');
+                            }
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {superAdminDoctors.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        No doctors found.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : superAdminTab === 'patient-control' ? (
+          <div className="dashboard-card">
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+              <h3><i className="fa-solid fa-user-injured"></i> Patient Management</h3>
+              <input
+                value={superAdminPatientSearch}
+                onChange={(e) => setSuperAdminPatientSearch(e.target.value)}
+                placeholder="Search patient name, phone, reg no, email..."
+                style={{ minWidth: 280 }}
+              />
+            </div>
+            <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Patient</th>
+                    <th>Doctor / Clinic</th>
+                    <th>Age/Gender</th>
+                    <th>Phone</th>
+                    <th>Prescriptions</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {superAdminPatients.map((p: any) => (
+                    <tr key={p.id}>
+                      <td>
+                        <strong>{p.name}</strong>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{p.regNo || '—'}</div>
+                      </td>
+                      <td>{p.user?.name || '—'} {p.user?.clinicName ? `(${p.user.clinicName})` : ''}</td>
+                      <td>{p.age ?? '—'} / {p.gender || '—'}</td>
+                      <td>{p.phone}</td>
+                      <td>{p._count?.prescriptions ?? 0}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          onClick={async () => {
+                            const name = window.prompt('Patient name', p.name ?? '');
+                            if (name === null) return;
+                            const phone = window.prompt('Patient phone', p.phone ?? '');
+                            if (phone === null) return;
+                            const ageInput = window.prompt('Patient age', p.age?.toString() ?? '');
+                            if (ageInput === null) return;
+                            try {
+                              const updated = await api.superAdmin.updatePatient(p.id, {
+                                name: name.trim(),
+                                phone: phone.trim(),
+                                age: ageInput.trim() === '' ? null : Number(ageInput),
+                              });
+                              setSuperAdminPatients((list) => list.map((x: any) => (x.id === p.id ? { ...x, ...updated } : x)));
+                              showToast('Patient updated successfully');
+                            } catch (e: any) {
+                              showToast(e?.message ?? 'Failed to update patient');
+                            }
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {superAdminPatients.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        No patients found.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : superAdminTab === 'prescription-control' ? (
+          <div className="dashboard-card">
+            <div className="card-header">
+              <h3><i className="fa-solid fa-file-prescription"></i> Prescription Management</h3>
+            </div>
+            <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Patient</th>
+                    <th>Doctor</th>
+                    <th>Diagnosis</th>
+                    <th>Advice</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {superAdminPrescriptions.map((pr: any) => (
+                    <tr key={pr.id}>
+                      <td>{pr.date ? new Date(pr.date).toLocaleDateString() : '—'}</td>
+                      <td>{pr.patient?.name || '—'}</td>
+                      <td>{pr.user?.name || '—'}</td>
+                      <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.diagnosis || '—'}</td>
+                      <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.advice || '—'}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          onClick={async () => {
+                            const diagnosis = window.prompt('Diagnosis', pr.diagnosis ?? '');
+                            if (diagnosis === null) return;
+                            const advice = window.prompt('Advice', pr.advice ?? '');
+                            if (advice === null) return;
+                            const followUp = window.prompt(
+                              'Follow-up date (YYYY-MM-DD, leave empty to clear)',
+                              pr.followUpDate ? String(pr.followUpDate).slice(0, 10) : ''
+                            );
+                            if (followUp === null) return;
+                            try {
+                              const updated = await api.superAdmin.updatePrescription(pr.id, {
+                                diagnosis,
+                                advice,
+                                followUpDate: followUp.trim() ? followUp.trim() : null,
+                              });
+                              setSuperAdminPrescriptions((list) => list.map((x: any) => (x.id === pr.id ? { ...x, ...updated } : x)));
+                              showToast('Prescription updated successfully');
+                            } catch (e: any) {
+                              showToast(e?.message ?? 'Failed to update prescription');
+                            }
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {superAdminPrescriptions.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        No prescriptions found.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : superAdminTab === 'revenue' ? (
           <div className="table-wrapper" style={{ overflowX: 'auto' }}>
@@ -3173,7 +5863,38 @@ const printHtml = (title: string, html: string) => {
       case 'dashboard': return renderDashboard();
       case 'patients': return renderPatients();
       case 'patient-detail': return renderPatientDetail();
-      case 'prescription': return <PrescriptionPage embeddedInDashboard onBackToLogin={onLogout} userName={userName} />;
+      case 'prescription':
+        return (
+          <PrescriptionPage
+            embeddedInDashboard
+            onBackToLogin={onLogout}
+            userName={userName}
+            onPrescriptionSaved={loadData}
+            preselectedPatient={
+              selectedPatient
+                ? {
+                    patientId: selectedPatient.id,
+                    name: selectedPatient.name,
+                    age: selectedPatient.age || '',
+                    sex: selectedPatient.gender || '',
+                    address: selectedPatient.address || '',
+                    mobile: selectedPatient.phone,
+                    regNo: selectedPatient.regNo || '',
+                    date: new Date().toISOString().slice(0, 10),
+                  }
+                : undefined
+            }
+            patientsDirectory={patients.map((p) => ({
+              id: p.id,
+              name: p.name,
+              phone: p.phone,
+              regNo: p.regNo,
+              age: p.age,
+              gender: p.gender,
+              address: p.address,
+            }))}
+          />
+        );
       case 'prescriptions-list': return renderPrescriptionsList();
       case 'appointments': return renderAppointments();
       case 'billing': return renderBilling();
@@ -3181,6 +5902,7 @@ const printHtml = (title: string, html: string) => {
       case 'drugs': return renderDrugs();
       case 'sms': return renderSMS();
       case 'settings': return renderSettings();
+      case 'clinic-admin': return renderClinicAdmin();
       case 'super-admin': return renderSuperAdmin();
       default: return renderDashboard();
     }

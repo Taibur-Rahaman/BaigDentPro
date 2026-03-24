@@ -23,6 +23,8 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
       pendingDue,
       pendingLabOrders,
       prescriptionsThisMonth,
+      pendingInvoicesCount,
+      overdueInvoicesCount,
     ] = await Promise.all([
       prisma.patient.count({ where: { userId: req.user!.id } }),
       prisma.patient.count({
@@ -64,6 +66,20 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
           date: { gte: startOfMonth, lte: endOfMonth },
         },
       }),
+      prisma.invoice.count({
+        where: {
+          userId: req.user!.id,
+          status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] },
+        },
+      }),
+      prisma.invoice.count({
+        where: {
+          userId: req.user!.id,
+          due: { gt: 0 },
+          status: { not: 'PAID' },
+          dueDate: { not: null, lt: today },
+        },
+      }),
     ]);
 
     res.json({
@@ -75,6 +91,8 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
       pendingDue: pendingDue._sum.due || 0,
       pendingLabOrders,
       prescriptionsThisMonth,
+      pendingInvoicesCount,
+      overdueInvoicesCount,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

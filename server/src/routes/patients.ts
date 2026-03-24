@@ -1,7 +1,9 @@
  
 import { Router } from 'express';
-import { prisma, Prisma } from '../index.js';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
+import { sanitizeMedicalHistoryBody } from '../utils/medicalHistorySanitize.js';
 
 const router = Router();
 
@@ -28,22 +30,26 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const params: PatientListParams = {
       search: req.query.search as string,
-      page: req.query.page as string || '1',
-      limit: req.query.limit as string || '50',
+      page: (req.query.page as string) || '1',
+      limit: (req.query.limit as string) || '50',
     };
 
-    const skip = (parseInt(params.page) - 1) * parseInt(params.limit);
-    const take = parseInt(params.limit);
+    const pageNum = Math.max(1, parseInt(params.page ?? '1', 10) || 1);
+    const limitNum = Math.max(1, Math.min(500, parseInt(params.limit ?? '50', 10) || 50));
+    const skip = (pageNum - 1) * limitNum;
+    const take = limitNum;
 
-    const where: Prisma.PatientWhereInput = { 
-      userId: req.user!.id 
+    const where: Prisma.PatientWhereInput = {
+      userId: req.user!.id,
     };
 
     if (params.search) {
+      const s = params.search;
       where.OR = [
-        { name: { contains: params.search, mode: 'insensitive' } },
-        { phone: { contains: params.search } },
-        { regNo: { contains: params.search, mode: 'insensitive' } },
+        { name: { contains: s, mode: 'insensitive' } },
+        { phone: { contains: s, mode: 'insensitive' } },
+        { regNo: { contains: s, mode: 'insensitive' } },
+        { email: { contains: s, mode: 'insensitive' } },
       ];
     }
 
@@ -63,7 +69,7 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       prisma.patient.count({ where }),
     ]);
 
-    res.json({ patients, total, page: parseInt(params.page), limit: take });
+    res.json({ patients, total, page: pageNum, limit: take });
   } catch (error) {
     console.error('Patients list error:', error);
     res.status(500).json({ error: 'Failed to fetch patients' });
@@ -193,10 +199,11 @@ router.put('/:id/medical-history', authenticate, async (req: AuthRequest, res) =
       return res.status(404).json({ error: 'Patient not found' });
     }
 
+    const safe = sanitizeMedicalHistoryBody(req.body);
     const medicalHistory = await prisma.medicalHistory.upsert({
       where: { patientId: req.params.id },
-      create: { patientId: req.params.id, ...req.body },
-      update: req.body,
+      create: { patientId: req.params.id, ...safe },
+      update: safe,
     });
 
     res.json(medicalHistory);

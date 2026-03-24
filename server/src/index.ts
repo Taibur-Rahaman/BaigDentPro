@@ -1,6 +1,10 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { PrismaClient } from '@prisma/client';
 
 import authRoutes from './routes/auth.js';
@@ -14,18 +18,53 @@ import communicationRoutes from './routes/communication.js';
 import dashboardRoutes from './routes/dashboard.js';
 import adminRoutes from './routes/admin.js';
 import superAdminRoutes from './routes/superAdmin.js';
+import { validateProductionEnvironment } from './utils/envSecurity.js';
 
-dotenv.config();
+// Load server/.env regardless of process cwd (e.g. monorepo root)
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+validateProductionEnvironment();
 
 export const prisma = new PrismaClient();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' ? (process.env.FRONTEND_URL?.split(',') || []) : true,
   credentials: true,
 }));
+
+/** Slow brute-force / credential stuffing on auth endpoints */
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' },
+});
+
+/** General API rate limit (DoS / abuse) */
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api', apiLimiter);
+app.use('/api/auth', authLimiter);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -48,9 +87,11 @@ app.use('/api/super-admin', superAdminRoutes);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Error:', err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+  const status = err.status || 500;
+  const isProd = process.env.NODE_ENV === 'production';
+  res.status(status).json({
+    error: isProd && status >= 500 ? 'Internal Server Error' : (err.message || 'Internal Server Error'),
+    ...(!isProd && { stack: err.stack }),
   });
 });
 

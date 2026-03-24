@@ -79,12 +79,12 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
         { id: 'DENTAL_TOOLS', name: 'Dental Tools', icon: '🔧', count: 10 },
       ]);
       setProducts([
-        { id: '1', name: 'Oral-B Electric Toothbrush', slug: 'oral-b', description: 'Advanced electric toothbrush with smart sensors', price: 2500, images: [], category: 'TOOTHBRUSH', stock: 50, isFeatured: true },
-        { id: '2', name: 'Colgate Total Toothpaste', slug: 'colgate', description: '12-hour antibacterial protection', price: 180, images: [], category: 'TOOTHPASTE', stock: 100, isFeatured: false },
-        { id: '3', name: 'Listerine Mouthwash 500ml', slug: 'listerine', description: 'Advanced antiseptic formula', price: 350, images: [], category: 'MOUTHWASH', stock: 75, isFeatured: true },
-        { id: '4', name: 'Crest Whitening Strips', slug: 'crest', description: 'Professional-grade whitening', price: 3500, images: [], category: 'WHITENING', stock: 30, isFeatured: true },
-        { id: '5', name: 'Waterpik Water Flosser', slug: 'waterpik', description: 'Advanced water flossing technology', price: 5500, images: [], category: 'DENTAL_TOOLS', stock: 25, isFeatured: true },
-        { id: '6', name: 'Sensodyne Repair', slug: 'sensodyne', description: 'For sensitive teeth protection', price: 220, images: [], category: 'TOOTHPASTE', stock: 90, isFeatured: false },
+        { id: '1', name: 'Oral-B Electric Toothbrush', slug: 'oral-b', description: 'Advanced electric toothbrush with smart sensors', price: 2500, images: null, category: 'TOOTHBRUSH', stock: 50, isFeatured: true },
+        { id: '2', name: 'Colgate Total Toothpaste', slug: 'colgate', description: '12-hour antibacterial protection', price: 180, images: null, category: 'TOOTHPASTE', stock: 100, isFeatured: false },
+        { id: '3', name: 'Listerine Mouthwash 500ml', slug: 'listerine', description: 'Advanced antiseptic formula', price: 350, images: null, category: 'MOUTHWASH', stock: 75, isFeatured: true },
+        { id: '4', name: 'Crest Whitening Strips', slug: 'crest', description: 'Professional-grade whitening', price: 3500, images: null, category: 'WHITENING', stock: 30, isFeatured: true },
+        { id: '5', name: 'Waterpik Water Flosser', slug: 'waterpik', description: 'Advanced water flossing technology', price: 5500, images: null, category: 'DENTAL_TOOLS', stock: 25, isFeatured: true },
+        { id: '6', name: 'Sensodyne Repair', slug: 'sensodyne', description: 'For sensitive teeth protection', price: 220, images: null, category: 'TOOTHPASTE', stock: 90, isFeatured: false },
       ]);
     } finally {
       setLoading(false);
@@ -144,7 +144,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
       slug: plan.id.toLowerCase(),
       description: `Monthly ${plan.name} subscription for BaigDentPro`,
       price: plan.price,
-      images: [],
+      images: null,
       category: 'SUBSCRIPTION',
       stock: 9999,
       isFeatured: false,
@@ -295,7 +295,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
             <div className="neo-feature-icon">
               <i className="fa-solid fa-store"></i>
             </div>
-            <h3>E-Commerce</h3>
+            <h3>Shop</h3>
             <p>Sell products online</p>
           </div>
         </div>

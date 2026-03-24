@@ -1,39 +1,90 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Seeding database...');
 
+  const demoClinic = await prisma.clinic.upsert({
+    where: { id: 'seed-clinic-baigdentpro' },
+    update: { name: 'BaigDentPro Dental Clinic' },
+    create: {
+      id: 'seed-clinic-baigdentpro',
+      name: 'BaigDentPro Dental Clinic',
+      phone: '+880 1617-180711',
+      email: 'info@baigdentpro.com',
+    },
+  });
+
   const hashedPassword = await bcrypt.hash('password123', 12);
   const demoUser = await prisma.user.upsert({
     where: { email: 'demo@baigdentpro.com' },
-    update: {},
+    update: {
+      clinicId: demoClinic.id,
+      role: 'CLINIC_ADMIN',
+      clinicName: demoClinic.name,
+      isActive: true,
+      isApproved: true,
+    },
     create: {
       email: 'demo@baigdentpro.com',
       password: hashedPassword,
       name: 'Dr. Demo',
-      clinicName: 'BaigDentPro Dental Clinic',
+      role: 'CLINIC_ADMIN',
+      clinicId: demoClinic.id,
+      clinicName: demoClinic.name,
       clinicAddress: 'Dhaka, Bangladesh',
       clinicPhone: '+880 1617-180711',
       clinicEmail: 'info@baigdentpro.com',
       degree: 'BDS, MDS',
       specialization: 'General Dentistry',
+      isActive: true,
+      isApproved: true,
     },
   });
 
-  console.log('✅ Created demo user:', demoUser.email);
+  console.log('✅ Demo clinic admin:', demoUser.email, '(manages doctor access for this clinic)');
+
+  const staffDoctor = await prisma.user.upsert({
+    where: { email: 'doctor@baigdentpro.com' },
+    update: {
+      clinicId: demoClinic.id,
+      clinicName: demoClinic.name,
+      role: 'DOCTOR',
+      isActive: true,
+      isApproved: true,
+    },
+    create: {
+      email: 'doctor@baigdentpro.com',
+      password: hashedPassword,
+      name: 'Dr. Associate',
+      role: 'DOCTOR',
+      clinicId: demoClinic.id,
+      clinicName: demoClinic.name,
+      isActive: true,
+      isApproved: true,
+    },
+  });
+  console.log('✅ Staff doctor (same clinic):', staffDoctor.email, '/ password123');
 
   const superAdmin = await prisma.user.upsert({
     where: { email: 'superadmin@baigdentpro.com' },
-    update: {},
+    update: { isApproved: true, isActive: true },
     create: {
       email: 'superadmin@baigdentpro.com',
       password: await bcrypt.hash('super123', 12),
       name: 'Super Admin',
       role: 'SUPER_ADMIN',
       clinicName: 'BaigDentPro Platform',
+      isApproved: true,
+      isActive: true,
     },
   });
   console.log('✅ Created super admin:', superAdmin.email);

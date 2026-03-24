@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import api from './api';
 
 export interface DrugRow {
   id: string;
@@ -15,6 +16,29 @@ interface Props {
   userName?: string;
   /** When true, only the Create Prescription form is rendered (no nav, no app shell). Use inside Dashboard. */
   embeddedInDashboard?: boolean;
+  preselectedPatient?: {
+    /** When set (e.g. from Dashboard patient profile), prescriptions can sync to the API. */
+    patientId?: string;
+    name: string;
+    age: string;
+    sex: string;
+    address: string;
+    mobile: string;
+    regNo: string;
+    date?: string;
+  };
+  /** When embedded in Dashboard: clinic patients for linking server saves. */
+  patientsDirectory?: Array<{
+    id: string;
+    name: string;
+    phone: string;
+    regNo?: string;
+    age?: string;
+    gender?: string;
+    address?: string;
+  }>;
+  /** Called after a successful server sync (e.g. refresh prescription list). */
+  onPrescriptionSaved?: () => void;
 }
 
 const createDrugRow = (): DrugRow => ({
@@ -126,7 +150,14 @@ type PrescriptionSubView =
   | 'settings'
   | 'dashboard';
 
-export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'User', embeddedInDashboard = false }) => {
+export const PrescriptionPage: React.FC<Props> = ({
+  onBackToLogin,
+  userName = 'User',
+  embeddedInDashboard = false,
+  preselectedPatient,
+  patientsDirectory,
+  onPrescriptionSaved,
+}) => {
   const [activeNav, setActiveNav] = useState<PrescriptionSubView>('prescription');
   const [notice, setNotice] = useState<string | null>(null);
   const [showPatientSearch, setShowPatientSearch] = useState(false);
@@ -144,6 +175,73 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     regNo: '',
     date: new Date().toISOString().slice(0, 10),
   });
+
+  /** Linked clinic patient id for API `prescriptions.create` (Dashboard / patient picker). */
+  const [linkedPatientId, setLinkedPatientId] = useState<string | null>(() => preselectedPatient?.patientId ?? null);
+  const [savingPrescription, setSavingPrescription] = useState(false);
+
+  // Auto-fill patient fields when Dashboard opens this page from a patient profile.
+  useEffect(() => {
+    if (preselectedPatient) {
+      setLinkedPatientId(preselectedPatient.patientId ?? null);
+      setPatient((p) => ({
+        ...p,
+        name: preselectedPatient.name ?? '',
+        age: preselectedPatient.age ?? '',
+        sex: preselectedPatient.sex ?? '',
+        address: preselectedPatient.address ?? '',
+        mobile: preselectedPatient.mobile ?? '',
+        regNo: preselectedPatient.regNo ?? '',
+        date: preselectedPatient.date ?? p.date,
+      }));
+      setShowPatientSearch(false);
+
+      // Load the last saved Prescription "History" for this patient (localStorage demo feature).
+      // This powers the "Past History / Present History / Notes" textareas.
+      try {
+        const raw = localStorage.getItem('baigdentpro:prescriptions');
+        const list: Array<any> = raw ? JSON.parse(raw) : [];
+
+        const regNo = preselectedPatient.regNo?.toString().trim() ?? '';
+        const name = preselectedPatient.name?.toString().trim().toLowerCase() ?? '';
+
+        const candidates = list.filter((item) => {
+          const itemPatient = item?.patient ?? {};
+          const itemRegNo = itemPatient?.regNo?.toString().trim() ?? '';
+          const itemName = itemPatient?.name?.toString().trim().toLowerCase() ?? '';
+          if (regNo) return itemRegNo === regNo;
+          if (name) return itemName === name;
+          return false;
+        });
+
+        const latest = candidates.sort((a, b) => (b?.createdAt ?? 0) - (a?.createdAt ?? 0))[0];
+        if (latest) {
+          setPastHistory(typeof latest.pastHistory === 'string' ? (latest.pastHistory || 'Past medical history') : 'Past medical history');
+          setPresentHistory(typeof latest.presentHistory === 'string' ? latest.presentHistory : '');
+          setNotesHistory(typeof latest.notesHistory === 'string' ? latest.notesHistory : '');
+        }
+      } catch {
+        // ignore localStorage parsing errors
+      }
+      return;
+    }
+
+    // If no preselected patient is provided, reset patient fields.
+    setLinkedPatientId(null);
+    setPatient({
+      name: '',
+      age: '',
+      sex: '',
+      address: '',
+      mobile: '',
+      regNo: '',
+      date: new Date().toISOString().slice(0, 10),
+    });
+
+    setPastHistory('Past medical history');
+    setPresentHistory('');
+    setNotesHistory('');
+  }, [preselectedPatient]);
   
   // Clinical data
   const [dx, setDx] = useState('');
@@ -237,12 +335,30 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     college: '',
     bmdcRegNo: '',
     clinicName: 'BaigDentPro Dental Care',
+    clinicLogo: '',
     address: '123 Medical Center, Main Road',
     phone: '+880 1617-180711',
     email: 'contact@baigdentpro.com',
     visitTime: '',
     dayOff: '',
+    doctorLogo: '',
   });
+
+  const HEADER_SETTINGS_STORAGE_KEY = 'baigdentpro:headerSettings';
+  const PRINT_SETUP_OVERRIDES_STORAGE_KEY = 'baigdentpro:printSetupOverrides';
+
+  useEffect(() => {
+    // Load persisted clinic/doctor header settings (so Settings page affects all pages).
+    try {
+      const raw = localStorage.getItem(HEADER_SETTINGS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<typeof headerSettings>;
+      setHeaderSettings((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   type PrintBarcodePosition = 'leftBottom' | 'rightTop';
   type PrintSetupState = {
@@ -352,6 +468,37 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   }, []);
 
   useEffect(() => {
+    // Apply dashboard overrides (paper size / optional header height) on top of saved print setup.
+    try {
+      const raw = localStorage.getItem(PRINT_SETUP_OVERRIDES_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<{ paperSize: 'A4' | 'A5' | 'Letter'; headerHeight: number }>;
+
+      const paper = parsed.paperSize;
+      const size = paper === 'A5'
+        ? { widthCm: 14.8, heightCm: 21.0 }
+        : paper === 'Letter'
+          ? { widthCm: 21.59, heightCm: 27.94 }
+          : { widthCm: 21.0, heightCm: 29.7 }; // A4 default
+
+      const next: Partial<PrintSetupState> = {
+        pageWidthCm: size.widthCm,
+        pageHeightCm: size.heightCm,
+      };
+
+      if (typeof parsed.headerHeight === 'number' && isFinite(parsed.headerHeight)) {
+        // Interpret values > 20 as mm; otherwise treat as cm.
+        const maybeCm = parsed.headerHeight > 20 ? parsed.headerHeight / 10 : parsed.headerHeight;
+        if (maybeCm > 0.5 && maybeCm < 20) next.headerHeightCm = maybeCm;
+      }
+
+      setPrintSetup((prev) => ({ ...prev, ...next }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
     // Keep visit fees aligned with configured defaults (don’t overwrite user edits if they already changed it).
     setVisit((v) => (v.paid === '300' ? { ...v, paid: String(printSetup.visitFees) } : v));
   }, [printSetup.visitFees]);
@@ -432,7 +579,17 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     setRxDuration('');
   };
 
-  const handleSave = () => {
+  const handleSave = async (): Promise<boolean> => {
+    const validDrugs = drugs.filter((d) => d.brand.trim() && d.dose.trim());
+    if (validDrugs.length === 0) {
+      showNotice('Add at least one drug with brand and dose.');
+      return false;
+    }
+    if (!patient.name.trim() && !patient.mobile.trim()) {
+      showNotice('Enter patient name or mobile.');
+      return false;
+    }
+
     const revisitStr = [followUpDay.trim(), revisitUnit].filter(Boolean).join(' ');
     const payload = {
       patient,
@@ -455,8 +612,49 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     const list = existingRaw ? JSON.parse(existingRaw) : [];
     list.push(payload);
     localStorage.setItem('baigdentpro:prescriptions', JSON.stringify(list));
-    setStatus('Saved');
-    showNotice('Prescription saved successfully!');
+
+    setSavingPrescription(true);
+    try {
+      let extra = '';
+      const pid = linkedPatientId || preselectedPatient?.patientId;
+      if (api.getToken() && pid) {
+        try {
+          const richHtml = richTextRef.current?.innerHTML ?? '';
+          await api.prescriptions.create({
+            patientId: pid,
+            diagnosis: dx || '',
+            chiefComplaint: cc || '',
+            examination: getOeDisplayString() || '',
+            investigation: ix || '',
+            advice: richHtml || undefined,
+            vitals: JSON.stringify(oe),
+            items: validDrugs.map((d) => ({
+              drugName: d.brand,
+              genericName: '',
+              dosage: d.dose,
+              frequency: d.durationUnit === 'M' ? `${d.duration} M` : `${d.duration} D`,
+              duration: d.durationUnit === 'M' ? `${d.duration} months` : `${d.duration} days`,
+              beforeFood: d.beforeFood,
+              afterFood: d.afterFood,
+            })),
+          });
+          extra = ' Synced to server.';
+          onPrescriptionSaved?.();
+        } catch (e: any) {
+          showNotice(e?.message ?? 'Server save failed — saved locally only.');
+          setStatus('Saved locally');
+          return true;
+        }
+      } else if (api.getToken() && !pid) {
+        extra = ' Saved locally — select a clinic patient to sync to the server.';
+      }
+
+      setStatus('Saved');
+      showNotice(`Prescription saved successfully!${extra}`);
+      return true;
+    } finally {
+      setSavingPrescription(false);
+    }
   };
 
   const getPrintHtml = useCallback((opts: { forPrint?: boolean; withoutHeader?: boolean }) => {
@@ -470,10 +668,12 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     const college = headerSettings.college || '';
     const bmdc = headerSettings.bmdcRegNo || '';
     const clinic = headerSettings.clinicName || '';
+    const clinicLogo = headerSettings.clinicLogo || '';
     const addr = headerSettings.address || '';
     const ph = headerSettings.phone || '';
     const visitTime = headerSettings.visitTime || '';
     const dayOff = headerSettings.dayOff || '';
+    const doctorLogo = headerSettings.doctorLogo || '';
     const wt = weight ? `${weight} kg` : '—';
     const bmiStr = bmiValue ? `BMI: ${bmiValue}` : '';
     const regNo = (patient.regNo || visit.visitNo || '').toString().replace(/\s/g, '');
@@ -483,6 +683,16 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     const fontSizePt = printSetup.fontSizePt || 12;
     const footerText = printSetup.footerText || defaultPrintSetup.footerText;
     const showFooter = printSetup.showFooter;
+
+    const escapeHtmlAttr = (value: string) =>
+      String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const clinicLogoAttr = clinicLogo ? escapeHtmlAttr(clinicLogo) : '';
+    const doctorLogoAttr = doctorLogo ? escapeHtmlAttr(doctorLogo) : '';
     const drugsList = drugs
       .filter((r) => r.brand || r.dose || r.duration)
       .map((r) => {
@@ -523,6 +733,8 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   .print-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:8px;min-height:${printSetup.headerHeightCm}cm;${withoutHeader ? 'display:none;' : ''}}
   .print-header-left{text-align:left;font-size:13px;}
   .print-header-right{text-align:right;font-size:13px;}
+  .print-logo{display:block;max-height:1.1cm;max-width:3.2cm;object-fit:contain;margin-bottom:2px;}
+  .print-logo-right{margin-left:auto;}
   .print-header-left .doc-name,.print-header-right .chamber-label{font-weight:bold;font-size:14px;display:block;margin-bottom:2px;}
   .patient-line{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 20px;margin-bottom:10px;padding:6px 0;border-bottom:1px solid #000;font-size:12px;min-height:${printSetup.patientInfoHeightCm}cm;${printSetup.printPatientInfo ? '' : 'display:none;'}}
   .patient-line span{white-space:nowrap;}
@@ -549,6 +761,7 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
   <div class="page">
   <div class="print-header">
     <div class="print-header-left">
+      ${doctorLogoAttr ? `<img class="print-logo" src="${doctorLogoAttr}" alt="Doctor logo" />` : ''}
       <span class="doc-name">${(doc || '').replace(/</g, '&lt;')}</span>
       ${qual ? qual + '<br>' : ''}
       ${spec ? spec + '<br>' : ''}
@@ -557,6 +770,7 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
       ${bmdc ? 'BMDC Reg. No- ' + bmdc.replace(/</g, '&lt;') : ''}
     </div>
     <div class="print-header-right">
+      ${clinicLogoAttr ? `<img class="print-logo print-logo-right" src="${clinicLogoAttr}" alt="Clinic logo" />` : ''}
       <span class="chamber-label">Chember:</span>
       ${clinic ? clinic + '<br>' : ''}
       ${addr ? addr + '<br>' : ''}
@@ -627,14 +841,14 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
     }
   };
 
-  const handlePrint = (withoutHeader: boolean) => {
-    handleSave();
-    printViaIframe(withoutHeader);
+  const handlePrint = async (withoutHeader: boolean) => {
+    const ok = await handleSave();
+    if (ok) printViaIframe(withoutHeader);
   };
 
-  const handleSaveAndPrint = (withoutHeader: boolean) => {
-    handleSave();
-    printViaIframe(withoutHeader);
+  const handleSaveAndPrint = async (withoutHeader: boolean) => {
+    const ok = await handleSave();
+    if (ok) printViaIframe(withoutHeader);
   };
 
   const handlePreview = () => {
@@ -1092,6 +1306,31 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
             />
           </div>
           <div className="form-group">
+            <label className="label">Doctor Logo</label>
+            <input
+              className="input"
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const res = typeof reader.result === 'string' ? reader.result : '';
+                  setHeaderSettings((prev) => ({ ...prev, doctorLogo: res }));
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            {headerSettings.doctorLogo ? (
+              <img
+                src={headerSettings.doctorLogo}
+                alt="Doctor logo preview"
+                style={{ display: 'block', marginTop: 8, maxWidth: 140, maxHeight: 70, objectFit: 'contain', border: '1px solid rgba(226,232,240,1)', borderRadius: 10, padding: 6, background: '#fff' }}
+              />
+            ) : null}
+          </div>
+          <div className="form-group">
             <label className="label">Qualification</label>
             <input 
               className="input" 
@@ -1144,6 +1383,31 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
             />
           </div>
           <div className="form-group">
+            <label className="label">Clinic Logo</label>
+            <input
+              className="input"
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const res = typeof reader.result === 'string' ? reader.result : '';
+                  setHeaderSettings((prev) => ({ ...prev, clinicLogo: res }));
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            {headerSettings.clinicLogo ? (
+              <img
+                src={headerSettings.clinicLogo}
+                alt="Clinic logo preview"
+                style={{ display: 'block', marginTop: 8, maxWidth: 140, maxHeight: 70, objectFit: 'contain', border: '1px solid rgba(226,232,240,1)', borderRadius: 10, padding: 6, background: '#fff' }}
+              />
+            ) : null}
+          </div>
+          <div className="form-group">
             <label className="label">Phone</label>
             <input 
               className="input" 
@@ -1187,7 +1451,18 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
           </div>
         </div>
         <div style={{ marginTop: '16px' }}>
-          <button type="button" className="btn-primary" onClick={() => showNotice('Header settings saved!')}>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              try {
+                localStorage.setItem(HEADER_SETTINGS_STORAGE_KEY, JSON.stringify(headerSettings));
+                showNotice('Header settings saved!');
+              } catch {
+                showNotice('Failed to save header settings');
+              }
+            }}
+          >
             <i className="fa-solid fa-save"></i> Save Settings
           </button>
         </div>
@@ -1196,8 +1471,24 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
       <div className="card">
         <h3 style={{ marginTop: 0, marginBottom: '16px' }}>Preview</h3>
         <div style={{ border: '2px dashed var(--border-color)', borderRadius: '8px', padding: '20px', textAlign: 'center', background: '#f8fafc' }}>
+          {headerSettings.clinicLogo ? (
+            <img
+              src={headerSettings.clinicLogo}
+              alt="Clinic logo preview"
+              style={{ display: 'block', margin: '0 auto 10px', maxWidth: 180, maxHeight: 90, objectFit: 'contain', border: '1px solid rgba(226,232,240,1)', borderRadius: 12, padding: 8, background: '#fff' }}
+            />
+          ) : null}
           <h3 style={{ margin: '0 0 8px', color: 'var(--primary-color)' }}>{headerSettings.clinicName}</h3>
-          <p style={{ margin: '0 0 4px', fontWeight: '600' }}>{headerSettings.doctorName}, {headerSettings.qualification}</p>
+          <p style={{ margin: '0 0 4px', fontWeight: '600' }}>
+            {headerSettings.doctorLogo ? (
+              <img
+                src={headerSettings.doctorLogo}
+                alt="Doctor logo preview"
+                style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 8, width: 22, height: 22, objectFit: 'contain', borderRadius: 4 }}
+              />
+            ) : null}
+            {headerSettings.doctorName}, {headerSettings.qualification}
+          </p>
           <p style={{ margin: '0 0 4px', fontSize: '0.9rem' }}>{headerSettings.address}</p>
           <p style={{ margin: 0, fontSize: '0.9rem' }}>{headerSettings.phone} | {headerSettings.email}</p>
         </div>
@@ -1822,6 +2113,65 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
             <h2><i className="fa-solid fa-file-prescription"></i> Create Prescription</h2>
             <p>Patient details, clinical notes, medications, and print options</p>
           </header>
+          {embeddedInDashboard && patientsDirectory && patientsDirectory.length > 0 && (
+            <div
+              className="rx-clinic-patient-bar"
+              style={{
+                marginBottom: 12,
+                padding: '12px 14px',
+                background: 'var(--bg-card, #f8fafc)',
+                borderRadius: 8,
+                border: '1px solid var(--border-color, #e2e8f0)',
+              }}
+            >
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                <i className="fa-solid fa-hospital-user" /> Clinic patient
+              </label>
+              <select
+                className="input"
+                style={{ maxWidth: '100%', width: 'min(520px, 100%)' }}
+                value={linkedPatientId || ''}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setLinkedPatientId(id || null);
+                  if (!id) return;
+                  const row = patientsDirectory.find((x) => x.id === id);
+                  if (row) {
+                    setPatient((p) => ({
+                      ...p,
+                      name: row.name,
+                      mobile: row.phone,
+                      regNo: row.regNo || '',
+                      age: row.age || '',
+                      sex: row.gender || p.sex,
+                      address: row.address || '',
+                    }));
+                  }
+                }}
+              >
+                <option value="">— Select patient (for server sync) —</option>
+                {patientsDirectory.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name} · {row.phone}
+                    {row.regNo ? ` (${row.regNo})` : ''}
+                  </option>
+                ))}
+              </select>
+              {api.getToken() ? (
+                <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted, #64748b)' }}>
+                  {linkedPatientId ? (
+                    <>
+                      <i className="fa-solid fa-cloud" /> Logged in — save will sync to the server.
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-info-circle" /> Choose a patient to sync to the server. You can still save locally.
+                    </>
+                  )}
+                </p>
+              ) : null}
+            </div>
+          )}
           <div className="rx-create-top">
             <div className="rx-patient-strip">
               <div className="rx-field">
@@ -1843,6 +2193,15 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
               <div className="rx-field">
                 <label>Mobile</label>
                 <input value={patient.mobile} onChange={(e) => setPatient({ ...patient, mobile: e.target.value })} />
+                {patient.mobile.trim() ? (
+                  <a
+                    href={`tel:${patient.mobile.replace(/\s/g, '')}`}
+                    className="rx-tel-link"
+                    style={{ fontSize: 12, display: 'inline-block', marginTop: 4 }}
+                  >
+                    <i className="fa-solid fa-phone" /> Call
+                  </a>
+                ) : null}
               </div>
               <div className="rx-field">
                 <label>Reg No.</label>
@@ -1863,17 +2222,18 @@ export const PrescriptionPage: React.FC<Props> = ({ onBackToLogin, userName = 'U
               </div>
             </div>
             <div className="rx-create-actions">
-              <button type="button" className="btn-secondary action-btn-with-icon" onClick={handlePreview}>
+              <button type="button" className="btn-secondary action-btn-with-icon" onClick={handlePreview} disabled={savingPrescription}>
                 <span><i className="fa-solid fa-eye"></i></span> Preview
               </button>
-              <button type="button" className="btn-primary action-btn-with-icon" onClick={() => handleSaveAndPrint(false)}>
-                <span><i className="fa-solid fa-print"></i></span> Save & Print
+              <button type="button" className="btn-primary action-btn-with-icon" onClick={() => handleSaveAndPrint(false)} disabled={savingPrescription}>
+                <span>{savingPrescription ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-print" />}</span>{' '}
+                Save & Print
               </button>
-              <button type="button" className="btn-secondary action-btn-with-icon" onClick={() => handleSaveAndPrint(true)}>
+              <button type="button" className="btn-secondary action-btn-with-icon" onClick={() => handleSaveAndPrint(true)} disabled={savingPrescription}>
                 <span><i className="fa-solid fa-file-pdf"></i></span> Save & Print Without header
               </button>
-              <button type="button" className="btn-primary action-btn-with-icon" onClick={handleSave}>
-                <span><i className="fa-solid fa-save"></i></span> Save Only
+              <button type="button" className="btn-primary action-btn-with-icon" onClick={() => void handleSave()} disabled={savingPrescription}>
+                <span>{savingPrescription ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-save" />}</span> Save Only
               </button>
             </div>
           </div>

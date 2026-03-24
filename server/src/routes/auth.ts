@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { JWT_SECRET, JWT_EXPIRES_IN } from '../utils/config.js';
+import { assertPasswordAcceptable } from '../utils/passwordPolicy.js';
+import { sendSafeError } from '../utils/safeError.js';
 
 // Centralized in config.ts
 
@@ -12,6 +14,8 @@ const router = Router();
 router.post('/register', async (req, res) => {
   try {
     const { email, password, name, clinicName, phone } = req.body;
+
+    assertPasswordAcceptable(password, 'Password');
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -37,19 +41,32 @@ router.post('/register', async (req, res) => {
         phone,
         role: 'CLINIC_ADMIN',
         clinicId: clinic.id,
+        isApproved: false,
       },
-      select: { id: true, email: true, name: true, role: true, clinicName: true, clinicId: true },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        clinicName: true,
+        clinicId: true,
+        isApproved: true,
+      },
     });
 
-    const token = jwt.sign(
-      { userId: user.id, role: user.role, clinicId: user.clinicId },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
-    );
-
-    res.status(201).json({ user, token });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    // No JWT until a platform super admin approves the registration.
+    res.status(201).json({
+      user,
+      pendingApproval: true,
+      message:
+        'Your clinic account was created and is pending approval. You will be able to sign in after a platform administrator approves it.',
+    });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('Password') || msg.includes('characters')) {
+      return res.status(400).json({ error: msg });
+    }
+    return sendSafeError(res, 500, error, 'register');
   }
 });
 
@@ -67,10 +84,23 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    if (!user.isActive) {
+      return res.status(403).json({
+        error: 'This account has been disabled. Contact your clinic administrator.',
+      });
+    }
+
+    if (!user.isApproved) {
+      return res.status(403).json({
+        error: 'Your registration is still pending approval by a platform administrator. You cannot sign in yet.',
+      });
+    }
+
+    const signOptsLogin: SignOptions = { expiresIn: JWT_EXPIRES_IN as SignOptions['expiresIn'] };
     const token = jwt.sign(
       { userId: user.id, role: user.role, clinicId: user.clinicId },
       JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
+      signOptsLogin
     );
 
     await prisma.activityLog.create({ data: { userId: user.id, action: 'LOGIN', entity: 'USER', entityId: user.id } }).catch(() => {});
@@ -90,8 +120,8 @@ router.post('/login', async (req, res) => {
       },
       token,
     });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    return sendSafeError(res, 500, error, 'login');
   }
 });
 
@@ -104,6 +134,9 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
         email: true,
         name: true,
         role: true,
+        clinicId: true,
+        isActive: true,
+        isApproved: true,
         phone: true,
         clinicName: true,
         clinicAddress: true,
@@ -116,8 +149,8 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
       },
     });
     res.json(user);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    return sendSafeError(res, 500, error, 'me');
   }
 });
 
@@ -154,14 +187,16 @@ router.put('/profile', authenticate, async (req: AuthRequest, res) => {
     });
 
     res.json(user);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    return sendSafeError(res, 500, error, 'profile');
   }
 });
 
 router.put('/password', authenticate, async (req: AuthRequest, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
+
+    assertPasswordAcceptable(newPassword, 'New password');
 
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
     if (!user) {
@@ -180,8 +215,13 @@ router.put('/password', authenticate, async (req: AuthRequest, res) => {
     });
 
     res.json({ message: 'Password updated successfully' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('Password') || msg.includes('characters') || msg.includes('incorrect')) {
+      const status = msg.includes('incorrect') ? 401 : 400;
+      return res.status(status).json({ error: msg });
+    }
+    return sendSafeError(res, 500, error, 'password');
   }
 });
 

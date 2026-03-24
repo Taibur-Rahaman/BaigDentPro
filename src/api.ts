@@ -94,11 +94,18 @@ class ApiClient {
     },
 
     register: async (data: { email: string; password: string; name: string; clinicName?: string; phone?: string }) => {
-      const result = await this.request<{ user: any; token: string }>('/auth/register', {
+      const result = await this.request<{
+        user: any;
+        token?: string;
+        pendingApproval?: boolean;
+        message?: string;
+      }>('/auth/register', {
         method: 'POST',
         body: data,
       });
-      this.setToken(result.token);
+      if (result.token) {
+        this.setToken(result.token);
+      }
       return result;
     },
 
@@ -187,12 +194,13 @@ class ApiClient {
   };
 
   prescriptions = {
-    list: (params?: { patientId?: string; startDate?: string; endDate?: string; page?: number }) => {
+    list: (params?: { patientId?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
       const query = new URLSearchParams();
       if (params?.patientId) query.set('patientId', params.patientId);
       if (params?.startDate) query.set('startDate', params.startDate);
       if (params?.endDate) query.set('endDate', params.endDate);
       if (params?.page) query.set('page', String(params.page));
+      if (params?.limit) query.set('limit', String(params.limit));
       return this.request<{ prescriptions: any[]; total: number }>(`/prescriptions?${query}`);
     },
 
@@ -212,11 +220,12 @@ class ApiClient {
   };
 
   invoices = {
-    list: (params?: { patientId?: string; status?: string; page?: number }) => {
+    list: (params?: { patientId?: string; status?: string; page?: number; limit?: number }) => {
       const query = new URLSearchParams();
       if (params?.patientId) query.set('patientId', params.patientId);
       if (params?.status) query.set('status', params.status);
       if (params?.page) query.set('page', String(params.page));
+      if (params?.limit) query.set('limit', String(params.limit));
       return this.request<{ invoices: any[]; total: number }>(`/invoices?${query}`);
     },
 
@@ -240,12 +249,13 @@ class ApiClient {
   };
 
   lab = {
-    list: (params?: { patientId?: string; status?: string; workType?: string; page?: number }) => {
+    list: (params?: { patientId?: string; status?: string; workType?: string; page?: number; limit?: number }) => {
       const query = new URLSearchParams();
       if (params?.patientId) query.set('patientId', params.patientId);
       if (params?.status) query.set('status', params.status);
       if (params?.workType) query.set('workType', params.workType);
       if (params?.page) query.set('page', String(params.page));
+      if (params?.limit) query.set('limit', String(params.limit));
       return this.request<{ labOrders: any[]; total: number }>(`/lab?${query}`);
     },
 
@@ -388,20 +398,42 @@ class ApiClient {
   };
 
   admin = {
-    users: (params?: { search?: string; role?: string; page?: number; limit?: number }) => {
+    users: (params?: { search?: string; role?: string; page?: number; limit?: number; clinicId?: string }) => {
       const query = new URLSearchParams();
       if (params?.search) query.set('search', params.search);
       if (params?.role) query.set('role', params.role);
       if (params?.page) query.set('page', String(params.page));
       if (params?.limit) query.set('limit', String(params.limit));
-      return this.request<{ users: any[]; total: number }>(`/admin/users?${query}`);
+      if (params?.clinicId) query.set('clinicId', params.clinicId);
+      return this.request<{ users: any[]; total: number; page?: number; limit?: number }>(`/admin/users?${query}`);
     },
 
-    updateUser: (id: string, data: { role?: string; clinicName?: string; phone?: string }) =>
-      this.request<any>(`/admin/users/${id}`, { method: 'PUT', body: data }),
+    createUser: (data: {
+      email: string;
+      password: string;
+      name: string;
+      phone?: string;
+      role?: 'DOCTOR' | 'CLINIC_ADMIN';
+      clinicId?: string;
+    }) => this.request<any>('/admin/users', { method: 'POST', body: data }),
+
+    updateUser: (
+      id: string,
+      data: { role?: string; clinicName?: string; phone?: string; isActive?: boolean; name?: string }
+    ) => this.request<any>(`/admin/users/${id}`, { method: 'PUT', body: data }),
+
+    clinics: () => this.request<{ clinics: { id: string; name: string; phone?: string | null; email?: string | null }[] }>('/admin/clinics'),
   };
 
   superAdmin = {
+    pendingSignups: () => this.request<{ pending: any[]; count: number }>('/super-admin/pending-signups'),
+
+    approveSignup: (userId: string) =>
+      this.request<any>(`/super-admin/users/${userId}/approve-signup`, { method: 'POST' }),
+
+    rejectSignup: (userId: string) =>
+      this.request<{ ok: boolean }>(`/super-admin/users/${userId}/reject-signup`, { method: 'POST' }),
+
     stats: () => this.request<any>('/super-admin/stats'),
     clinics: (params?: { search?: string; page?: number; limit?: number }) => {
       const query = new URLSearchParams();
@@ -431,6 +463,89 @@ class ApiClient {
       if (params?.limit) query.set('limit', String(params?.limit ?? 50));
       return this.request<{ logs: any[]; total: number; page: number; limit: number }>(`/super-admin/activity-logs?${query}`);
     },
+
+    doctors: (params?: { search?: string; clinicId?: string; page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.search) query.set('search', params.search);
+      if (params?.clinicId) query.set('clinicId', params.clinicId);
+      if (params?.page) query.set('page', String(params?.page ?? 1));
+      if (params?.limit) query.set('limit', String(params?.limit ?? 20));
+      return this.request<{ doctors: any[]; total: number; page: number; limit: number }>(`/super-admin/doctors?${query}`);
+    },
+
+    updateDoctor: (
+      id: string,
+      data: {
+        name?: string;
+        phone?: string;
+        clinicName?: string;
+        clinicAddress?: string;
+        clinicPhone?: string;
+        degree?: string;
+        specialization?: string;
+        isActive?: boolean;
+        role?: 'DOCTOR' | 'CLINIC_ADMIN';
+      }
+    ) => this.request<any>(`/super-admin/doctors/${id}`, { method: 'PUT', body: data }),
+
+    patients: (params?: { search?: string; doctorId?: string; page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.search) query.set('search', params.search);
+      if (params?.doctorId) query.set('doctorId', params.doctorId);
+      if (params?.page) query.set('page', String(params?.page ?? 1));
+      if (params?.limit) query.set('limit', String(params?.limit ?? 20));
+      return this.request<{ patients: any[]; total: number; page: number; limit: number }>(`/super-admin/patients?${query}`);
+    },
+
+    updatePatient: (
+      id: string,
+      data: {
+        name?: string;
+        phone?: string;
+        age?: number | string | null;
+        gender?: string;
+        email?: string;
+        address?: string;
+        bloodGroup?: string;
+        occupation?: string;
+        referredBy?: string;
+        notes?: string;
+      }
+    ) => this.request<any>(`/super-admin/patients/${id}`, { method: 'PUT', body: data }),
+
+    prescriptions: (params?: { doctorId?: string; patientId?: string; page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.doctorId) query.set('doctorId', params.doctorId);
+      if (params?.patientId) query.set('patientId', params.patientId);
+      if (params?.page) query.set('page', String(params?.page ?? 1));
+      if (params?.limit) query.set('limit', String(params?.limit ?? 20));
+      return this.request<{ prescriptions: any[]; total: number; page: number; limit: number }>(
+        `/super-admin/prescriptions?${query}`
+      );
+    },
+
+    updatePrescription: (
+      id: string,
+      data: {
+        diagnosis?: string;
+        chiefComplaint?: string;
+        examination?: string;
+        investigation?: string;
+        advice?: string;
+        followUpDate?: string | null;
+        vitals?: string;
+        items?: Array<{
+          drugName: string;
+          genericName?: string;
+          dosage: string;
+          frequency: string;
+          duration: string;
+          beforeFood?: boolean;
+          afterFood?: boolean;
+          instructions?: string;
+        }>;
+      }
+    ) => this.request<any>(`/super-admin/prescriptions/${id}`, { method: 'PUT', body: data }),
   };
 }
 

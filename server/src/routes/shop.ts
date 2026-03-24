@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../index.js';
-import { optionalAuth, requireAuth, AuthRequest } from '../middleware/auth.js';
+import { optionalAuth, requireAuth, requireAdmin, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 
 // ============== ADMIN ROUTES ==============
 
 // Admin: Get shop statistics
-router.get('/admin/stats', requireAuth, async (req, res) => {
+router.get('/admin/stats', requireAuth, requireAdmin, async (req, res) => {
   try {
     const [
       totalProducts,
@@ -49,7 +49,7 @@ router.get('/admin/stats', requireAuth, async (req, res) => {
 });
 
 // Admin: List all orders with filters
-router.get('/admin/orders', requireAuth, async (req, res) => {
+router.get('/admin/orders', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { status, page = '1', limit = '20' } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
@@ -75,7 +75,7 @@ router.get('/admin/orders', requireAuth, async (req, res) => {
 });
 
 // Admin: Update order status
-router.put('/admin/orders/:id/status', requireAuth, async (req, res) => {
+router.put('/admin/orders/:id/status', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { status, trackingNumber } = req.body;
 
@@ -96,7 +96,7 @@ router.put('/admin/orders/:id/status', requireAuth, async (req, res) => {
 });
 
 // Admin: Create product
-router.post('/admin/products', requireAuth, async (req, res) => {
+router.post('/admin/products', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { name, description, shortDesc, price, comparePrice, cost, sku, barcode, category, images, stock, isFeatured } = req.body;
 
@@ -128,7 +128,7 @@ router.post('/admin/products', requireAuth, async (req, res) => {
 });
 
 // Admin: Update product
-router.put('/admin/products/:id', requireAuth, async (req, res) => {
+router.put('/admin/products/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { name, description, shortDesc, price, comparePrice, cost, sku, barcode, category, images, stock, isActive, isFeatured } = req.body;
 
@@ -158,7 +158,7 @@ router.put('/admin/products/:id', requireAuth, async (req, res) => {
 });
 
 // Admin: Delete product
-router.delete('/admin/products/:id', requireAuth, async (req, res) => {
+router.delete('/admin/products/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     await prisma.product.delete({ where: { id: req.params.id } });
     res.json({ success: true });
@@ -168,7 +168,7 @@ router.delete('/admin/products/:id', requireAuth, async (req, res) => {
 });
 
 // Admin: Get all products (including inactive)
-router.get('/admin/products', requireAuth, async (req, res) => {
+router.get('/admin/products', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { category, search, page = '1', limit = '50' } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
