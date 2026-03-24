@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -42,7 +43,10 @@ app.use(
 );
 
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' ? (process.env.FRONTEND_URL?.split(',') || []) : true,
+  origin:
+    process.env.NODE_ENV === 'production'
+      ? (process.env.FRONTEND_URL?.split(',').map((o) => o.trim()).filter(Boolean) ?? [])
+      : true,
   credentials: true,
 }));
 
@@ -84,6 +88,27 @@ app.use('/api/communication', communicationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/super-admin', superAdminRoutes);
+
+/** Single-process production: serve Vite `dist` from repo root (run `npm run build:production` first). */
+if (process.env.NODE_ENV === 'production') {
+  const staticDir = path.resolve(__dirname, '../../dist');
+  if (fs.existsSync(staticDir)) {
+    app.use(express.static(staticDir, { index: false }));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        res.status(404).json({ error: 'Not Found' });
+        return;
+      }
+      res.sendFile(path.join(staticDir, 'index.html'), (err) => {
+        if (err) next(err);
+      });
+    });
+  } else {
+    console.warn(
+      `[startup] Frontend dist not found at ${staticDir} — API-only mode. Set FRONTEND_URL CORS and deploy the SPA separately, or run "npm run build" at repo root before start.`
+    );
+  }
+}
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Error:', err);

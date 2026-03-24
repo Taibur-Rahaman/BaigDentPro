@@ -2,9 +2,33 @@
  * Startup checks for database and secrets (common deployment threats).
  */
 
+const PLACEHOLDER_SECRETS = new Set([
+  'your-secret-key-change-in-production',
+  'changeme',
+  'secret',
+]);
+
 export function validateProductionEnvironment(): void {
   if (process.env.NODE_ENV !== 'production') {
     return;
+  }
+
+  const frontend = (process.env.FRONTEND_URL ?? '').trim();
+  if (!frontend) {
+    throw new Error(
+      'FRONTEND_URL is required in production (comma-separated origins), e.g. https://yourdomain.com'
+    );
+  }
+
+  const jwt = (process.env.JWT_SECRET ?? '').trim();
+  if (!jwt) {
+    throw new Error('JWT_SECRET is required in production');
+  }
+  if (jwt.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters in production');
+  }
+  if (PLACEHOLDER_SECRETS.has(jwt.toLowerCase())) {
+    throw new Error('JWT_SECRET must be replaced with a strong random value in production');
   }
 
   const db = process.env.DATABASE_URL ?? '';

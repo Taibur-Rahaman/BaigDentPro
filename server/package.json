@@ -2,10 +2,14 @@
   "name": "baigdentpro-server",
   "version": "1.0.0",
   "description": "BaigDentPro Dental Management System Backend",
+  "type": "module",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/index.js",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",

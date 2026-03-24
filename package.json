@@ -5,12 +5,17 @@
   "workspaces": [
     "server"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
     "dev:client": "vite",
     "dev:server": "cd server && npm run dev",
     "build": "vite build",
     "build:server": "cd server && npm run build",
+    "build:production": "npm run build && npm run build:server",
+    "start:production": "NODE_ENV=production npm run start -w server",
     "preview": "vite preview",
     "install:all": "npm i && cd server && npm i",
     "db:push": "cd server && npm run db:push",

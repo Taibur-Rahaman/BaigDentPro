@@ -1,4 +1,15 @@
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/api' : 'http://localhost:3001/api');
+/**
+ * API base path or absolute URL (must end with `/api` for this client).
+ * - Dev: defaults to `/api` (Vite proxy → backend).
+ * - Prod same-origin (Express serves `dist` + `/api`): leave unset → `/api`.
+ * - Prod split (e.g. app on Hostinger, API elsewhere): set VITE_API_URL=https://api.example.com/api
+ */
+function apiUrlBase(): string {
+  const raw = import.meta.env.VITE_API_URL as string | undefined;
+  const base = raw?.trim() ? raw.trim() : '/api';
+  return base.replace(/\/$/, '');
+}
+const API_URL = apiUrlBase();
 
 interface ApiOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
