@@ -106,12 +106,77 @@ BaigDentPro is a **Vite/React SPA** plus a **Node (Express) API** and **PostgreS
 - If the API is on another origin, set `VITE_API_URL` (see `.env.production.example`) **before** building.
 - On the API server, set `FRONTEND_URL` to the **exact** browser origins that will call the API (CORS).
 
+### Hostinger: File Manager or FTP (static site only)
+
+Use this when you **upload files** to `public_html` (no Git deploy). It deploys the **React app only**. Your **API must run elsewhere** (VPS, another Node host, or Hostinger’s Node feature) and must allow your site’s domain in **`FRONTEND_URL`** (CORS).
+
+1. **Point the frontend at the live API** (create a file `.env.production` in the repo root before building):
+   ```bash
+   # Example: public HTTPS API
+   VITE_API_URL=https://api.yourdomain.com/api
+   ```
+   If you omit this, the app uses `/api` (same domain). That only works if **the same domain** serves `/api` (for example via reverse proxy to Node), not if the site is pure static files only.
+
+2. **Build:**
+   ```bash
+   npm ci
+   npm run build:hostinger-static
+   ```
+   Output is in **`dist/`** (includes `index.html`, `assets/`, images, and **`.htaccess`** for Apache SPA routing on Hostinger).
+
+3. **Upload** the **contents** of `dist/` (all files and folders, including hidden `.htaccess`) into **`public_html`** (or the subdomain’s document root). Use **binary** mode in FTP for assets if your client offers it.
+
+4. **Do not** upload `server/`, `node_modules/`, or source files for this static-only method—only the **`dist`** output.
+
+5. If the site lives in a **subfolder** (e.g. `yoursite.com/app/`), build with a base path and fix `.htaccess` `RewriteBase` — see comments inside `public/.htaccess`.
+
+### Hostinger: Git + Vite site (e.g. `*.hostingersite.com`, Cloud Startup)
+
+What Hostinger’s **default Vite + Git** deploy does: it runs something like `npm install` + `npm run build` and publishes **`dist/`** as a **static site**. That is **not** the Express API and **not** PostgreSQL. Your plan shows **Node.js apps** (e.g. 2/10) — use that for the backend, or use an external API + hosted DB.
+
+**Path A — Full stack on Hostinger (same subscription, recommended if you have Node slots)**
+
+1. **Database (hPanel):** **Websites → your site → Databases** — create a **PostgreSQL** database (or use **Supabase / Neon** and copy the connection string). Never use `localhost` unless Postgres runs on the same server as Node.
+2. **Node.js app (hPanel):** **Advanced → Node.js** (or **Websites → Node.js** depending on UI) — **Create application**, point it at this repo or upload the built project, set:
+   - **Startup file / command:** run from repo root after install, e.g. `npm run start:production` (after `npm ci` and `npm run build:production` on the server), or whatever your panel expects (some use `server/dist/index.js` with `node`).
+   - **Environment variables** (never commit these):  
+     `NODE_ENV=production`  
+     `DATABASE_URL=postgresql://...?sslmode=require`  
+     `JWT_SECRET=` (32+ random characters)  
+     `FRONTEND_URL=https://YOUR-SUBDOMAIN.hostingersite.com` (your real site URL, comma-separated if you add `www` or a custom domain later)  
+     Optional: `PORT` if the panel assigns one.
+3. **Deploy schema:** SSH or one-time deploy step: `cd server && npx prisma db push` (or `migrate deploy`) so tables exist.
+4. **If the SPA is still built separately by Git:** set **`VITE_API_URL`** in the **Git build environment variables** to your **public API base URL** (e.g. `https://api.yourdomain.com/api` or the URL Hostinger gives the Node app). Rebuild/redeploy the frontend so `fetch` hits the real API.
+
+**Path B — Keep Git deploy as frontend-only**
+
+1. Run the **API + DB** on a **VPS**, **Railway**, **Render**, or Hostinger **Node** URL.
+2. In Hostinger **Git → Environment variables** for the Vite build, set `VITE_API_URL=https://YOUR-API-HOST/api` and redeploy.
+3. On the API server, set `FRONTEND_URL` to your Hostinger site URL (exact `https://…` origin).
+
+**Quick check:** open `https://YOUR-API-HOST/api/health` — JSON should show `"database":"connected"`.
+
+### After GitHub → Hostinger: “database not working” (common causes)
+
+1. **Static hosting (`public_html` upload) has no database.**  
+   Uploading only `dist/` gives you **HTML/JS files**. There is **no Node process** and **no PostgreSQL** on that host. The app will call `/api/...` on the **same domain** and get your **Apache `index.html`** (wrong) unless you point the build at a real API (see below).  
+   **Fix:** Either run the **full stack** on a **VPS / Hostinger Node app** (see “One service”), **or** keep static hosting and run the API on another server, then rebuild with `VITE_API_URL=https://your-api-host.com/api`.
+
+2. **`DATABASE_URL` must not be `localhost`.**  
+   On the **machine where Node runs**, `localhost` is that server’s loopback — not your laptop. Use a **hosted** Postgres URL (Supabase, Neon, Railway, Hostinger managed DB, etc.) with TLS, e.g. `postgresql://user:pass@host:5432/db?sslmode=require`.
+
+3. **CORS:** set `FRONTEND_URL` on the API to your **exact** live origins (including `https://` and `www` if you use both), comma-separated. Wrong origins = browser blocks API calls (looks like “nothing works”).
+
+4. **Check the API itself:** open `https://YOUR-API-HOST/api/health` in a browser. You should see JSON with `"database":"connected"`. If you see `"database":"disconnected"`, the API is running but **cannot reach Postgres** — fix `DATABASE_URL`, firewall, and SSL params.
+
+5. **Email domain (“temp mail”)** does not fix the database. SMTP and Postgres are separate; use a real provider for production mail if you send from the app.
+
 ### Before going live
 
 - [ ] Rotate all secrets; never commit `server/.env`.
 - [ ] Use PostgreSQL with TLS; backups for the database.
 - [ ] Apply schema changes on deploy (`npx prisma db push` or `migrate deploy` if you use migrations).
-- [ ] Smoke-test `/api/health` and login after deploy.
+- [ ] Smoke-test `/api/health` (expect `database: connected`) and login after deploy.
 
 ## License
 

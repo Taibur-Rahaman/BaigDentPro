@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { isSupabaseConfigured } from './utils/supabaseServer.js';
+import { syncSupabasePasswordForEmail } from './services/supabaseAuthSync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -89,6 +91,35 @@ async function main() {
   });
   console.log('✅ Created super admin:', superAdmin.email);
 
+  const omixEmail = process.env.OMIX_SERVICE_USER_EMAIL?.trim();
+  const omixPassword = process.env.OMIX_SERVICE_USER_PASSWORD?.trim();
+  if (omixEmail && omixPassword) {
+    const omixHash = await bcrypt.hash(omixPassword, 12);
+    const omixUser = await prisma.user.upsert({
+      where: { email: omixEmail },
+      update: {
+        password: omixHash,
+        clinicId: demoClinic.id,
+        role: 'CLINIC_ADMIN',
+        clinicName: demoClinic.name,
+        name: 'Omix Service',
+        isActive: true,
+        isApproved: true,
+      },
+      create: {
+        email: omixEmail,
+        password: omixHash,
+        name: 'Omix Service',
+        role: 'CLINIC_ADMIN',
+        clinicId: demoClinic.id,
+        clinicName: demoClinic.name,
+        isActive: true,
+        isApproved: true,
+      },
+    });
+    console.log('✅ Omix service clinic admin:', omixUser.email);
+  }
+
   const products = [
     { name: 'Oral-B Electric Toothbrush', slug: 'oral-b-electric-toothbrush', price: 2500, category: 'TOOTHBRUSH', description: 'Advanced electric toothbrush with smart timer', stock: 50, isFeatured: true },
     { name: 'Colgate Total Toothpaste', slug: 'colgate-total-toothpaste', price: 180, category: 'TOOTHPASTE', description: '12-hour protection toothpaste', stock: 100 },
@@ -117,10 +148,34 @@ async function main() {
 
   console.log(`✅ Created ${products.length} products`);
 
+  if (isSupabaseConfigured()) {
+    const authSeeds: { email: string; password: string }[] = [
+      { email: 'demo@baigdentpro.com', password: 'password123' },
+      { email: 'doctor@baigdentpro.com', password: 'password123' },
+      { email: 'superadmin@baigdentpro.com', password: 'super123' },
+    ];
+    const omixE = process.env.OMIX_SERVICE_USER_EMAIL?.trim();
+    const omixP = process.env.OMIX_SERVICE_USER_PASSWORD?.trim();
+    if (omixE && omixP) {
+      authSeeds.push({ email: omixE, password: omixP });
+    }
+    for (const { email, password } of authSeeds) {
+      const r = await syncSupabasePasswordForEmail(email, password);
+      if (r.synced) console.log('✅ Supabase Auth user:', email);
+      else if (r.note && r.note !== 'supabase_not_configured') console.warn('⚠️ Supabase Auth', email, r.note);
+    }
+  } else {
+    console.log('ℹ️  Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY to sync seeded users to Supabase Auth.');
+  }
+
   console.log('🎉 Seeding completed!');
   console.log('\n📋 Demo Login:');
   console.log('   Email: demo@baigdentpro.com');
   console.log('   Password: password123');
+  if (omixEmail && omixPassword) {
+    console.log('\n📋 Omix service user seeded (OMIX_SERVICE_USER_* in server/.env).');
+    console.log('   Email:', omixEmail);
+  }
 }
 
 main()

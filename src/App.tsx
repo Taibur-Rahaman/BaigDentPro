@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DashboardPage } from './DashboardPage';
 import { HomePage } from './HomePage';
 import api from './api';
+import { getSupabase, isSupabaseAuthConfigured } from './supabaseClient';
 
 export type View = 'home' | 'login' | 'dashboard';
 
@@ -21,6 +22,31 @@ export const App: React.FC = () => {
     clinicName: '',
     phone: '',
   });
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSentMessage, setForgotSentMessage] = useState('');
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryPasswordConfirm, setRecoveryPasswordConfirm] = useState('');
+
+  useEffect(() => {
+    const sb = getSupabase();
+    if (!sb) return undefined;
+    const {
+      data: { subscription },
+    } = sb.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRegister(false);
+        setForgotPasswordMode(false);
+        setForgotSentMessage('');
+        setRecoveryMode(true);
+        setView('login');
+      }
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('baigdentpro:token');
@@ -61,6 +87,30 @@ export const App: React.FC = () => {
     const password = (form.querySelector('input[name="password"]') as HTMLInputElement)?.value;
 
     try {
+      const sb = getSupabase();
+      if (sb && email && password) {
+        const { data: sbData, error: sbError } = await sb.auth.signInWithPassword({ email, password });
+        if (!sbError && sbData.session?.access_token) {
+          try {
+            const result = await api.auth.exchangeSupabaseSession(sbData.session.access_token);
+            await sb.auth.signOut();
+            localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
+            setUser({
+              id: result.user.id,
+              name: result.user.name,
+              role: result.user.role,
+              clinicId: result.user.clinicId,
+            });
+            setView('dashboard');
+            return;
+          } catch (exchangeErr: any) {
+            await sb.auth.signOut();
+            setError(exchangeErr.message || 'Could not complete sign-in for this account');
+            return;
+          }
+        }
+      }
+
       const result = await api.auth.login(email, password);
       localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
       setUser({
@@ -72,6 +122,69 @@ export const App: React.FC = () => {
       setView('dashboard');
     } catch (err: any) {
       setError(err.message || 'Login failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError('');
+    setForgotSentMessage('');
+    const sb = getSupabase();
+    if (!sb) {
+      setError('Password reset requires Supabase. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const redirectTo = `${window.location.origin}${window.location.pathname || '/'}`;
+      const { error: sbErr } = await sb.auth.resetPasswordForEmail(forgotEmail.trim(), { redirectTo });
+      if (sbErr) throw new Error(sbErr.message);
+      setForgotSentMessage('If an account exists for that email, you will receive a reset link shortly.');
+    } catch (err: any) {
+      setError(err.message || 'Could not send reset email');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRecoveryPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError('');
+    if (recoveryPassword !== recoveryPasswordConfirm) {
+      setError('Passwords do not match');
+      return;
+    }
+    const sb = getSupabase();
+    if (!sb) {
+      setError('Session lost. Open the reset link from your email again.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const { error: upErr } = await sb.auth.updateUser({ password: recoveryPassword });
+      if (upErr) throw new Error(upErr.message);
+      const {
+        data: { session },
+      } = await sb.auth.getSession();
+      if (!session?.access_token) throw new Error('Session expired. Open the reset link again.');
+      await api.auth.syncPrismaPassword(session.access_token, recoveryPassword);
+      const result = await api.auth.exchangeSupabaseSession(session.access_token);
+      await sb.auth.signOut();
+      localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
+      setUser({
+        id: result.user.id,
+        name: result.user.name,
+        role: result.user.role,
+        clinicId: result.user.clinicId,
+      });
+      setRecoveryMode(false);
+      setRecoveryPassword('');
+      setRecoveryPasswordConfirm('');
+      setView('dashboard');
+    } catch (err: any) {
+      setError(err.message || 'Could not update password');
     } finally {
       setIsLoading(false);
     }
@@ -117,6 +230,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    void getSupabase()?.auth.signOut();
     api.auth.logout();
     localStorage.removeItem('baigdentpro:user');
     setUser(null);
@@ -214,8 +328,24 @@ export const App: React.FC = () => {
         <div className="neo-auth-form-panel">
           <div className="neo-auth-card">
             <div className="neo-auth-card-header">
-              <h2>{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
-              <p>{isRegister ? 'Register to get started' : 'Sign in to your command center'}</p>
+              <h2>
+                {isRegister
+                  ? 'Create Account'
+                  : recoveryMode
+                    ? 'Set new password'
+                    : forgotPasswordMode
+                      ? 'Reset password'
+                      : 'Welcome Back'}
+              </h2>
+              <p>
+                {isRegister
+                  ? 'Register to get started'
+                  : recoveryMode
+                    ? 'Choose a strong password, then you will be signed in'
+                    : forgotPasswordMode
+                      ? 'We will email you a secure link if Supabase Auth is enabled'
+                      : 'Sign in to your command center'}
+              </p>
             </div>
 
             {!isRegister && (
@@ -334,8 +464,116 @@ export const App: React.FC = () => {
                 </button>
                 <p className="neo-auth-switch">
                   Already have an account?{' '}
-                  <button type="button" onClick={() => setIsRegister(false)}>Sign In</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRegister(false);
+                      setForgotPasswordMode(false);
+                      setRecoveryMode(false);
+                    }}
+                  >
+                    Sign In
+                  </button>
                 </p>
+              </form>
+            ) : forgotPasswordMode && !recoveryMode ? (
+              <form onSubmit={handleForgotPassword} className="neo-auth-form">
+                <div className="neo-form-group">
+                  <label>Email</label>
+                  <div className="neo-input-wrapper">
+                    <i className="fa-solid fa-envelope"></i>
+                    <input
+                      type="email"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="doctor@clinic.com"
+                      required
+                    />
+                  </div>
+                </div>
+                {forgotSentMessage && (
+                  <div
+                    className="neo-auth-info-box"
+                    style={{ borderColor: 'rgba(13, 148, 136, 0.35)', background: 'rgba(236, 253, 245, 0.5)' }}
+                  >
+                    <div className="neo-auth-info-icon">
+                      <i className="fa-solid fa-envelope-circle-check"></i>
+                    </div>
+                    <div className="neo-auth-info-content">
+                      <h4>Check your inbox</h4>
+                      <p>{forgotSentMessage}</p>
+                    </div>
+                  </div>
+                )}
+                <button type="submit" className="neo-btn neo-btn-primary neo-btn-block neo-btn-lg" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                      <span>Sending...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-paper-plane"></i>
+                      <span>Send reset link</span>
+                    </>
+                  )}
+                </button>
+                <p className="neo-auth-switch">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotPasswordMode(false);
+                      setForgotSentMessage('');
+                      setError('');
+                    }}
+                  >
+                    Back to Sign In
+                  </button>
+                </p>
+              </form>
+            ) : recoveryMode ? (
+              <form onSubmit={handleRecoveryPassword} className="neo-auth-form">
+                <div className="neo-form-group">
+                  <label>New password</label>
+                  <div className="neo-input-wrapper">
+                    <i className="fa-solid fa-lock"></i>
+                    <input
+                      type="password"
+                      value={recoveryPassword}
+                      onChange={(e) => setRecoveryPassword(e.target.value)}
+                      placeholder="Enter new password"
+                      required
+                      minLength={8}
+                    />
+                  </div>
+                </div>
+                <div className="neo-form-group">
+                  <label>Confirm password</label>
+                  <div className="neo-input-wrapper">
+                    <i className="fa-solid fa-lock"></i>
+                    <input
+                      type="password"
+                      value={recoveryPasswordConfirm}
+                      onChange={(e) => setRecoveryPasswordConfirm(e.target.value)}
+                      placeholder="Confirm new password"
+                      required
+                      minLength={8}
+                    />
+                  </div>
+                </div>
+                <button type="submit" className="neo-btn neo-btn-primary neo-btn-block neo-btn-lg" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                      <span>Updating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-check"></i>
+                      <span>Save password &amp; sign in</span>
+                    </>
+                  )}
+                </button>
               </form>
             ) : (
               <form onSubmit={handleLogin} className="neo-auth-form">
@@ -347,7 +585,38 @@ export const App: React.FC = () => {
                   </div>
                 </div>
                 <div className="neo-form-group">
-                  <label>Password</label>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 8,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <label style={{ marginBottom: 0 }}>Password</label>
+                    {isSupabaseAuthConfigured() && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotPasswordMode(true);
+                          setForgotSentMessage('');
+                          setError('');
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          color: '#0d9488',
+                          fontWeight: 500,
+                        }}
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
                   <div className="neo-input-wrapper">
                     <i className="fa-solid fa-lock"></i>
                     <input name="password" type="password" placeholder="Enter password" required />
@@ -374,6 +643,8 @@ export const App: React.FC = () => {
                       setIsRegister(true);
                       setRegisterInfo('');
                       setError('');
+                      setForgotPasswordMode(false);
+                      setRecoveryMode(false);
                     }}
                   >
                     Create Account

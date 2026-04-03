@@ -1,0 +1,18 @@
+# Hostinger / Apache (and most LiteSpeed) — SPA fallback so direct URLs and refresh work.
+# Vite copies this file from public/ into dist/ on build. Upload everything inside dist/ to public_html.
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # If you deploy in a subfolder (e.g. public_html/app), set RewriteBase /app/ above
+  # and run: vite build --base=/app/
+
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
+
+# Optional: block directory listing
+Options -Indexes

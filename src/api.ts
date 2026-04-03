@@ -57,16 +57,37 @@ class ApiClient {
       requestHeaders['Authorization'] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(`${API_URL}${endpoint}`, {
-      method,
-      headers: requestHeaders,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}${endpoint}`, {
+        method,
+        headers: requestHeaders,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (err) {
+      if (err instanceof TypeError) {
+        throw new Error(
+          'Cannot reach the API. Deploy the backend (Node + PostgreSQL) and set Hostinger build env VITE_API_URL to your API base if it is not on the same origin (e.g. https://api.yourdomain.com/api).'
+        );
+      }
+      throw err;
+    }
 
     if (!response.ok) {
       const status = response.status;
-      const errorBody = await response.json().catch(() => ({ error: 'Request failed' }));
-      const message = errorBody?.error || 'Request failed';
+      const raw = await response.text();
+      let message = 'Request failed';
+      try {
+        const parsed = JSON.parse(raw) as { error?: string };
+        if (typeof parsed.error === 'string') message = parsed.error;
+      } catch {
+        if (raw.trim().startsWith('<!')) {
+          message =
+            'Got HTML instead of JSON — wrong API URL or static hosting only. Deploy the Node API on a VPS or host, set VITE_API_URL to your API base (e.g. https://api.yourdomain.com/api), rebuild the SPA, and upload dist/.';
+        } else if (raw.length > 0 && raw.length < 400) {
+          message = raw;
+        }
+      }
 
       // If the token is invalid/expired, clear auth state but don't hard-redirect.
       if (status === 401 && this.token) {
@@ -131,6 +152,24 @@ class ApiClient {
       this.setToken(null);
       localStorage.removeItem('baigdentpro:user');
     },
+
+    /** After Supabase sign-in; server verifies JWT and returns app token. */
+    exchangeSupabaseSession: async (accessToken: string) => {
+      const result = await this.request<{ user: any; token: string }>('/auth/supabase-session', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      this.setToken(result.token);
+      return result;
+    },
+
+    /** Keeps Prisma password hash aligned after Supabase password recovery. */
+    syncPrismaPassword: async (accessToken: string, password: string) =>
+      this.request<{ message: string }>('/auth/sync-prisma-password', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: { password },
+      }),
   };
 
   patients = {

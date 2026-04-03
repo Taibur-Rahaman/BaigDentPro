@@ -20,6 +20,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import adminRoutes from './routes/admin.js';
 import superAdminRoutes from './routes/superAdmin.js';
 import { validateProductionEnvironment } from './utils/envSecurity.js';
+import { isDatabaseUnreachableError, sendDatabaseUnavailable } from './utils/dbUnavailable.js';
 
 // Load server/.env regardless of process cwd (e.g. monorepo root)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,8 +74,29 @@ app.use('/api/auth', authLimiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/api/health', async (_req, res) => {
+  const payload: {
+    status: string;
+    timestamp: string;
+    database?: 'connected' | 'disconnected';
+    databaseError?: string;
+  } = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  };
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    payload.database = 'connected';
+  } catch (err) {
+    payload.database = 'disconnected';
+    if (process.env.NODE_ENV !== 'production') {
+      payload.databaseError = err instanceof Error ? err.message : String(err);
+    } else {
+      console.error('[health] database unreachable:', err instanceof Error ? err.message : err);
+    }
+  }
+  const httpStatus = payload.database === 'disconnected' ? 503 : 200;
+  res.status(httpStatus).json(payload);
 });
 
 app.use('/api/auth', authRoutes);
@@ -112,6 +134,9 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Error:', err);
+  if (isDatabaseUnreachableError(err)) {
+    return sendDatabaseUnavailable(res);
+  }
   const status = err.status || 500;
   const isProd = process.env.NODE_ENV === 'production';
   res.status(status).json({

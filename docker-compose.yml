@@ -1,25 +1,28 @@
-# Local PostgreSQL for BaigDentPro (matches server/.env DATABASE_URL by default)
-# Usage: docker compose up -d
+# Local PostgreSQL for BaigDentPro — matches default DATABASE_URL in server/.env.example
+# From repo root: docker compose up -d
 # Then: cd server && npx prisma db push && npm run db:seed
+#
+# If port 5432 is already in use, either stop the other Postgres or run:
+#   POSTGRES_PUBLISH_PORT=5433 docker compose up -d
+# and set DATABASE_URL in server/.env to use port 5433.
 
 services:
   postgres:
     image: postgres:16-alpine
     container_name: baigdentpro-postgres
-    restart: unless-stopped
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_DB: baigdentpro
       POSTGRES_USER: baigdentpro
       POSTGRES_PASSWORD: baigdentpro
+    ports:
+      - "${POSTGRES_PUBLISH_PORT:-5432}:5432"
     volumes:
       - baigdentpro_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U baigdentpro -d baigdentpro"]
-      interval: 5s
+      interval: 3s
       timeout: 5s
-      retries: 5
+      retries: 10
 
 volumes:
   baigdentpro_pgdata:

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../index.js';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { assertPasswordAcceptable } from '../utils/passwordPolicy.js';
+import { syncSupabasePasswordForEmail } from '../services/supabaseAuthSync.js';
 
 const router = Router();
 
@@ -205,6 +206,12 @@ router.post('/users', authenticate, requireAdmin, async (req: AuthRequest, res) 
         },
       })
       .catch(() => {});
+
+    void syncSupabasePasswordForEmail(user.email, password).then((r) => {
+      if (!r.synced && r.note && r.note !== 'supabase_not_configured') {
+        console.warn('[admin create user] Supabase Auth sync:', r.note);
+      }
+    });
 
     res.status(201).json(user);
   } catch (error: any) {

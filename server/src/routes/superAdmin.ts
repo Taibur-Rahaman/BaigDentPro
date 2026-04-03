@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../index.js';
 import { authenticate, requireSuperAdmin, AuthRequest } from '../middleware/auth.js';
+import { deleteSupabaseUserByEmail, inviteSupabaseUserIfAbsent } from '../services/supabaseAuthSync.js';
 
 const router = Router();
 
@@ -222,6 +223,13 @@ router.post('/users/:id/approve-signup', async (req: AuthRequest, res) => {
         },
       })
       .catch(() => {});
+
+    void inviteSupabaseUserIfAbsent(user.email).then((r) => {
+      if (r.invited) {
+        console.log('[approve-signup] Supabase invite sent for', user.email);
+      }
+    });
+
     res.json(user);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -242,6 +250,7 @@ router.post('/users/:id/reject-signup', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Invalid operation' });
     }
     const clinicId = user.clinicId;
+    await deleteSupabaseUserByEmail(user.email);
     await prisma.user.delete({ where: { id } });
     if (clinicId) {
       const remaining = await prisma.user.count({ where: { clinicId } });

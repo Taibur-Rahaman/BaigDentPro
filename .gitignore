@@ -2,6 +2,9 @@
 node_modules/
 server/node_modules/
 
+# Hostinger / local upload bundle (regenerate with npm run build:hostinger-static + zip)
+baigdentpro-hostinger-upload.zip
+
 # Build
 dist/
 server/dist/
