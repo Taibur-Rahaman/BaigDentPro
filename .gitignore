@@ -19,6 +19,8 @@ server/prisma/*.db
 .env.local
 .env.*.local
 server/.env
+.env.alpha
+server/.env.alpha
 
 # Editor
 .vscode/

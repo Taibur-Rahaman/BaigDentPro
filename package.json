@@ -15,6 +15,8 @@
     "build": "vite build",
     "build:server": "cd server && npm run build",
     "build:production": "npm run build && npm run build:server",
+    "build:alpha": "vite build --mode alpha",
+    "build:alpha:full": "npm run build:alpha && npm run build:server",
     "build:hostinger-static": "vite build",
     "start:production": "NODE_ENV=production npm run start -w server",
     "preview": "vite preview",
@@ -25,6 +27,8 @@
     "db:generate": "cd server && npm run db:generate",
     "db:seed": "cd server && npm run db:seed",
     "db:setup": "npm run db:up && cd server && npx prisma db push && npm run db:seed",
+    "db:push:alpha": "cd server && npx prisma db push",
+    "db:seed:alpha": "cd server && npm run db:seed",
     "typecheck": "tsc --noEmit && cd server && tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx && cd server && eslint src --ext .ts"
   },

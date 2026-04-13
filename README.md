@@ -54,6 +54,44 @@ Open the URL from Vite (e.g. `http://localhost:5173`). Data is stored in the bro
 
    **Public registration:** New accounts from **Create Account** are created in a *pending* state. A **super admin** must open **Super Admin → Pending signups** and click **Approve** before that user can sign in. Staff added under **Clinic admin → Add staff** are approved automatically.
 
+### Alpha testing (Supabase Postgres + optional Auth)
+
+Use this for a hosted alpha (e.g. [baigdentpro.com](https://baigdentpro.com)) with **Supabase** as Postgres and, if you want password reset / Auth sync, the same project’s API keys.
+
+1. **Supabase dashboard**
+   - Create or pick a **non-production** project for alpha when possible.
+   - **Database →** copy the **URI** connection string (use **Session** or **Transaction** pooler if your host recommends it). Append `?sslmode=require` if it is not already there.
+   - **Project Settings → API →** copy **Project URL**, **anon** `public`, and **service_role** `secret` (server only).
+
+2. **Auth URLs (if you use Supabase Auth features)**  
+   **Authentication → URL configuration:** set **Site URL** to your alpha site (e.g. `https://baigdentpro.com`). Add the same under **Redirect URLs** if the dashboard requires it. The server uses the first origin in `FRONTEND_URL` for invite/reset links.
+
+3. **Backend env on the alpha server**  
+   Copy `server/.env.alpha.example` → `server/.env` and fill every empty value (`JWT_SECRET` must be random and **≥ 32 characters** — `validateProductionEnvironment` enforces this when `NODE_ENV=production`).
+
+4. **Apply schema and seed (one-time or after schema changes)**  
+   From the repo root (with `DATABASE_URL` set in `server/.env`):
+
+   ```bash
+   npm run db:push:alpha
+   npm run db:seed:alpha
+   ```
+
+5. **Frontend build for alpha**  
+   Copy `.env.alpha.example` → `.env.alpha` with `VITE_SUPABASE_*` filled. If the API is on another host, set `VITE_API_URL` to the public API base (e.g. `https://api.yourdomain.com/api`). Then:
+
+   ```bash
+   npm run build:alpha:full
+   ```
+
+6. **Run the API** (same as production — serves `dist/` when present):
+
+   ```bash
+   NODE_ENV=production npm run start:production
+   ```
+
+7. **Smoke test:** open `https://YOUR-API-HOST/api/health` and confirm `"database":"connected"`.
+
 ## Features
 
 - **Clinic admin** – Disable or enable doctor logins, change roles (doctor vs clinic admin), add staff accounts (**Clinic admin** sidebar; requires API + `CLINIC_ADMIN` or `SUPER_ADMIN` role)
