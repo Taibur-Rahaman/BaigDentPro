@@ -130,7 +130,7 @@ BaigDentPro is a **Vite/React SPA** plus a **Node (Express) API** and **PostgreS
    cd server && npx prisma db push && cd ..
    npm run build:production
    ```
-   When you introduce Prisma migrations, replace `db push` with `npx prisma migrate deploy` for production.
+   For **new** databases, prefer **`npm run db:migrate:deploy`** (from repo root) so schema matches versioned migrations under `server/prisma/migrations/`. For quick local experiments, `npx prisma db push` in `server/` is still fine.
 5. Start the API (it will also serve the built SPA from `dist/` when `dist` exists):
    ```bash
    NODE_ENV=production npm run start:production

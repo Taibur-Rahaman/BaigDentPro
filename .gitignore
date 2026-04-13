@@ -13,6 +13,7 @@ server/dist/
 # Database
 *.db
 server/prisma/*.db
+server/backups/
 
 # Env
 .env

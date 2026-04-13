@@ -184,3 +184,38 @@ By following this guide and using the included scripts, your database will be:
 - Backed up automatically
 - Recoverable via a tested restore process
 
+---
+
+## 8. If the website is hacked or you suspect an attack
+
+No checklist replaces a qualified security review, but use this as an **immediate operational sequence**:
+
+1. **Contain**
+   - If you host the Node app yourself: **stop** the process (or scale to zero) until you understand the blast radius.
+   - In **Supabase**: review **Logs** and **Auth** for unusual sign-ins; consider **pausing** the project only if you must block all access while investigating (this affects live users).
+
+2. **Rotate secrets (assume compromise if unsure)**
+   - Generate a new **database password** and update `DATABASE_URL` on the server; restart the app.
+   - Generate a new **`JWT_SECRET`** and deploy; **all users will need to sign in again** (old tokens invalid).
+   - Rotate **Supabase service_role** and **anon** keys if they could have leaked (Dashboard → API → reset).
+   - Rotate any **SMTP / Twilio / WhatsApp** keys that lived in the same environment.
+
+3. **Preserve evidence**
+   - Export or screenshot **reverse-proxy access logs**, **application logs** (failed logins are tagged `[security] failed_login` in server output), and **Supabase logs** for the incident window before they roll off.
+
+4. **Assess data**
+   - Check **ActivityLog** (and Supabase audit features if enabled) for unexpected admin actions.
+   - Compare current row counts or critical tables against a **recent backup** if you suspect data tampering.
+
+5. **Recover**
+   - If the database was corrupted or ransomware-style dropped: restore from the **latest clean backup** (see §5) into a **new** database, verify, then point `DATABASE_URL` at it.
+
+6. **Harden before going back live**
+   - Confirm **TLS**, **CORS** (`FRONTEND_URL`), and **firewall** rules still match your intent.
+   - Re-run smoke tests: `/api/health`, login, one patient read/write.
+
+7. **Backups going forward**
+   - **Supabase**: enable and verify **Point-in-Time Recovery** / automated backups on paid tiers, or schedule **`backup-postgres.sh`** plus **off-site** copy (§3–§4) so you always have a restore path.
+
+For day-to-day assurance: **you are not “safe because the app exists”**—safety comes from **managed DB backups**, **secret hygiene**, **HTTPS**, **limited DB network exposure**, and **monitoring**. The app implements rate limits, helmet, production env checks, and scoped patient queries; it does **not** replace backups or org-wide security policies.
+

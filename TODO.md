@@ -1,5 +1,7 @@
 # BaigDentPro – Master TODO
 
+> **Note (2026-04):** Much of the checklist below is **out of date** — the backend (Express + Prisma), auth, patients, prescriptions, appointments, billing routes, and shop APIs **already exist** in the codebase. Use **`newtodolist.md`** for an honest **production / security / backup** checklist and current gaps.
+
 Central tracker generated from all project `.md` files. Frontend is marked production‑ready; focus is now on backend, integration, testing, deployment, and a few remaining frontend/HTML tasks.
 
 ---

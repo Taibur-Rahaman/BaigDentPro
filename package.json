@@ -28,6 +28,7 @@
     "db:seed": "cd server && npm run db:seed",
     "db:setup": "npm run db:up && cd server && npx prisma db push && npm run db:seed",
     "db:push:alpha": "cd server && npx prisma db push",
+    "db:migrate:deploy": "cd server && npx prisma migrate deploy",
     "db:seed:alpha": "cd server && npm run db:seed",
     "typecheck": "tsc --noEmit && cd server && tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx && cd server && eslint src --ext .ts"

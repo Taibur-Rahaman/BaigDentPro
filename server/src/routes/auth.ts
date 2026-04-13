@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt, { type SignOptions } from 'jsonwebtoken';
@@ -29,6 +30,13 @@ async function findUserByEmailInsensitive(email: string) {
   return prisma.user.findFirst({
     where: { email: { equals: trimmed, mode: 'insensitive' } },
   });
+}
+
+/** Correlates attempts in logs without printing the full email (monitoring / incident review). */
+function logFailedLoginAttempt(req: { ip?: string; socket?: { remoteAddress?: string } }, normalizedEmail: string): void {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const id = createHash('sha256').update(normalizedEmail.toLowerCase()).digest('hex').slice(0, 16);
+  console.warn(`[security] failed_login ip=${ip} email_hash=${id}`);
 }
 
 router.post('/register', async (req, res) => {
@@ -115,11 +123,13 @@ router.post('/login', async (req, res) => {
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
+      logFailedLoginAttempt(req, email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
+      logFailedLoginAttempt(req, email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
