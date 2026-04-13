@@ -694,6 +694,11 @@ export const DashboardPage: React.FC<Props> = ({
   const [dataLoading, setDataLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
 
+  /** SMS compose (dashboard → Twilio via /api/communication) */
+  const [smsComposePatientId, setSmsComposePatientId] = useState('');
+  const [smsComposeMessage, setSmsComposeMessage] = useState('');
+  const [smsSending, setSmsSending] = useState(false);
+
   // Settings persistence (used by PrescriptionPage header/print templates)
   const HEADER_SETTINGS_STORAGE_KEY = 'baigdentpro:headerSettings';
   const PRINT_SETUP_OVERRIDES_KEY = 'baigdentpro:printSetupOverrides';
@@ -1366,6 +1371,61 @@ export const DashboardPage: React.FC<Props> = ({
   const showToast = (message: string) => {
     setShowNotice(message);
     setTimeout(() => setShowNotice(null), 3000);
+  };
+
+  const handleSmsTemplate = (
+    kind: 'appointment' | 'prescription' | 'lab' | 'payment' | 'birthday' | 'custom',
+  ) => {
+    if (kind === 'custom') {
+      showToast('Type your message below, then Send.');
+      return;
+    }
+    if (!smsComposePatientId) {
+      showToast('Select a patient first');
+      return;
+    }
+    const p = patients.find((x) => x.id === smsComposePatientId);
+    if (!p) {
+      showToast('Select a patient first');
+      return;
+    }
+    const clinic = dashboardHeaderDraft.clinicName || 'our clinic';
+    const phoneLine = dashboardHeaderDraft.phone ? ` Tel: ${dashboardHeaderDraft.phone}` : '';
+    const body: Record<string, string> = {
+      appointment: `Hello ${p.name}, this is ${clinic}.${phoneLine} Reminder: please attend your scheduled dental appointment. Reply if you need to reschedule.`,
+      prescription: `Hello ${p.name}, your prescription is ready at ${clinic}.${phoneLine}`,
+      lab: `Hello ${p.name}, lab work update from ${clinic}.${phoneLine} Please contact us for details.`,
+      payment: `Hello ${p.name}, friendly reminder from ${clinic}: there may be a balance due on your account.${phoneLine}`,
+      birthday: `Happy birthday ${p.name}! Best wishes from ${clinic}.${phoneLine}`,
+    };
+    setSmsComposeMessage(body[kind] ?? '');
+    showToast('Template applied — review and send');
+  };
+
+  const handleSendSmsCompose = async () => {
+    if (!api.getToken()) {
+      showToast('Log in to send SMS');
+      return;
+    }
+    const p = patients.find((x) => x.id === smsComposePatientId);
+    if (!p?.phone?.trim()) {
+      showToast('Select a patient with a phone number');
+      return;
+    }
+    const msg = smsComposeMessage.trim();
+    if (!msg) {
+      showToast('Enter a message');
+      return;
+    }
+    setSmsSending(true);
+    try {
+      await api.communication.sendSMS(p.phone.trim(), msg, 'dashboard_compose');
+      showToast('SMS sent');
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed to send SMS');
+    } finally {
+      setSmsSending(false);
+    }
   };
 
   const filteredPatients = useMemo(() => {
@@ -4795,24 +4855,23 @@ const printHtml = (title: string, html: string) => {
 
       <div className="sms-panel">
         <div className="sms-stats">
-          <div className="sms-stat">
-            <span className="sms-stat-value">850</span>
-            <span className="sms-stat-label">SMS Remaining</span>
-          </div>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--neo-text-muted)', maxWidth: 520 }}>
+            SMS is sent via <strong>Twilio</strong> when <code>TWILIO_*</code> is set on the server. Usage and balance appear in your Twilio console — not here.
+          </p>
         </div>
 
         <div className="sms-templates">
           <h3>Quick Templates</h3>
           <p style={{ fontSize: 13, marginTop: -8, marginBottom: 12, color: 'var(--neo-text-muted)' }}>
-            Templates are not wired to send yet—configure Twilio on the server and connect this UI when ready.
+            Select a patient, tap a template to fill the message (uses clinic name/phone from Settings), edit if needed, then Send.
           </p>
           <div className="template-buttons">
-            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-calendar"></i> Appointment Reminder</button>
-            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-prescription"></i> Prescription Ready</button>
-            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-flask"></i> Lab Work Ready</button>
-            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-credit-card"></i> Payment Reminder</button>
-            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-birthday-cake"></i> Birthday Wish</button>
-            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-comment"></i> Custom Message</button>
+            <button type="button" className="template-btn" onClick={() => handleSmsTemplate('appointment')}><i className="fa-solid fa-calendar"></i> Appointment Reminder</button>
+            <button type="button" className="template-btn" onClick={() => handleSmsTemplate('prescription')}><i className="fa-solid fa-prescription"></i> Prescription Ready</button>
+            <button type="button" className="template-btn" onClick={() => handleSmsTemplate('lab')}><i className="fa-solid fa-flask"></i> Lab Work Ready</button>
+            <button type="button" className="template-btn" onClick={() => handleSmsTemplate('payment')}><i className="fa-solid fa-credit-card"></i> Payment Reminder</button>
+            <button type="button" className="template-btn" onClick={() => handleSmsTemplate('birthday')}><i className="fa-solid fa-birthday-cake"></i> Birthday Wish</button>
+            <button type="button" className="template-btn" onClick={() => handleSmsTemplate('custom')}><i className="fa-solid fa-comment"></i> Custom Message</button>
           </div>
         </div>
 
@@ -4820,19 +4879,32 @@ const printHtml = (title: string, html: string) => {
           <h3>Send SMS</h3>
           <div className="form-group">
             <label>Select Patient</label>
-            <select>
+            <select
+              value={smsComposePatientId}
+              onChange={(e) => setSmsComposePatientId(e.target.value)}
+            >
               <option value="">-- Select Patient --</option>
-              {patients.map(p => (
+              {patients.map((p) => (
                 <option key={p.id} value={p.id}>{p.name} - {p.phone}</option>
               ))}
             </select>
           </div>
           <div className="form-group">
             <label>Message</label>
-            <textarea placeholder="Type your message..." rows={4} />
+            <textarea
+              placeholder="Type your message..."
+              rows={4}
+              value={smsComposeMessage}
+              onChange={(e) => setSmsComposeMessage(e.target.value)}
+            />
           </div>
-          <button type="button" className="btn-primary" onClick={() => showToast('Send SMS is not wired in this UI yet—use Twilio env + communication API when ready.')}>
-            <i className="fa-solid fa-paper-plane"></i> Send SMS
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={smsSending}
+            onClick={() => void handleSendSmsCompose()}
+          >
+            <i className="fa-solid fa-paper-plane"></i> {smsSending ? 'Sending…' : 'Send SMS'}
           </button>
         </div>
       </div>

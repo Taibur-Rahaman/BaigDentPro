@@ -12,7 +12,7 @@ The long checklist that used to live here was **obsolete** (it assumed the backe
 ## Real remaining product gaps (high level)
 
 - **Payments:** no Stripe/PayPal webhooks; shop is COD-oriented.
-- **SMS:** Twilio env + `/api/communication/*` exist; dashboard SMS UI is mostly **not wired** to those endpoints yet.
+- **SMS:** Dashboard **SMS** tab calls `/api/communication/sms/send` (Twilio env required). Appointment row “reminder” already used the API.
 - **Compliance:** not HIPAA-certified; PHI handling is your legal + hosting responsibility.
 - **Automated tests:** add over time (auth, health, critical CRUD).
 

@@ -67,16 +67,16 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 ## E. Product / feature gaps (not blockers for “API works”, but real-clinic expectations)
 
 - [ ] **Payment gateway:** shop/billing is largely **manual / COD-style** in schema; no Stripe webhooks in repo.
-- [ ] **SMS / email:** optional via env; verify Twilio/SMTP in production if you promise reminders.
+- [ ] **SMS / email:** Twilio SMS from **Dashboard → SMS** is wired to `POST /communication/sms/send` (needs `TWILIO_*` on server). Verify on production; email still env-driven.
 - [ ] **Automated tests:** no full E2E suite in repo; add smoke tests or manual QA checklist per release.
-- **Release smoke (manual, ~5 min):** `GET /api/health` → `database: connected` · login · list patients · open one patient · create draft prescription or invoice · browser print preview once · SMS panel shows “not wired” toast (expected until Twilio UI work).
+- **Release smoke (manual, ~5 min):** `GET /api/health` → `database: connected` · login · list patients · open one patient · create draft prescription or invoice · browser print preview once · **SMS:** select patient, template, Send (with Twilio test number / creds).
 - [x] **Stale doc:** `TODO.md` replaced with a **short index** pointing here + `DB_SECURITY_AND_BACKUP.md`.
 
 ---
 
 ## F. Frontend / UX polish
 
-- [x] **SMS template buttons** — clarified in UI (helper text + toasts); sending still requires Twilio + API wiring (see §E).
+- [x] **SMS panel** — templates + compose call **`api.communication.sendSMS`** (Twilio on server); fake “850 remaining” removed.
 - [ ] Re-test **print** flows (invoice / prescription) after each deploy.
 
 ---
@@ -98,5 +98,6 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 | Env-tunable rate limits + `.env.example` | done 2026-04-13 |
 | DB doc §2.1 Prisma baseline + `backup-cron.example` | done 2026-04-13 |
 | `TODO.md` shortened to index | done 2026-04-13 |
+| Dashboard SMS wired to Twilio API | done 2026-04-13 |
 
 When an item is finished, set it to `[x]` and optionally add a date in a commit message.
