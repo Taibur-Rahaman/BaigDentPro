@@ -31,6 +31,7 @@
     "db:migrate:deploy": "cd server && npx prisma migrate deploy",
     "db:seed:alpha": "cd server && npm run db:seed",
     "typecheck": "tsc --noEmit && cd server && tsc --noEmit",
+    "smoke:api": "bash scripts/smoke-api.sh",
     "lint": "eslint src --ext .ts,.tsx && cd server && eslint src --ext .ts"
   },
   "dependencies": {

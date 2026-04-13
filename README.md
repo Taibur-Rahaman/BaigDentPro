@@ -92,6 +92,16 @@ Use this for a hosted alpha (e.g. [baigdentpro.com](https://baigdentpro.com)) wi
 
 7. **Smoke test:** open `https://YOUR-API-HOST/api/health` and confirm `"database":"connected"`.
 
+## CI & local checks
+
+- **GitHub Actions** (`.github/workflows/ci.yml`): on each push/PR to `main`/`master`, runs `npm ci`, **`npm run typecheck`**, and **`npm audit --audit-level=high`**.
+- **Local API smoke** (server must be running, default `http://127.0.0.1:3001`):
+
+  ```bash
+  npm run smoke:api
+  # or: ./scripts/smoke-api.sh https://your-api-host
+  ```
+
 ## Features
 
 - **Clinic admin** – Disable or enable doctor logins, change roles (doctor vs clinic admin), add staff accounts (**Clinic admin** sidebar; requires API + `CLINIC_ADMIN` or `SUPER_ADMIN` role)
@@ -143,6 +153,7 @@ BaigDentPro is a **Vite/React SPA** plus a **Node (Express) API** and **PostgreS
 - Build the SPA with `npm run build` and deploy `dist/` to static hosting or CDN.
 - If the API is on another origin, set `VITE_API_URL` (see `.env.production.example`) **before** building.
 - On the API server, set `FRONTEND_URL` to the **exact** browser origins that will call the API (CORS).
+- **Same domain, no `VITE_API_URL`:** if you run **Nginx** (or similar) on a VPS, serve `dist/` and **proxy `/api` to Node** — copy from **`deploy/nginx-same-origin-api.example.conf`**. Then the browser uses `/api` and `/api/health` returns JSON instead of the SPA HTML.
 
 ### Hostinger: File Manager or FTP (static site only)
 

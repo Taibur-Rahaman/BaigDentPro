@@ -7,7 +7,7 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 ### Run the next steps in order
 
 1. **Check what the public site actually serves** — from the repo: `./scripts/check-live-api.sh 'https://YOUR_DOMAIN/api/health'`. If you see the **WARN: HTML** message, the live site is not hitting the Node API (static hosting only, or missing reverse proxy / `VITE_API_URL`).
-2. **Point the app at a real API** — either deploy the full stack (Node + Postgres, same origin `/api`) or build the SPA with `VITE_API_URL=https://your-api-host/api` and redeploy static files.
+2. **Point the app at a real API** — (a) deploy **Node + Postgres** with **Nginx** proxying `/api` to the app (`deploy/nginx-same-origin-api.example.conf`), **or** (b) build with `VITE_API_URL=https://your-api-host/api` and redeploy static files.
 3. **On the server**, set `DATABASE_URL`, `FRONTEND_URL`, `JWT_SECRET`, `NODE_ENV=production`, then `npm run db:migrate:deploy` (or baseline per §B) and restart.
 4. **Schedule backups** (§C) and enable Supabase backups if you use Supabase.
 5. **Manual smoke test** — login, open one patient, print prescription once (§F).
@@ -23,6 +23,8 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 | 2026-04-13 | Rate limits | **Configurable** via `AUTH_RATE_LIMIT_MAX` / `API_RATE_LIMIT_MAX` in `server/.env` (see `.env.example`). |
 | 2026-04-13 | Prisma baseline doc | **`server/DB_SECURITY_AND_BACKUP.md` §2.1** — `migrate resolve --applied 20260413120000_baseline` for existing `db push` DBs. |
 | 2026-04-13 | Backup scheduling | Example crontab lines in **`scripts/backup-cron.example`**. |
+| 2026-04-13 | CI | **`.github/workflows/ci.yml`** — typecheck + `npm audit --audit-level=high` on push/PR. |
+| 2026-04-13 | Same-origin `/api` | Example **`deploy/nginx-same-origin-api.example.conf`** (static `dist` + proxy to Node). |
 
 ---
 
@@ -68,7 +70,7 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 
 - [ ] **Payment gateway:** shop/billing is largely **manual / COD-style** in schema; no Stripe webhooks in repo.
 - [ ] **SMS / email:** Twilio SMS from **Dashboard → SMS** is wired to `POST /communication/sms/send` (needs `TWILIO_*` on server). Verify on production; email still env-driven.
-- [ ] **Automated tests:** no full E2E suite in repo; add smoke tests or manual QA checklist per release.
+- [x] **Automated checks (light):** GitHub Actions runs **typecheck + high-severity npm audit**; locally **`npm run smoke:api`** hits `/api/health` (no E2E browser tests yet).
 - **Release smoke (manual, ~5 min):** `GET /api/health` → `database: connected` · login · list patients · open one patient · create draft prescription or invoice · browser print preview once · **SMS:** select patient, template, Send (with Twilio test number / creds).
 - [x] **Stale doc:** `TODO.md` replaced with a **short index** pointing here + `DB_SECURITY_AND_BACKUP.md`.
 
@@ -99,5 +101,7 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 | DB doc §2.1 Prisma baseline + `backup-cron.example` | done 2026-04-13 |
 | `TODO.md` shortened to index | done 2026-04-13 |
 | Dashboard SMS wired to Twilio API | done 2026-04-13 |
+| GitHub Actions CI + `scripts/smoke-api.sh` + `npm run smoke:api` | done 2026-04-13 |
+| `deploy/nginx-same-origin-api.example.conf` + README cross-link | done 2026-04-13 |
 
 When an item is finished, set it to `[x]` and optionally add a date in a commit message.

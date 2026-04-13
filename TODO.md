@@ -14,9 +14,10 @@ The long checklist that used to live here was **obsolete** (it assumed the backe
 - **Payments:** no Stripe/PayPal webhooks; shop is COD-oriented.
 - **SMS:** Dashboard **SMS** tab calls `/api/communication/sms/send` (Twilio env required). Appointment row “reminder” already used the API.
 - **Compliance:** not HIPAA-certified; PHI handling is your legal + hosting responsibility.
-- **Automated tests:** add over time (auth, health, critical CRUD).
+- **Automated tests:** CI runs typecheck + audit; `npm run smoke:api` for `/api/health`. Add E2E over time if needed.
 
 ## Quick links
 
 - Cron backup examples: `scripts/backup-cron.example`
 - Live API probe: `scripts/check-live-api.sh`
+- Nginx same-origin `/api`: `deploy/nginx-same-origin-api.example.conf`
