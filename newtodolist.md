@@ -25,6 +25,7 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 | 2026-04-13 | Backup scheduling | Example crontab lines in **`scripts/backup-cron.example`**. |
 | 2026-04-13 | CI | **`.github/workflows/ci.yml`** — typecheck + `npm audit --audit-level=high` on push/PR. |
 | 2026-04-13 | Same-origin `/api` | Example **`deploy/nginx-same-origin-api.example.conf`** (static `dist` + proxy to Node). |
+| 2026-04-13 | CI build + Dependabot | **`build:production`** in CI; **`.github/dependabot.yml`** weekly npm updates. |
 
 ---
 
@@ -103,5 +104,6 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 | Dashboard SMS wired to Twilio API | done 2026-04-13 |
 | GitHub Actions CI + `scripts/smoke-api.sh` + `npm run smoke:api` | done 2026-04-13 |
 | `deploy/nginx-same-origin-api.example.conf` + README cross-link | done 2026-04-13 |
+| CI: `build:production` + Dependabot weekly npm | done 2026-04-13 |
 
 When an item is finished, set it to `[x]` and optionally add a date in a commit message.

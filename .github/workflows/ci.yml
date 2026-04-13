@@ -24,5 +24,8 @@ jobs:
       - name: Typecheck (client + server)
         run: npm run typecheck
 
+      - name: Production build (Vite + server)
+        run: npm run build:production
+
       - name: npm audit (high or above)
         run: npm audit --audit-level=high

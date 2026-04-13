@@ -94,7 +94,8 @@ Use this for a hosted alpha (e.g. [baigdentpro.com](https://baigdentpro.com)) wi
 
 ## CI & local checks
 
-- **GitHub Actions** (`.github/workflows/ci.yml`): on each push/PR to `main`/`master`, runs `npm ci`, **`npm run typecheck`**, and **`npm audit --audit-level=high`**.
+- **GitHub Actions** (`.github/workflows/ci.yml`): on each push/PR to `main`/`master`, runs `npm ci`, **`npm run typecheck`**, **`npm run build:production`**, and **`npm audit --audit-level=high`**.
+- **Dependabot** (`.github/dependabot.yml`): weekly `npm` version-update PRs for the root lockfile (review + merge after CI passes).
 - **Local API smoke** (server must be running, default `http://127.0.0.1:3001`):
 
   ```bash
