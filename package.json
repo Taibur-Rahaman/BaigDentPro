@@ -32,6 +32,7 @@
     "db:seed:alpha": "cd server && npm run db:seed",
     "typecheck": "tsc --noEmit && cd server && tsc --noEmit",
     "smoke:api": "bash scripts/smoke-api.sh",
+    "ops:verify": "bash scripts/ops-verify.sh",
     "lint": "eslint src --ext .ts,.tsx && cd server && eslint src --ext .ts"
   },
   "dependencies": {

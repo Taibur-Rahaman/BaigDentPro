@@ -1,26 +1,22 @@
 # BaigDentPro – TODO (short)
 
-The long checklist that used to live here was **obsolete** (it assumed the backend was not built). **Use these instead:**
-
 | Doc | Purpose |
 |-----|---------|
-| **`newtodolist.md`** | Production readiness: live API check, migrations, backups, security, smoke tests |
-| **`README.md`** | Setup, deploy, Hostinger, Supabase alpha |
-| **`server/DB_SECURITY_AND_BACKUP.md`** | Postgres security, backups, restore, incident response, **Prisma baselining §2.1** |
-| **`IMPLEMENTATION_CHECKLIST.md`** | Historical feature checklist (may be partially stale) |
+| **`newtodolist.md`** | Production checklist — all items **[x]** in repo; **you** run **`OPERATIONS_RUNBOOK.md`** on your servers. |
+| **`OPERATIONS_RUNBOOK.md`** | Copy-paste steps: health, login, `FRONTEND_URL`, backups, Supabase, restore drill, print. |
+| **`docs/ROADMAP.md`** | Payments, CAPTCHA, JWT refresh, WAF — not built yet. |
+| **`README.md`** | Setup, deploy, Hostinger, CI |
+| **`server/DB_SECURITY_AND_BACKUP.md`** | Postgres security, backups, restore, incidents, Prisma baseline |
 
-## Real remaining product gaps (high level)
+## Commands
 
-- **Payments:** no Stripe/PayPal webhooks; shop is COD-oriented.
-- **SMS:** Dashboard **SMS** tab calls `/api/communication/sms/send` (Twilio env required). Appointment row “reminder” already used the API.
-- **Compliance:** not HIPAA-certified; PHI handling is your legal + hosting responsibility.
-- **Automated tests:** CI runs typecheck + audit; `npm run smoke:api` for `/api/health`. Add E2E over time if needed.
+- **`npm run ops:verify`** — ensure no secret env files are tracked; optional `HEALTH_URL=https://api.host npm run ops:verify`
+- **`npm run smoke:api`** — local `/api/health` (server running)
+- **`./scripts/check-live-api.sh 'https://domain/api/health'`** — prod probe
 
 ## Quick links
 
 - Cron backup examples: `scripts/backup-cron.example`
-- Live API probe: `scripts/check-live-api.sh`
-- Nginx same-origin `/api`: `deploy/nginx-same-origin-api.example.conf`
+- Nginx: `deploy/nginx-same-origin-api.example.conf`
 - systemd: `deploy/baigdentpro.service.example`
 - Security disclosures: `SECURITY.md`
-- Dependabot: `.github/dependabot.yml` (enable “Dependabot alerts” in repo Settings → Code security if needed)
