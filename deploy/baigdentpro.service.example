@@ -1,0 +1,44 @@
+# Example systemd unit — BaigDentPro Node API (serves /api + optional SPA from dist/).
+#
+# Prerequisites on the server:
+#   1. Clone repo to e.g. /opt/baigdentpro
+#   2. npm ci && npm run build:production
+#   3. Create server/.env (DATABASE_URL, FRONTEND_URL, JWT_SECRET, …)
+#   4. npx prisma migrate deploy (or baseline) in server/
+#
+# Install:
+#   sudo cp deploy/baigdentpro.service.example /etc/systemd/system/baigdentpro.service
+#   sudo nano /etc/systemd/system/baigdentpro.service   # fix paths & User=
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now baigdentpro
+#
+# Logs: journalctl -u baigdentpro -f
+
+[Unit]
+Description=BaigDentPro (Express API + static dist)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/baigdentpro
+
+# Loads DATABASE_URL, JWT_SECRET, FRONTEND_URL, PORT, etc. (KEY=VALUE per line)
+EnvironmentFile=/opt/baigdentpro/server/.env
+Environment=NODE_ENV=production
+
+# Run compiled server (serves ../dist when present — paths relative to server/dist)
+ExecStart=/usr/bin/node /opt/baigdentpro/server/dist/index.js
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Hardening (optional; adjust if you hit permission issues)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

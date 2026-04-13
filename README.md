@@ -94,7 +94,7 @@ Use this for a hosted alpha (e.g. [baigdentpro.com](https://baigdentpro.com)) wi
 
 ## CI & local checks
 
-- **GitHub Actions** (`.github/workflows/ci.yml`): on each push/PR to `main`/`master`, runs `npm ci`, **`npm run typecheck`**, **`npm run build:production`**, and **`npm audit --audit-level=high`**.
+- **GitHub Actions** (`.github/workflows/ci.yml`): on each push/PR to `main`/`master`, runs `npm ci`, **`npm run typecheck`**, **`npm run build:production`**, and **`npm audit --audit-level=high`**. You can also run it manually (**Actions → CI → Run workflow**).
 - **Dependabot** (`.github/dependabot.yml`): weekly `npm` version-update PRs for the root lockfile (review + merge after CI passes).
 - **Local API smoke** (server must be running, default `http://127.0.0.1:3001`):
 
@@ -146,7 +146,8 @@ BaigDentPro is a **Vite/React SPA** plus a **Node (Express) API** and **PostgreS
    ```bash
    NODE_ENV=production npm run start:production
    ```
-   Use **PM2**, **systemd**, or Hostinger’s process manager so the app restarts on reboot.
+   Use **PM2**, **systemd**, or Hostinger’s process manager so the app restarts on reboot.  
+   **systemd example:** `deploy/baigdentpro.service.example` (adjust paths, `User=`, and `ExecStart` to your Node binary).
 6. Put **Nginx** (or the panel’s reverse proxy) in front: TLS termination, `proxy_pass` to `PORT`, and WebSocket limits if you add them later.
 
 ### Split frontend and API
