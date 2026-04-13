@@ -4803,13 +4803,16 @@ const printHtml = (title: string, html: string) => {
 
         <div className="sms-templates">
           <h3>Quick Templates</h3>
+          <p style={{ fontSize: 13, marginTop: -8, marginBottom: 12, color: 'var(--neo-text-muted)' }}>
+            Templates are not wired to send yet—configure Twilio on the server and connect this UI when ready.
+          </p>
           <div className="template-buttons">
-            <button className="template-btn"><i className="fa-solid fa-calendar"></i> Appointment Reminder</button>
-            <button className="template-btn"><i className="fa-solid fa-prescription"></i> Prescription Ready</button>
-            <button className="template-btn"><i className="fa-solid fa-flask"></i> Lab Work Ready</button>
-            <button className="template-btn"><i className="fa-solid fa-credit-card"></i> Payment Reminder</button>
-            <button className="template-btn"><i className="fa-solid fa-birthday-cake"></i> Birthday Wish</button>
-            <button className="template-btn"><i className="fa-solid fa-comment"></i> Custom Message</button>
+            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-calendar"></i> Appointment Reminder</button>
+            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-prescription"></i> Prescription Ready</button>
+            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-flask"></i> Lab Work Ready</button>
+            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-credit-card"></i> Payment Reminder</button>
+            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-birthday-cake"></i> Birthday Wish</button>
+            <button type="button" className="template-btn" onClick={() => showToast('SMS templates are not wired yet—use Twilio + /api/communication when ready.')}><i className="fa-solid fa-comment"></i> Custom Message</button>
           </div>
         </div>
 
@@ -4828,7 +4831,7 @@ const printHtml = (title: string, html: string) => {
             <label>Message</label>
             <textarea placeholder="Type your message..." rows={4} />
           </div>
-          <button className="btn-primary">
+          <button type="button" className="btn-primary" onClick={() => showToast('Send SMS is not wired in this UI yet—use Twilio env + communication API when ready.')}>
             <i className="fa-solid fa-paper-plane"></i> Send SMS
           </button>
         </div>

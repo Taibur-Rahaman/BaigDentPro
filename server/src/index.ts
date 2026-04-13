@@ -51,10 +51,13 @@ app.use(cors({
   credentials: true,
 }));
 
+const authRateMax = Math.max(1, parseInt(process.env.AUTH_RATE_LIMIT_MAX ?? '60', 10) || 60);
+const apiRateMax = Math.max(1, parseInt(process.env.API_RATE_LIMIT_MAX ?? '300', 10) || 300);
+
 /** Slow brute-force / credential stuffing on auth endpoints */
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 60,
+  max: authRateMax,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please try again later.' },
@@ -63,7 +66,7 @@ const authLimiter = rateLimit({
 /** General API rate limit (DoS / abuse) */
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 300,
+  max: apiRateMax,
   standardHeaders: true,
   legacyHeaders: false,
 });

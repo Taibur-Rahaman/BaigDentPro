@@ -192,7 +192,7 @@ What Hostinger’s **default Vite + Git** deploy does: it runs something like `n
 2. In Hostinger **Git → Environment variables** for the Vite build, set `VITE_API_URL=https://YOUR-API-HOST/api` and redeploy.
 3. On the API server, set `FRONTEND_URL` to your Hostinger site URL (exact `https://…` origin).
 
-**Quick check:** open `https://YOUR-API-HOST/api/health` — JSON should show `"database":"connected"`.
+**Quick check:** open `https://YOUR-API-HOST/api/health` — JSON should show `"database":"connected"`. Or run `./scripts/check-live-api.sh 'https://YOUR-API-HOST/api/health'` (warns if you get HTML from a static SPA instead of the API).
 
 ### After GitHub → Hostinger: “database not working” (common causes)
 
@@ -212,7 +212,7 @@ What Hostinger’s **default Vite + Git** deploy does: it runs something like `n
 ### Before going live
 
 - [ ] Rotate all secrets; never commit `server/.env`.
-- [ ] Use PostgreSQL with TLS; backups for the database.
+- [ ] Use PostgreSQL with TLS; backups for the database (`server/scripts/backup-postgres.sh`, cron ideas in `scripts/backup-cron.example`, full guide in `server/DB_SECURITY_AND_BACKUP.md`).
 - [ ] Apply schema changes on deploy (`npx prisma db push` or `migrate deploy` if you use migrations).
 - [ ] Smoke-test `/api/health` (expect `database: connected`) and login after deploy.
 

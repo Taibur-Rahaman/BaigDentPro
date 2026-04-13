@@ -64,6 +64,24 @@ npx prisma migrate deploy
 
 This will apply all migrations to the managed database.
 
+### 2.1 Database already created with `prisma db push` (no migration history)
+
+If tables **already exist** and match the current Prisma schema (you used `db push` earlier), **do not** run `migrate deploy` blindly — it may try to create tables that already exist.
+
+**Option A — Mark the baseline as applied** (recommended when schema matches `schema.prisma`):
+
+```bash
+cd server
+export DATABASE_URL="postgresql://…?sslmode=require"
+npx prisma migrate resolve --applied 20260413120000_baseline
+```
+
+After that, future migrations can be applied with `npx prisma migrate deploy`.
+
+**Option B — New empty database** — point `DATABASE_URL` at a fresh database and run `npx prisma migrate deploy` only.
+
+If you are unsure the DB matches the schema, compare with `npx prisma db pull` on a scratch branch or use [Prisma baselining](https://www.prisma.io/docs/guides/migrate/developing-with-prisma-migrate/add-prisma-migrate-to-an-existing-project).
+
 ---
 
 ## 3. Automated backups (pg_dump)

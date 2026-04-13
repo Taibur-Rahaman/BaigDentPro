@@ -1,0 +1,9 @@
+# Example: daily Postgres dump + optional S3 sync (copy into crontab -e).
+# Replace paths and DATABASE_URL; keep secrets out of git (use env on the host).
+#
+# 0 2 * * * cd /path/to/BaigDentPro-byOmixSolutions/server && export DATABASE_URL='postgresql://…?sslmode=require' && ./scripts/backup-postgres.sh >> /var/log/baigdentpro-backup.log 2>&1
+#
+# With AWS CLI off-site copy (uncomment and set bucket):
+# 0 2 * * * cd /path/to/BaigDentPro-byOmixSolutions/server && export DATABASE_URL='postgresql://…?sslmode=require' && ./scripts/backup-postgres.sh && aws s3 sync ./backups s3://YOUR_BUCKET/baigdentpro-db/ --exclude "*" --include "*.sql" >> /var/log/baigdentpro-backup.log 2>&1
+#
+# Supabase: also enable project backups / PITR in the dashboard (plan-dependent).

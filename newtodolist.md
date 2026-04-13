@@ -4,6 +4,26 @@
 
 Update this file as you complete items: change `[ ]` to `[x]`.
 
+### Run the next steps in order
+
+1. **Check what the public site actually serves** — from the repo: `./scripts/check-live-api.sh 'https://YOUR_DOMAIN/api/health'`. If you see the **WARN: HTML** message, the live site is not hitting the Node API (static hosting only, or missing reverse proxy / `VITE_API_URL`).
+2. **Point the app at a real API** — either deploy the full stack (Node + Postgres, same origin `/api`) or build the SPA with `VITE_API_URL=https://your-api-host/api` and redeploy static files.
+3. **On the server**, set `DATABASE_URL`, `FRONTEND_URL`, `JWT_SECRET`, `NODE_ENV=production`, then `npm run db:migrate:deploy` (or baseline per §B) and restart.
+4. **Schedule backups** (§C) and enable Supabase backups if you use Supabase.
+5. **Manual smoke test** — login, open one patient, print prescription once (§F).
+
+---
+
+## Verification log
+
+| Date | Check | Result |
+|------|--------|--------|
+| 2026-04-13 | `https://baigdentpro.com/api/health` | HTTP 200 but body is **SPA HTML**, not JSON — **API not exposed on that URL**; fix hosting or `VITE_API_URL`. |
+| 2026-04-13 | `npm audit` (root + server) | **Fixed** in repo: Vite bump, axios (transitive), nodemailer **8.x** on server — re-run `npm audit` after future `npm install`. |
+| 2026-04-13 | Rate limits | **Configurable** via `AUTH_RATE_LIMIT_MAX` / `API_RATE_LIMIT_MAX` in `server/.env` (see `.env.example`). |
+| 2026-04-13 | Prisma baseline doc | **`server/DB_SECURITY_AND_BACKUP.md` §2.1** — `migrate resolve --applied 20260413120000_baseline` for existing `db push` DBs. |
+| 2026-04-13 | Backup scheduling | Example crontab lines in **`scripts/backup-cron.example`**. |
+
 ---
 
 ## A. Verify live backend & database (you / owner)
@@ -19,7 +39,7 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 
 - [x] **Baseline Prisma migration** added (`server/prisma/migrations/20260413120000_baseline/`) so new environments can use `prisma migrate deploy`.
 - [x] **Scripts:** `npm run db:migrate:deploy` (root) and `npm run db:migrate:deploy` (in `server/`) apply migrations.
-- [ ] **If the database already exists** from older `db push` only: either run `migrate deploy` on an empty DB, or follow [Prisma baselining](https://www.prisma.io/docs/guides/migrate/developing-with-prisma-migrate/add-prisma-migrate-to-an-existing-project) and mark the baseline as applied without re-running destructive SQL.
+- [x] **If the database already exists** from older `db push` only: see **`server/DB_SECURITY_AND_BACKUP.md` §2.1** — `npx prisma migrate resolve --applied 20260413120000_baseline` when schema already matches, then use `migrate deploy` for future migrations.
 
 ---
 
@@ -28,7 +48,7 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 - [x] **Scripts documented:** `server/scripts/backup-postgres.sh` and `server/scripts/restore-postgres.sh` (see `server/DB_SECURITY_AND_BACKUP.md`).
 - [x] **Incident / breach playbook** added to `server/DB_SECURITY_AND_BACKUP.md` §8 (rotate secrets, logs, restore).
 - [x] **`server/backups/`** added to `.gitignore` so SQL dumps are not committed by mistake.
-- [ ] **Schedule** backups (cron or host scheduler) and copy dumps **off-site** (S3, another region, etc.).
+- [ ] **Schedule** backups (cron or host scheduler) and copy dumps **off-site** (S3, another region, etc.). *Start from **`scripts/backup-cron.example`**.*
 - [ ] **Supabase:** turn on and test **automated backups / PITR** in the dashboard if you use Supabase Postgres (per your plan).
 - [ ] **Restore drill:** restore a dump to a **throwaway** database once to prove the procedure.
 
@@ -37,9 +57,9 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 ## D. Security (code + ops)
 
 - [x] **Failed login logging** (hashed email id + IP) in `server/src/routes/auth.ts` for log monitoring — tag: `[security] failed_login`.
-- [ ] **Review** rate limits (`server/src/index.ts`) for your traffic; tighten `/api/auth` if you see abuse.
+- [x] **Review** rate limits — tuned via **`AUTH_RATE_LIMIT_MAX`** (default 60 / 15 min per IP on `/api/auth`) and **`API_RATE_LIMIT_MAX`** (default 300 / min on `/api`) in `server/.env`; see `server/.env.example`.
 - [ ] **No secrets in git:** `.env`, `server/.env`, `.env.alpha` remain ignored; rotate any key ever pasted in chat or tickets.
-- [ ] **Dependency audit:** run `npm audit` / `npm audit fix` in root and `server/` on a schedule (expect some dev-only noise).
+- [x] **Dependency audit:** run `npm audit` / `npm audit fix` in root and `server/` on a schedule (done in repo 2026-04-13: 0 vulns root + server; repeat monthly).
 - [ ] **Optional hardening:** JWT refresh tokens, CAPTCHA on login/register, WAF / Cloudflare in front of the public site.
 
 ---
@@ -49,13 +69,14 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 - [ ] **Payment gateway:** shop/billing is largely **manual / COD-style** in schema; no Stripe webhooks in repo.
 - [ ] **SMS / email:** optional via env; verify Twilio/SMTP in production if you promise reminders.
 - [ ] **Automated tests:** no full E2E suite in repo; add smoke tests or manual QA checklist per release.
-- [ ] **Stale doc:** `TODO.md` is outdated (it claims core APIs are missing). Prefer this file + `README.md` for truth; update `TODO.md` when you have time.
+- **Release smoke (manual, ~5 min):** `GET /api/health` → `database: connected` · login · list patients · open one patient · create draft prescription or invoice · browser print preview once · SMS panel shows “not wired” toast (expected until Twilio UI work).
+- [x] **Stale doc:** `TODO.md` replaced with a **short index** pointing here + `DB_SECURITY_AND_BACKUP.md`.
 
 ---
 
 ## F. Frontend / UX polish
 
-- [ ] **SMS template buttons** on the dashboard may be UI-only — confirm they call the API or hide until wired.
+- [x] **SMS template buttons** — clarified in UI (helper text + toasts); sending still requires Twilio + API wiring (see §E).
 - [ ] Re-test **print** flows (invoice / prescription) after each deploy.
 
 ---
@@ -71,5 +92,11 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 | `server/backups/` gitignored | done |
 | README: `db:migrate:deploy` for prod | done |
 | `TODO.md` stale warning | done |
+| `scripts/check-live-api.sh` + ordered “next steps” | done 2026-04-13 |
+| npm audit fixes (Vite, nodemailer 8, axios) | done 2026-04-13 |
+| SMS panel UX honesty (toasts + copy) | done 2026-04-13 |
+| Env-tunable rate limits + `.env.example` | done 2026-04-13 |
+| DB doc §2.1 Prisma baseline + `backup-cron.example` | done 2026-04-13 |
+| `TODO.md` shortened to index | done 2026-04-13 |
 
 When an item is finished, set it to `[x]` and optionally add a date in a commit message.
