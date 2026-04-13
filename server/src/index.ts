@@ -150,7 +150,7 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Error:', err);
   if (isDatabaseUnreachableError(err)) {
     return sendDatabaseUnavailable(res);

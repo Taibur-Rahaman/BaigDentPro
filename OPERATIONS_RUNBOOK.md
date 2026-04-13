@@ -133,6 +133,7 @@ Compose template: **`docker-compose.prod.example.yml`**. Put **Nginx** in front 
 
 ```bash
 npm run ops:verify
+npm run lint
 npm run smoke:api
 # With API on another host:
 HEALTH_URL='https://api.example.com' npm run ops:verify

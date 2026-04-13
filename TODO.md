@@ -20,4 +20,5 @@
 - Nginx: `deploy/nginx-same-origin-api.example.conf`
 - systemd: `deploy/baigdentpro.service.example`
 - Docker: `Dockerfile`, `docker-compose.prod.example.yml`, runbook §13
+- Lint: `npm run lint` (`eslint.config.mjs`)
 - Security disclosures: `SECURITY.md`

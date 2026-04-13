@@ -156,7 +156,7 @@ router.get('/revenue-chart', authenticate, async (req: AuthRequest, res) => {
     const { period = 'monthly' } = req.query;
     const today = new Date();
     
-    let data: { date: string; revenue: number }[] = [];
+    const data: { date: string; revenue: number }[] = [];
 
     if (period === 'daily') {
       for (let i = 6; i >= 0; i--) {

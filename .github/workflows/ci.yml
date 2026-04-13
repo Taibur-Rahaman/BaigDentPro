@@ -28,6 +28,9 @@ jobs:
       - name: Typecheck (client + server)
         run: npm run typecheck
 
+      - name: ESLint
+        run: npm run lint
+
       - name: Production build (Vite + server)
         run: npm run build:production
 

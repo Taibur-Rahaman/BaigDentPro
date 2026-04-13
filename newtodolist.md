@@ -25,6 +25,7 @@
 | 2026-04-13 | Health `version` + **SECURITY.md** | `/api/health` + disclosure policy. |
 | 2026-04-13 | **OPERATIONS_RUNBOOK.md** + **docs/ROADMAP.md** + **`ops:verify`** | All remaining operator steps documented and scripted where possible. |
 | 2026-04-13 | **Docker** | `Dockerfile`, `docker-compose.prod.example.yml`, runbook §13, **CI `docker-image`** job. |
+| 2026-04-13 | **ESLint 9 flat config** | `eslint.config.mjs`, **`npm run lint`**, CI + small `prefer-const` fix in `dashboard.ts`. |
 
 ---
 
@@ -88,5 +89,6 @@
 | Health `version`, SECURITY.md | done |
 | **OPERATIONS_RUNBOOK.md**, **docs/ROADMAP.md**, all checklist [x] | done 2026-04-13 |
 | Docker + compose example + CI image build | done 2026-04-13 |
+| ESLint flat config + CI lint step | done 2026-04-13 |
 
 **You are “done” in git when CI is green. You are “done” in production when `OPERATIONS_RUNBOOK.md` is executed on your environment.**

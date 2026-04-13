@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit && cd server && tsc --noEmit",
     "smoke:api": "bash scripts/smoke-api.sh",
     "ops:verify": "bash scripts/ops-verify.sh",
-    "lint": "eslint src --ext .ts,.tsx && cd server && eslint src --ext .ts"
+    "lint": "eslint src server/src"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
@@ -41,15 +41,18 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/node": "^20.16.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.3",
     "@vitejs/plugin-react-swc": "^3.7.0",
     "concurrently": "^8.2.2",
     "eslint": "^9.6.1",
-    "eslint-plugin-react-hooks": "^5.0.0",
-    "eslint-plugin-react-refresh": "^0.4.9",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^17.5.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.58.1",
     "vite": "^6.0.0"
   }
 }
