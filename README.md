@@ -205,7 +205,7 @@ What Hostinger’s **default Vite + Git** deploy does: it runs something like `n
 2. In Hostinger **Git → Environment variables** for the Vite build, set `VITE_API_URL=https://YOUR-API-HOST/api` and redeploy.
 3. On the API server, set `FRONTEND_URL` to your Hostinger site URL (exact `https://…` origin).
 
-**Quick check:** open `https://YOUR-API-HOST/api/health` — JSON should show `"database":"connected"`. Or run `./scripts/check-live-api.sh 'https://YOUR-API-HOST/api/health'` (warns if you get HTML from a static SPA instead of the API).
+**Quick check:** open `https://YOUR-API-HOST/api/health` — JSON should show `"database":"connected"` and optionally `"version"` (root `package.json` or `APP_VERSION` in `server/.env`). Or run `./scripts/check-live-api.sh 'https://YOUR-API-HOST/api/health'` (warns if you get HTML from a static SPA instead of the API).
 
 ### After GitHub → Hostinger: “database not working” (common causes)
 

@@ -26,6 +26,19 @@ import { isDatabaseUnreachableError, sendDatabaseUnavailable } from './utils/dbU
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
+/** Monorepo root package.json version, or override with APP_VERSION (e.g. git SHA in CI). */
+function readRootPackageVersion(): string | undefined {
+  try {
+    const pkgPath = path.resolve(__dirname, '../../package.json');
+    const raw = fs.readFileSync(pkgPath, 'utf8');
+    const j = JSON.parse(raw) as { version?: string };
+    return typeof j.version === 'string' ? j.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const APP_VERSION_PUBLIC = process.env.APP_VERSION?.trim() || readRootPackageVersion();
+
 validateProductionEnvironment();
 
 export const prisma = new PrismaClient();
@@ -81,11 +94,13 @@ app.get('/api/health', async (_req, res) => {
   const payload: {
     status: string;
     timestamp: string;
+    version?: string;
     database?: 'connected' | 'disconnected';
     databaseError?: string;
   } = {
     status: 'ok',
     timestamp: new Date().toISOString(),
+    ...(APP_VERSION_PUBLIC ? { version: APP_VERSION_PUBLIC } : {}),
   };
   try {
     await prisma.$queryRaw`SELECT 1`;

@@ -22,4 +22,5 @@ The long checklist that used to live here was **obsolete** (it assumed the backe
 - Live API probe: `scripts/check-live-api.sh`
 - Nginx same-origin `/api`: `deploy/nginx-same-origin-api.example.conf`
 - systemd: `deploy/baigdentpro.service.example`
+- Security disclosures: `SECURITY.md`
 - Dependabot: `.github/dependabot.yml` (enable “Dependabot alerts” in repo Settings → Code security if needed)

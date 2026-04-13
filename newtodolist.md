@@ -27,6 +27,7 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 | 2026-04-13 | Same-origin `/api` | Example **`deploy/nginx-same-origin-api.example.conf`** (static `dist` + proxy to Node). |
 | 2026-04-13 | CI build + Dependabot | **`build:production`** in CI; **`.github/dependabot.yml`** weekly npm updates. |
 | 2026-04-13 | systemd + CI manual | **`deploy/baigdentpro.service.example`**; **`workflow_dispatch`** on CI. |
+| 2026-04-13 | Health + security policy | **`GET /api/health`** includes optional **`version`**; **`SECURITY.md`** for reports. |
 
 ---
 
@@ -107,5 +108,6 @@ Update this file as you complete items: change `[ ]` to `[x]`.
 | `deploy/nginx-same-origin-api.example.conf` + README cross-link | done 2026-04-13 |
 | CI: `build:production` + Dependabot weekly npm | done 2026-04-13 |
 | systemd unit example + `workflow_dispatch` | done 2026-04-13 |
+| `/api/health` version + `SECURITY.md` | done 2026-04-13 |
 
 When an item is finished, set it to `[x]` and optionally add a date in a commit message.
