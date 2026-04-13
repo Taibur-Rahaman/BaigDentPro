@@ -112,6 +112,23 @@ After each deploy: **Billing** → open invoice → **Print**; **Prescription** 
 
 ---
 
+## §13 Docker (optional deploy)
+
+```bash
+docker build -t baigdentpro .
+docker run --rm -p 3001:3001 --env-file server/.env baigdentpro
+```
+
+Apply DB schema once (new database):
+
+```bash
+docker run --rm --env-file server/.env baigdentpro sh -c "cd server && npx prisma migrate deploy"
+```
+
+Compose template: **`docker-compose.prod.example.yml`**. Put **Nginx** in front for TLS and optional same-origin `/api` (see `deploy/nginx-same-origin-api.example.conf`).
+
+---
+
 ## Quick local checks (development)
 
 ```bash

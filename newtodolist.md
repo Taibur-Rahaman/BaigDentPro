@@ -24,6 +24,7 @@
 | 2026-04-13 | Deploy examples | `deploy/nginx-same-origin-api.example.conf`, `deploy/baigdentpro.service.example`. |
 | 2026-04-13 | Health `version` + **SECURITY.md** | `/api/health` + disclosure policy. |
 | 2026-04-13 | **OPERATIONS_RUNBOOK.md** + **docs/ROADMAP.md** + **`ops:verify`** | All remaining operator steps documented and scripted where possible. |
+| 2026-04-13 | **Docker** | `Dockerfile`, `docker-compose.prod.example.yml`, runbook §13, **CI `docker-image`** job. |
 
 ---
 
@@ -86,5 +87,6 @@
 | deploy: nginx, systemd | done |
 | Health `version`, SECURITY.md | done |
 | **OPERATIONS_RUNBOOK.md**, **docs/ROADMAP.md**, all checklist [x] | done 2026-04-13 |
+| Docker + compose example + CI image build | done 2026-04-13 |
 
 **You are “done” in git when CI is green. You are “done” in production when `OPERATIONS_RUNBOOK.md` is executed on your environment.**

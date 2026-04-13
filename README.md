@@ -104,6 +104,13 @@ Use this for a hosted alpha (e.g. [baigdentpro.com](https://baigdentpro.com)) wi
   # or: ./scripts/smoke-api.sh https://your-api-host
   ```
 
+### Docker (optional)
+
+- **`Dockerfile`** — builds the app and runs **`node server/dist/index.js`** on port **3001** (set `server/.env` or `-e` / `--env-file`).
+- **`docker-compose.prod.example.yml`** — template `docker compose` service.
+- **Migrate** before first traffic: `docker run --rm --env-file server/.env IMAGE sh -c "cd server && npx prisma migrate deploy"` (see **`OPERATIONS_RUNBOOK.md` §13**).
+- CI builds the image on every push (**`docker-image`** job).
+
 ## Features
 
 - **Clinic admin** – Disable or enable doctor logins, change roles (doctor vs clinic admin), add staff accounts (**Clinic admin** sidebar; requires API + `CLINIC_ADMIN` or `SUPER_ADMIN` role)

@@ -19,4 +19,5 @@
 - Cron backup examples: `scripts/backup-cron.example`
 - Nginx: `deploy/nginx-same-origin-api.example.conf`
 - systemd: `deploy/baigdentpro.service.example`
+- Docker: `Dockerfile`, `docker-compose.prod.example.yml`, runbook §13
 - Security disclosures: `SECURITY.md`
