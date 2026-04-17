@@ -1,6 +1,7 @@
 # Local PostgreSQL for BaigDentPro — matches default DATABASE_URL in server/.env.example
 # From repo root: docker compose up -d
 # Then: cd server && npx prisma db push && npm run db:seed
+# Doctor/practice panel (migrations + seed): from repo root `npm run db:setup:doctor`
 #
 # If port 5432 is already in use, either stop the other Postgres or run:
 #   POSTGRES_PUBLISH_PORT=5433 docker compose up -d

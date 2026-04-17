@@ -27,6 +27,7 @@
     "db:generate": "cd server && npm run db:generate",
     "db:seed": "cd server && npm run db:seed",
     "db:setup": "npm run db:up && cd server && npx prisma db push && npm run db:seed",
+    "db:setup:doctor": "npm run db:up && cd server && npx prisma migrate deploy && npm run db:seed",
     "db:push:alpha": "cd server && npx prisma db push",
     "db:migrate:deploy": "cd server && npx prisma migrate deploy",
     "db:seed:alpha": "cd server && npm run db:seed",
@@ -38,7 +39,8 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
