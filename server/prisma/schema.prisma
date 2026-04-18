@@ -13,12 +13,13 @@ datasource db {
 // ============== USER & AUTH ==============
 
 model User {
-  id            String    @id @default(cuid())
+  id            String    @id @default(uuid())
   email         String    @unique
   password      String
   name          String
   // SQLite connector doesn't support Prisma enums; use string role instead.
-  // Allowed values (by convention): SUPER_ADMIN, CLINIC_ADMIN, DOCTOR
+  // Allowed values (by convention): SUPER_ADMIN, CLINIC_ADMIN, CLINIC_OWNER (admin + billing), DOCTOR,
+  // RECEPTIONIST, LAB_TECH, DENTAL_ASSISTANT (optional), TENANT (SaaS catalog-only tenants)
   role          String    @default("DOCTOR")
   phone         String?
   clinicName    String?
@@ -33,6 +34,8 @@ model User {
   isActive      Boolean   @default(true)
   /// Self-service signups start false until SUPER_ADMIN approves. Staff created by admins are true.
   isApproved    Boolean   @default(true)
+  /// Bumped to invalidate issued JWTs (password change, logout-all, role change, etc.).
+  sessionVersion Int      @default(0)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -45,21 +48,251 @@ model User {
   emailLogs     EmailLog[]
   activityLogs  ActivityLog[]
 
-  clinicId      String?
-  clinic        Clinic?   @relation(fields: [clinicId], references: [id])
+  clinicId      String
+  clinic        Clinic    @relation(fields: [clinicId], references: [id])
+  branchId      String?
+  branch        Branch?   @relation(fields: [branchId], references: [id])
+
+  ownedClinics  Clinic[]  @relation("ClinicOwner")
+  deviceSessions DeviceSession[]
+
+  /// One-to-one SaaS profile (`Profile` / `profiles`).
+  profile       Profile?
+  refreshTokens RefreshToken[]
+
+  /// Branding / header JSON for the legacy practice doctor panel (`/practice`).
+  doctorPanelSettings DoctorPanelSettings?
+
+  auditLogs AuditLog[]
+  fraudAlerts FraudAlert[]
+  impersonationSessionsAsActor ImpersonationSession[] @relation("ImpersonationActor")
+  verifiedInvoicePayments Payment[] @relation("InvoicePaymentVerifiedBy")
+}
+
+/// Security / compliance audit trail (structured metadata).
+model AuditLog {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clinicId       String?
+  clinic         Clinic?  @relation(fields: [clinicId], references: [id], onDelete: SetNull)
+  action         String
+  entityId       String?
+  entityType     String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  beforeSnapshot Json?
+  afterSnapshot  Json?
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([clinicId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
 
 model Clinic {
   id        String   @id @default(cuid())
   name      String
+  plan      String   @default("FREE")
+  isActive  Boolean  @default(true)
+  ownerId   String?
   address   String?
   phone     String?
   email     String?
   logo      String?
+  /// BD = CASH + bKash + Nagad + Stripe. INTERNATIONAL = CASH + Stripe only.
+  region    String   @default("BD")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users     User[]
+  owner         User?    @relation("ClinicOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  users         User[]
+  patients      Patient[]
+  branches      Branch[]
+  deviceSessions DeviceSession[]
+  products      Product[]
+  orders        Order[]
+  profits       Profit[]
+  subscription  Subscription?
+  invites       Invite[]
+  subscriptionPayments SubscriptionPayment[]
+  activityLogs  ActivityLog[] @relation("ClinicActivityLogs")
+  auditLogs     AuditLog[]
+  impersonationSessions ImpersonationSession[]
+  fraudAlerts   FraudAlert[]
+  appointments  Appointment[]
+  invoices      Invoice[]
+}
+
+model Plan {
+  id          String         @id @default(uuid())
+  name        String         @unique
+  price       Int
+  deviceLimit Int
+  features    Json
+  createdAt   DateTime       @default(now())
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Branch {
+  id        String   @id @default(uuid())
+  clinicId  String
+  name      String
+  address   String?
+
+  clinic  Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  users   User[]
+  invites Invite[]
+
+  @@index([clinicId])
+  @@map("branches")
+}
+
+model DeviceSession {
+  id        String   @id @default(uuid())
+  userId    String
+  clinicId  String
+  deviceId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clinicId, deviceId])
+  @@index([clinicId])
+  @@map("device_sessions")
+}
+
+model Subscription {
+  id        String    @id @default(uuid())
+  clinicId  String    @unique
+  clinic    Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  /// Legacy string tier (FREE, PRO, …). When `planId` is set, keep this in sync with `planRef.name` for JWTs and older clients.
+  plan      String    @default("FREE")
+  planId    String?
+  planRef   Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+  status    String    @default("ACTIVE")
+  startDate DateTime?
+  endDate   DateTime?
+  autoRenew Boolean   @default(true)
+  /// Per-tenant feature overrides (e.g. `{ "orders.export": true }`). Server enforces with `featureFlags` + `requireFeature` / `requirePlanFeature`.
+  features  Json      @default("{}")
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([planId])
+  @@map("subscriptions")
+}
+
+/// SaaS subscription checkout rows (bKash / Nagad / Stripe placeholders). Not the same as invoice `Payment`.
+model SubscriptionPayment {
+  id          String   @id @default(uuid())
+  clinicId    String
+  amount      Int
+  method      String
+  status      String
+  externalRef String?
+  /// Target plan code when this payment is meant to unlock a subscription upgrade (Stripe metadata).
+  planCode    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId])
+  @@map("subscription_payments")
+}
+
+model PaymentEventLog {
+  id                    String   @id @default(uuid())
+  clinicId              String?
+  subscriptionPaymentId String?
+  event                 String
+  payload               Json?
+  verified              Boolean  @default(false)
+  ipAddress             String?
+  createdAt             DateTime @default(now())
+
+  @@index([clinicId])
+  @@index([subscriptionPaymentId])
+  @@index([createdAt])
+  @@map("payment_event_logs")
+}
+
+model ImpersonationSession {
+  id             String    @id @default(uuid())
+  jti            String    @unique
+  actorUserId    String
+  actor          User      @relation("ImpersonationActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+  targetClinicId String
+  targetClinic   Clinic    @relation(fields: [targetClinicId], references: [id], onDelete: Cascade)
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([actorUserId])
+  @@index([targetClinicId])
+  @@map("impersonation_sessions")
+}
+
+model FraudAlert {
+  id        String   @id @default(uuid())
+  clinicId  String?
+  clinic    Clinic?  @relation(fields: [clinicId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  rule      String
+  riskScore Int
+  riskLevel String
+  /// True when raised by automated rule engine (vs manual review).
+  autoFlag  Boolean  @default(false)
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([clinicId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("fraud_alerts")
+}
+
+/// Email-based staff onboarding for a clinic.
+model Invite {
+  id        String   @id @default(uuid())
+  email     String
+  /// DOCTOR, RECEPTIONIST, or ADMIN (accepted as CLINIC_ADMIN on the User row).
+  role      String
+  clinicId  String
+  branchId  String?
+  token     String   @unique
+  expiresAt DateTime
+  accepted  Boolean  @default(false)
+
+  clinic Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([clinicId])
+  @@index([email])
+  @@map("invites")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  tokenHash  String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
 }
 
 // ============== PATIENT MANAGEMENT ==============
@@ -82,6 +315,9 @@ model Patient {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  clinicId      String
+  clinic        Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
   userId        String
   user          User      @relation(fields: [userId], references: [id])
 
@@ -96,8 +332,10 @@ model Patient {
   consents         PatientConsent[]
 
   @@index([userId])
+  @@index([clinicId])
   @@index([phone])
   @@index([name])
+  @@unique([id, clinicId], name: "patient_id_clinic_unique")
 }
 
 model MedicalHistory {
@@ -210,7 +448,12 @@ model Appointment {
   patient       Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
   userId        String
   user          User     @relation(fields: [userId], references: [id])
-  
+
+  clinicId      String
+  clinic        Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  /// Optional operatory/chair id for future chair scheduling (nullable).
+  chairId       String?
+
   date          DateTime
   time          String
   duration      Int      @default(30)
@@ -222,9 +465,13 @@ model Appointment {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  @@unique([id, clinicId], name: "appointment_id_clinic_unique")
   @@index([patientId])
   @@index([userId])
   @@index([date])
+  @@index([clinicId])
+  @@index([clinicId, userId, date])
+  @@index([clinicId, chairId, date])
 }
 
 // ============== PRESCRIPTIONS ==============
@@ -285,7 +532,10 @@ model Invoice {
   patient       Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
   userId        String
   user          User     @relation(fields: [userId], references: [id])
-  
+
+  clinicId      String
+  clinic        Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
   date          DateTime @default(now())
   dueDate       DateTime?
   
@@ -309,8 +559,10 @@ model Invoice {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  @@unique([id, clinicId], name: "invoice_id_clinic_unique")
   @@index([patientId])
   @@index([userId])
+  @@index([clinicId])
 }
 
 model InvoiceItem {
@@ -330,12 +582,24 @@ model Payment {
   id          String   @id @default(cuid())
   invoiceId   String
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  
+
   amount      Float    @default(0)
   method      String   @default("CASH")
   reference   String?
   date        DateTime @default(now())
   notes       String?
+
+  /// CASH | BKASH | NAGAD | STRIPE (server-normalized; never trust client-paid flags).
+  paymentSource         String    @default("CASH")
+  /// RECORDED | RECONCILED (cash drawer) | VERIFIED | REJECTED (legacy mirror of paymentStatus where applicable)
+  reconciliationStatus  String    @default("RECORDED")
+  /// PENDING = awaiting verification (MFS / async Stripe). VERIFIED = included in invoice balances. REJECTED = not counted.
+  paymentStatus         String    @default("PENDING")
+  transactionRef        String?
+  verifiedByUserId      String?
+  verifiedByUser        User?     @relation("InvoicePaymentVerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  stripePaymentIntentId String?  @unique
+  verifiedAt            DateTime?
 
   @@index([invoiceId])
 }
@@ -372,7 +636,8 @@ model LabOrder {
 
 // ============== DENTAL SHOP (E-COMMERCE) ==============
 
-model Product {
+/// Public dental shop catalog (table `Product`). Prisma name avoids clashing with tenant `Product`.
+model ShopProduct {
   id            String   @id @default(cuid())
   name          String
   slug          String   @unique
@@ -400,11 +665,12 @@ model Product {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   
-  orderItems    OrderItem[]
+  orderItems    ShopOrderItem[]
   cartItems     CartItem[]
 
   @@index([category])
   @@index([isActive])
+  @@map("Product")
 }
 
 model Cart {
@@ -420,14 +686,15 @@ model CartItem {
   cartId        String
   cart          Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
   productId     String
-  product       Product  @relation(fields: [productId], references: [id])
+  product       ShopProduct @relation(fields: [productId], references: [id])
   quantity      Int      @default(1)
   
   @@unique([cartId, productId])
   @@index([cartId])
 }
 
-model Order {
+/// Public shop checkout order (table `Order`).
+model ShopOrder {
   id              String   @id @default(cuid())
   orderNo         String   @unique
   
@@ -453,21 +720,22 @@ model Order {
   notes           String?
   trackingNumber  String?
   
-  items           OrderItem[]
+  items           ShopOrderItem[]
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([customerPhone])
   @@index([status])
+  @@map("Order")
 }
 
-model OrderItem {
+model ShopOrderItem {
   id          String   @id @default(cuid())
   orderId     String
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order       ShopOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId   String
-  product     Product  @relation(fields: [productId], references: [id])
+  product     ShopProduct @relation(fields: [productId], references: [id])
   
   name        String
   price       Float    @default(0)
@@ -475,6 +743,7 @@ model OrderItem {
   total       Float    @default(0)
 
   @@index([orderId])
+  @@map("OrderItem")
 }
 
 // ============== COMMUNICATION LOGS ==============
@@ -535,16 +804,148 @@ model ActivityLog {
   id         String   @id @default(cuid())
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  action     String   // e.g. LOGIN, CREATE_PATIENT, UPDATE_PRESCRIPTION
-  entity     String?  // e.g. PATIENT, APPOINTMENT, INVOICE
+  clinicId   String?
+  clinic     Clinic?  @relation("ClinicActivityLogs", fields: [clinicId], references: [id], onDelete: SetNull)
+  action     String   // e.g. LOGIN_SUCCESS, USER_CREATED, PRODUCT_UPDATED
+  entity     String?  // e.g. PATIENT, PRODUCT, ORDER
   entityId   String?
-  details    String?  // JSON or short description
+  details    String?  // legacy text / JSON string
+  meta       Json?
   ipAddress  String?
   userAgent  String?
   createdAt  DateTime @default(now())
 
   @@index([userId])
+  @@index([clinicId])
   @@index([action])
   @@index([entity])
   @@index([createdAt])
 }
+
+// ============== DOCTOR / PRACTICE PANEL ==============
+
+/// Optional JSON `header`: `{ "doctorName": string, "doctorLogo": string }` for prescriptions and dashboard.
+model DoctorPanelSettings {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  header    Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("doctor_panel_settings")
+}
+
+// ============== TENANT SAAS (PROFILE, CATALOG, ORDERS, PROFIT) ==============
+
+model Profile {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName  String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+/// Per-clinic catalog for SaaS `/api/products` (table `saas_products`). `price` = sell price.
+model Product {
+  id         String      @id @default(uuid())
+  name       String
+  price      Float
+  costPrice  Float       @default(0)
+  imageUrl   String?
+  clinicId   String
+  clinic     Clinic      @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([clinicId])
+  @@map("saas_products")
+}
+
+/// Tenant order header for `/api/orders` (table `saas_orders`).
+model Order {
+  id            String        @id @default(uuid())
+  clinicId      String
+  clinic        Clinic        @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  currency      String        @default("BDT")
+  status        String        @default("CONFIRMED")
+  subtotal      Float         @default(0)
+  total         Float         @default(0)
+  paymentStatus String        @default("UNPAID")
+
+  notes         String?
+
+  items         OrderItem[]
+  transactions  Transaction[]
+  profit        Profit?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([clinicId])
+  @@index([status])
+  @@map("saas_orders")
+}
+
+/// Line item: one row per product line on a tenant order (table `saas_order_items`).
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  quantity    Int
+  unitPrice   Float
+  lineTotal   Float
+  productName String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("saas_order_items")
+}
+
+/// Payment / payout record for a tenant order (table `transactions`).
+model Transaction {
+  id           String   @id @default(uuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  amount       Float
+  currency     String   @default("BDT")
+  status       String   @default("PENDING")
+  provider     String?
+  externalRef  String?
+  metadata     String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+  @@map("transactions")
+}
+
+model Profit {
+  id        String   @id @default(uuid())
+  orderId   String   @unique
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  /// Sum over line items: (sell_price - cost_price) * quantity
+  amount    Float
+  createdAt DateTime @default(now())
+
+  @@index([clinicId])
+  @@map("profits")
+}
+

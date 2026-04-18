@@ -12,12 +12,12 @@
     "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
     "dev:client": "vite",
     "dev:server": "cd server && npm run dev",
-    "build": "vite build",
+    "build": "node scripts/check-env.js && vite build",
     "build:server": "cd server && npm run build",
     "build:production": "npm run build && npm run build:server",
     "build:alpha": "vite build --mode alpha",
     "build:alpha:full": "npm run build:alpha && npm run build:server",
-    "build:hostinger-static": "vite build",
+    "build:hostinger-static": "node scripts/check-env.js && vite build",
     "start:production": "NODE_ENV=production npm run start -w server",
     "preview": "vite preview",
     "install:all": "npm i && cd server && npm i",
@@ -37,6 +37,7 @@
     "lint": "eslint src server/src"
   },
   "dependencies": {
+    "@stripe/stripe-js": "^5.10.0",
     "@supabase/supabase-js": "^2.101.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

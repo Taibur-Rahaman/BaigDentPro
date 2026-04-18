@@ -1,15 +1,23 @@
 import { Router } from 'express';
 import { prisma } from '../index.js';
-import { authenticate, AuthRequest } from '../middleware/auth.js';
+import type { AuthRequest } from '../middleware/auth.js';
+import { resolveBusinessClinicId } from '../utils/requestClinic.js';
+import { blockTenantFromEmr, requireLabEmrAccess } from '../middleware/clinicalRbac.js';
+import { parseUniversalToothNumber } from '../utils/fdiTooth.js';
 
 const router = Router();
 
-router.get('/', authenticate, async (req: AuthRequest, res) => {
+router.use(blockTenantFromEmr);
+router.use(requireLabEmrAccess);
+
+const clinicLabScope = (req: AuthRequest) => ({ patient: { clinicId: resolveBusinessClinicId(req) } });
+
+router.get('/', async (req: AuthRequest, res) => {
   try {
     const { patientId, status, workType, page = '1', limit = '20' } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
 
-    const where: any = { userId: req.user!.id };
+    const where: any = { ...clinicLabScope(req) };
     if (patientId) where.patientId = patientId;
     if (status) where.status = status;
     if (workType) where.workType = workType;
@@ -33,11 +41,11 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/pending', authenticate, async (req: AuthRequest, res) => {
+router.get('/pending', async (req: AuthRequest, res) => {
   try {
     const labOrders = await prisma.labOrder.findMany({
       where: {
-        userId: req.user!.id,
+        ...clinicLabScope(req),
         status: { in: ['PENDING', 'SENT_TO_LAB', 'IN_PROGRESS'] },
       },
       orderBy: { expectedDate: 'asc' },
@@ -52,13 +60,13 @@ router.get('/pending', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/stats', authenticate, async (req: AuthRequest, res) => {
+router.get('/stats', async (req: AuthRequest, res) => {
   try {
     const [pending, inProgress, ready, delivered] = await Promise.all([
-      prisma.labOrder.count({ where: { userId: req.user!.id, status: 'PENDING' } }),
-      prisma.labOrder.count({ where: { userId: req.user!.id, status: 'IN_PROGRESS' } }),
-      prisma.labOrder.count({ where: { userId: req.user!.id, status: 'READY' } }),
-      prisma.labOrder.count({ where: { userId: req.user!.id, status: 'DELIVERED' } }),
+      prisma.labOrder.count({ where: { ...clinicLabScope(req), status: 'PENDING' } }),
+      prisma.labOrder.count({ where: { ...clinicLabScope(req), status: 'IN_PROGRESS' } }),
+      prisma.labOrder.count({ where: { ...clinicLabScope(req), status: 'READY' } }),
+      prisma.labOrder.count({ where: { ...clinicLabScope(req), status: 'DELIVERED' } }),
     ]);
 
     res.json({ pending, inProgress, ready, delivered });
@@ -67,10 +75,10 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/:id', authenticate, async (req: AuthRequest, res) => {
+router.get('/:id', async (req: AuthRequest, res) => {
   try {
     const labOrder = await prisma.labOrder.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicLabScope(req) },
       include: { patient: true },
     });
 
@@ -84,12 +92,20 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/', authenticate, async (req: AuthRequest, res) => {
+router.post('/', async (req: AuthRequest, res) => {
   try {
     const { patientId, labName, expectedDate, workType, description, toothNumber, shade, cost, notes } = req.body;
 
+    if (toothNumber !== undefined && toothNumber !== null && String(toothNumber).trim() !== '') {
+      const n = parseUniversalToothNumber(toothNumber);
+      if (n === null) {
+        res.status(400).json({ error: 'toothNumber must be between 1 and 32 when provided' });
+        return;
+      }
+    }
+
     const patient = await prisma.patient.findFirst({
-      where: { id: patientId, userId: req.user!.id },
+      where: { id: patientId, clinicId: resolveBusinessClinicId(req) },
     });
 
     if (!patient) {
@@ -118,12 +134,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.put('/:id', authenticate, async (req: AuthRequest, res) => {
+router.put('/:id', async (req: AuthRequest, res) => {
   try {
     const { labName, expectedDate, deliveryDate, workType, description, toothNumber, shade, status, cost, notes } = req.body;
 
     const existing = await prisma.labOrder.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicLabScope(req) },
     });
 
     if (!existing) {
@@ -153,10 +169,10 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
+router.delete('/:id', async (req: AuthRequest, res) => {
   try {
     const existing = await prisma.labOrder.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicLabScope(req) },
     });
 
     if (!existing) {
@@ -170,8 +186,14 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/send-to-lab', authenticate, async (req: AuthRequest, res) => {
+router.post('/:id/send-to-lab', async (req: AuthRequest, res) => {
   try {
+    const existing = await prisma.labOrder.findFirst({
+      where: { id: req.params.id, ...clinicLabScope(req) },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Lab order not found' });
+    }
     const labOrder = await prisma.labOrder.update({
       where: { id: req.params.id },
       data: { status: 'SENT_TO_LAB' },
@@ -182,8 +204,14 @@ router.post('/:id/send-to-lab', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/mark-ready', authenticate, async (req: AuthRequest, res) => {
+router.post('/:id/mark-ready', async (req: AuthRequest, res) => {
   try {
+    const existing = await prisma.labOrder.findFirst({
+      where: { id: req.params.id, ...clinicLabScope(req) },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Lab order not found' });
+    }
     const labOrder = await prisma.labOrder.update({
       where: { id: req.params.id },
       data: { status: 'READY' },
@@ -194,8 +222,14 @@ router.post('/:id/mark-ready', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/mark-delivered', authenticate, async (req: AuthRequest, res) => {
+router.post('/:id/mark-delivered', async (req: AuthRequest, res) => {
   try {
+    const existing = await prisma.labOrder.findFirst({
+      where: { id: req.params.id, ...clinicLabScope(req) },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Lab order not found' });
+    }
     const labOrder = await prisma.labOrder.update({
       where: { id: req.params.id },
       data: { status: 'DELIVERED', deliveryDate: new Date() },
@@ -206,8 +240,14 @@ router.post('/:id/mark-delivered', authenticate, async (req: AuthRequest, res) =
   }
 });
 
-router.post('/:id/mark-fitted', authenticate, async (req: AuthRequest, res) => {
+router.post('/:id/mark-fitted', async (req: AuthRequest, res) => {
   try {
+    const existing = await prisma.labOrder.findFirst({
+      where: { id: req.params.id, ...clinicLabScope(req) },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Lab order not found' });
+    }
     const labOrder = await prisma.labOrder.update({
       where: { id: req.params.id },
       data: { status: 'FITTED' },

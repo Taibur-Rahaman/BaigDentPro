@@ -1,13 +1,16 @@
 import { Router } from 'express';
 import { prisma } from '../index.js';
-import { authenticate, AuthRequest } from '../middleware/auth.js';
+import type { AuthRequest } from '../middleware/auth.js';
+import { resolveBusinessClinicId } from '../utils/requestClinic.js';
 import { sendSMS } from '../services/sms.js';
 import { sendEmail } from '../services/email.js';
 import { sendWhatsAppMessage } from '../services/whatsapp.js';
 
 const router = Router();
 
-router.post('/sms/send', authenticate, async (req: AuthRequest, res) => {
+const commUserScope = (req: AuthRequest) => ({ user: { clinicId: resolveBusinessClinicId(req) } });
+
+router.post('/sms/send', async (req: AuthRequest, res) => {
   try {
     const { phone, message, type = 'custom' } = req.body;
 
@@ -39,12 +42,12 @@ router.post('/sms/send', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/sms/appointment-reminder', authenticate, async (req: AuthRequest, res) => {
+router.post('/sms/appointment-reminder', async (req: AuthRequest, res) => {
   try {
     const { appointmentId } = req.body;
 
     const appointment = await prisma.appointment.findFirst({
-      where: { id: appointmentId, userId: req.user!.id },
+      where: { id: appointmentId, patient: { clinicId: resolveBusinessClinicId(req) } },
       include: { patient: true, user: true },
     });
 
@@ -82,7 +85,7 @@ router.post('/sms/appointment-reminder', authenticate, async (req: AuthRequest, 
   }
 });
 
-router.post('/sms/bulk-reminder', authenticate, async (req: AuthRequest, res) => {
+router.post('/sms/bulk-reminder', async (req: AuthRequest, res) => {
   try {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -92,7 +95,7 @@ router.post('/sms/bulk-reminder', authenticate, async (req: AuthRequest, res) =>
 
     const appointments = await prisma.appointment.findMany({
       where: {
-        userId: req.user!.id,
+        patient: { clinicId: resolveBusinessClinicId(req) },
         date: { gte: tomorrow, lt: dayAfter },
         status: { in: ['SCHEDULED', 'CONFIRMED'] },
         reminderSent: false,
@@ -137,19 +140,19 @@ router.post('/sms/bulk-reminder', authenticate, async (req: AuthRequest, res) =>
   }
 });
 
-router.get('/sms/logs', authenticate, async (req: AuthRequest, res) => {
+router.get('/sms/logs', async (req: AuthRequest, res) => {
   try {
     const { page = '1', limit = '20' } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
 
     const [logs, total] = await Promise.all([
       prisma.smsLog.findMany({
-        where: { userId: req.user!.id },
+        where: commUserScope(req),
         skip,
         take: parseInt(limit as string),
         orderBy: { sentAt: 'desc' },
       }),
-      prisma.smsLog.count({ where: { userId: req.user!.id } }),
+      prisma.smsLog.count({ where: commUserScope(req) }),
     ]);
 
     res.json({ logs, total, page: parseInt(page as string), limit: parseInt(limit as string) });
@@ -158,7 +161,7 @@ router.get('/sms/logs', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/email/send', authenticate, async (req: AuthRequest, res) => {
+router.post('/email/send', async (req: AuthRequest, res) => {
   try {
     const { to, subject, body, type = 'custom' } = req.body;
 
@@ -196,19 +199,19 @@ router.post('/email/send', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/email/logs', authenticate, async (req: AuthRequest, res) => {
+router.get('/email/logs', async (req: AuthRequest, res) => {
   try {
     const { page = '1', limit = '20' } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
 
     const [logs, total] = await Promise.all([
       prisma.emailLog.findMany({
-        where: { userId: req.user!.id },
+        where: commUserScope(req),
         skip,
         take: parseInt(limit as string),
         orderBy: { sentAt: 'desc' },
       }),
-      prisma.emailLog.count({ where: { userId: req.user!.id } }),
+      prisma.emailLog.count({ where: commUserScope(req) }),
     ]);
 
     res.json({ logs, total, page: parseInt(page as string), limit: parseInt(limit as string) });
@@ -217,7 +220,7 @@ router.get('/email/logs', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/whatsapp/send', authenticate, async (req: AuthRequest, res) => {
+router.post('/whatsapp/send', async (req: AuthRequest, res) => {
   try {
     const { phone, message } = req.body;
 

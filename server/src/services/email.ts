@@ -88,6 +88,38 @@ export async function sendAppointmentConfirmation(
   });
 }
 
+export async function sendStaffInviteEmail(toEmail: string, acceptUrl: string, clinicName: string, roleLabel: string): Promise<void> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: #0f766e; color: white; padding: 20px; text-align: center;">
+        <h1 style="margin: 0;">You’re invited to ${escapeHtml(clinicName)}</h1>
+      </div>
+      <div style="padding: 20px; background: #f9fafb;">
+        <p>You have been invited to join BaigDentPro as <strong>${escapeHtml(roleLabel)}</strong>.</p>
+        <p style="margin: 24px 0;">
+          <a href="${acceptUrl}" style="background:#0f766e;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;display:inline-block;">
+            Accept invitation
+          </a>
+        </p>
+        <p style="color:#64748b;font-size:14px;">If the button does not work, copy this link:<br/><span style="word-break:break-all;">${acceptUrl}</span></p>
+      </div>
+    </div>
+  `;
+  await sendEmail({
+    to: toEmail,
+    subject: `Invitation: ${clinicName} on BaigDentPro`,
+    html,
+  });
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export async function sendAppointmentReminder(
   email: string,
   patientName: string,

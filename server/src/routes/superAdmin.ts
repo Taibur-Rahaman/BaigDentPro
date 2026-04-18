@@ -1,12 +1,29 @@
 import { Router } from 'express';
-import { prisma } from '../index.js';
-import { authenticate, requireSuperAdmin, AuthRequest } from '../middleware/auth.js';
+import { prisma, prismaBase } from '../index.js';
+import { authenticate, AuthRequest } from '../middleware/auth.js';
+import { requireRole } from '../middleware/requireRole.js';
 import { deleteSupabaseUserByEmail, inviteSupabaseUserIfAbsent } from '../services/supabaseAuthSync.js';
+import { writeAuditLog } from '../services/auditLogService.js';
+import { auditSuperAdminPrismaBaseAccess } from '../utils/superAdminPrismaAudit.js';
 
 const router = Router();
 
 router.use(authenticate);
-router.use(requireSuperAdmin);
+router.use(requireRole('SUPER_ADMIN'));
+
+router.use((req, res, next) => {
+  const a = req as AuthRequest;
+  void writeAuditLog({
+    userId: a.user?.id ?? 'unknown',
+    clinicId: null,
+    action: 'SUPER_ADMIN_API',
+    entityType: 'HTTP',
+    metadata: { method: req.method, path: req.originalUrl ?? req.url },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent') ?? null,
+  });
+  next();
+});
 
 // List all clinics (users) with basic stats
 router.get('/clinics', async (req: AuthRequest, res) => {
@@ -64,7 +81,8 @@ router.get('/revenue-by-branch', async (req: AuthRequest, res) => {
       select: { id: true, name: true, clinicName: true, email: true },
     });
 
-    const revenueByUser = await prisma.invoice.groupBy({
+    auditSuperAdminPrismaBaseAccess(req, 'GET /revenue-by-branch invoice.groupBy');
+    const revenueByUser = await prismaBase.invoice.groupBy({
       by: ['userId'],
       where: {
         date: { gte: start, lte: end },
@@ -99,7 +117,8 @@ router.get('/chair-utilization', async (req: AuthRequest, res) => {
     const start = startDate ? new Date(startDate) : new Date(new Date().setDate(new Date().getDate() - 7));
     const end = endDate ? new Date(endDate) : new Date();
 
-    const byUser = await prisma.appointment.groupBy({
+    auditSuperAdminPrismaBaseAccess(req, 'GET /chair-utilization appointment.groupBy');
+    const byUser = await prismaBase.appointment.groupBy({
       by: ['userId'],
       where: {
         date: { gte: start, lte: end },
@@ -278,6 +297,7 @@ router.post('/users/:id/reject-signup', async (req: AuthRequest, res) => {
 // Global stats for super admin dashboard
 router.get('/stats', async (req: AuthRequest, res) => {
   try {
+    auditSuperAdminPrismaBaseAccess(req, 'GET /stats prismaBase');
     const [
       totalClinics,
       totalPatients,
@@ -287,10 +307,10 @@ router.get('/stats', async (req: AuthRequest, res) => {
       activityLogCount,
     ] = await Promise.all([
       prisma.user.count(),
-      prisma.patient.count(),
-      prisma.appointment.count(),
-      prisma.prescription.count(),
-      prisma.invoice.aggregate({ where: { status: { in: ['PAID', 'PARTIAL'] } }, _sum: { paid: true } }),
+      prismaBase.patient.count(),
+      prismaBase.appointment.count(),
+      prismaBase.prescription.count(),
+      prismaBase.invoice.aggregate({ where: { status: { in: ['PAID', 'PARTIAL'] } }, _sum: { paid: true } }),
       prisma.activityLog.count(),
     ]);
 
@@ -475,8 +495,9 @@ router.get('/patients', async (req: AuthRequest, res) => {
       ];
     }
 
+    auditSuperAdminPrismaBaseAccess(req, 'GET /patients prismaBase');
     const [patients, total] = await Promise.all([
-      prisma.patient.findMany({
+      prismaBase.patient.findMany({
         where,
         skip,
         take,
@@ -504,7 +525,7 @@ router.get('/patients', async (req: AuthRequest, res) => {
           },
         },
       }),
-      prisma.patient.count({ where }),
+      prismaBase.patient.count({ where }),
     ]);
 
     res.json({ patients, total, page: pageNum, limit: take });
@@ -516,7 +537,8 @@ router.get('/patients', async (req: AuthRequest, res) => {
 router.put('/patients/:id', async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const existing = await prisma.patient.findUnique({
+    auditSuperAdminPrismaBaseAccess(req, 'PUT /patients/:id prismaBase read');
+    const existing = await prismaBase.patient.findUnique({
       where: { id },
       select: { id: true, userId: true },
     });
@@ -549,7 +571,8 @@ router.put('/patients/:id', async (req: AuthRequest, res) => {
     if (referredBy !== undefined) data.referredBy = referredBy ? String(referredBy).trim() : null;
     if (notes !== undefined) data.notes = notes ? String(notes).trim() : null;
 
-    const updated = await prisma.patient.update({
+    auditSuperAdminPrismaBaseAccess(req, 'PUT /patients/:id prismaBase update');
+    const updated = await prismaBase.patient.update({
       where: { id },
       data,
       include: {
@@ -591,8 +614,9 @@ router.get('/prescriptions', async (req: AuthRequest, res) => {
     if (doctorId) where.userId = doctorId;
     if (patientId) where.patientId = patientId;
 
+    auditSuperAdminPrismaBaseAccess(req, 'GET /prescriptions prismaBase');
     const [prescriptions, total] = await Promise.all([
-      prisma.prescription.findMany({
+      prismaBase.prescription.findMany({
         where,
         skip,
         take,
@@ -603,7 +627,7 @@ router.get('/prescriptions', async (req: AuthRequest, res) => {
           items: true,
         },
       }),
-      prisma.prescription.count({ where }),
+      prismaBase.prescription.count({ where }),
     ]);
 
     res.json({ prescriptions, total, page: pageNum, limit: take });
@@ -615,6 +639,7 @@ router.get('/prescriptions', async (req: AuthRequest, res) => {
 router.put('/prescriptions/:id', async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    auditSuperAdminPrismaBaseAccess(req, 'PUT /prescriptions/:id prismaBase');
     const { diagnosis, chiefComplaint, examination, investigation, advice, followUpDate, vitals, items } = req.body as {
       diagnosis?: string;
       chiefComplaint?: string;
@@ -635,7 +660,7 @@ router.put('/prescriptions/:id', async (req: AuthRequest, res) => {
       }>;
     };
 
-    const existing = await prisma.prescription.findUnique({
+    const existing = await prismaBase.prescription.findUnique({
       where: { id },
       select: { id: true, userId: true, patientId: true },
     });
@@ -653,7 +678,7 @@ router.put('/prescriptions/:id', async (req: AuthRequest, res) => {
     if (followUpDate !== undefined) updateData.followUpDate = followUpDate ? new Date(followUpDate) : null;
 
     if (Array.isArray(items)) {
-      await prisma.prescriptionItem.deleteMany({ where: { prescriptionId: id } });
+      await prismaBase.prescriptionItem.deleteMany({ where: { prescriptionId: id } });
       updateData.items = {
         create: items.map((item) => ({
           drugName: item.drugName,
@@ -668,7 +693,7 @@ router.put('/prescriptions/:id', async (req: AuthRequest, res) => {
       };
     }
 
-    const updated = await prisma.prescription.update({
+    const updated = await prismaBase.prescription.update({
       where: { id },
       data: updateData,
       include: {

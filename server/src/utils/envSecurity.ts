@@ -40,6 +40,16 @@ export function validateProductionEnvironment(): void {
   if (lower.includes('file:') || lower.includes('sqlite')) {
     throw new Error('SQLite/file databases must not be used in production. Use PostgreSQL.');
   }
+  if (
+    lower.includes('localhost') ||
+    lower.includes('127.0.0.1') ||
+    lower.includes('0.0.0.0') ||
+    lower.includes('@db:5432')
+  ) {
+    throw new Error(
+      'DATABASE_URL points to local/private host in production. Use your managed Supabase PostgreSQL connection string.'
+    );
+  }
 
   if (!lower.startsWith('postgresql://') && !lower.startsWith('postgres://')) {
     console.warn('[security] DATABASE_URL should use postgresql:// or postgres:// in production');

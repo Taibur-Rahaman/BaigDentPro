@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { prisma } from '../index.js';
-import { authenticate, AuthRequest } from '../middleware/auth.js';
+import type { AuthRequest } from '../middleware/auth.js';
+import { resolveBusinessClinicId } from '../utils/requestClinic.js';
 
 const router = Router();
 
-router.get('/stats', authenticate, async (req: AuthRequest, res) => {
+router.get('/stats', async (req: AuthRequest, res) => {
   try {
+    const cid = resolveBusinessClinicId(req);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -13,6 +15,11 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
 
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+    const invScope = { clinicId: cid };
+    const apptScope = { clinicId: cid };
+    const rxScope = { patient: { clinicId: cid } };
+    const labScope = { patient: { clinicId: cid } };
 
     const [
       totalPatients,
@@ -26,55 +33,55 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
       pendingInvoicesCount,
       overdueInvoicesCount,
     ] = await Promise.all([
-      prisma.patient.count({ where: { userId: req.user!.id } }),
+      prisma.patient.count({ where: { clinicId: cid } }),
       prisma.patient.count({
-        where: { userId: req.user!.id, createdAt: { gte: startOfMonth, lte: endOfMonth } },
+        where: { clinicId: cid, createdAt: { gte: startOfMonth, lte: endOfMonth } },
       }),
       prisma.appointment.count({
-        where: { userId: req.user!.id, date: { gte: today, lt: tomorrow } },
+        where: { ...apptScope, date: { gte: today, lt: tomorrow } },
       }),
       prisma.appointment.count({
         where: {
-          userId: req.user!.id,
+          ...apptScope,
           date: { gte: today },
           status: { in: ['SCHEDULED', 'CONFIRMED'] },
         },
       }),
       prisma.invoice.aggregate({
         where: {
-          userId: req.user!.id,
+          ...invScope,
           date: { gte: startOfMonth, lte: endOfMonth },
         },
         _sum: { paid: true },
       }),
       prisma.invoice.aggregate({
         where: {
-          userId: req.user!.id,
+          ...invScope,
           status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] },
         },
         _sum: { due: true },
       }),
       prisma.labOrder.count({
         where: {
-          userId: req.user!.id,
+          ...labScope,
           status: { in: ['PENDING', 'SENT_TO_LAB', 'IN_PROGRESS', 'READY'] },
         },
       }),
       prisma.prescription.count({
         where: {
-          userId: req.user!.id,
+          ...rxScope,
           date: { gte: startOfMonth, lte: endOfMonth },
         },
       }),
       prisma.invoice.count({
         where: {
-          userId: req.user!.id,
+          ...invScope,
           status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] },
         },
       }),
       prisma.invoice.count({
         where: {
-          userId: req.user!.id,
+          ...invScope,
           due: { gt: 0 },
           status: { not: 'PAID' },
           dueDate: { not: null, lt: today },
@@ -99,25 +106,30 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/today', authenticate, async (req: AuthRequest, res) => {
+router.get('/today', async (req: AuthRequest, res) => {
   try {
+    const cid = resolveBusinessClinicId(req);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
+    const invScope = { clinicId: cid };
+    const apptScope = { clinicId: cid };
+    const rxScope = { patient: { clinicId: cid } };
+
     const [appointments, prescriptions, invoices] = await Promise.all([
       prisma.appointment.findMany({
-        where: { userId: req.user!.id, date: { gte: today, lt: tomorrow } },
+        where: { ...apptScope, date: { gte: today, lt: tomorrow } },
         orderBy: { time: 'asc' },
         include: { patient: { select: { id: true, name: true, phone: true } } },
       }),
       prisma.prescription.findMany({
-        where: { userId: req.user!.id, date: { gte: today, lt: tomorrow } },
+        where: { ...rxScope, date: { gte: today, lt: tomorrow } },
         include: { patient: { select: { id: true, name: true } } },
       }),
       prisma.invoice.findMany({
-        where: { userId: req.user!.id, date: { gte: today, lt: tomorrow } },
+        where: { ...invScope, date: { gte: today, lt: tomorrow } },
         include: { patient: { select: { id: true, name: true } } },
       }),
     ]);
@@ -128,10 +140,11 @@ router.get('/today', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/recent-patients', authenticate, async (req: AuthRequest, res) => {
+router.get('/recent-patients', async (req: AuthRequest, res) => {
   try {
+    const cid = resolveBusinessClinicId(req);
     const patients = await prisma.patient.findMany({
-      where: { userId: req.user!.id },
+      where: { clinicId: cid },
       orderBy: { createdAt: 'desc' },
       take: 10,
       select: {
@@ -151,12 +164,14 @@ router.get('/recent-patients', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/revenue-chart', authenticate, async (req: AuthRequest, res) => {
+router.get('/revenue-chart', async (req: AuthRequest, res) => {
   try {
+    const cid = resolveBusinessClinicId(req);
     const { period = 'monthly' } = req.query;
     const today = new Date();
-    
+
     const data: { date: string; revenue: number }[] = [];
+    const payScope = { invoice: { clinicId: cid } };
 
     if (period === 'daily') {
       for (let i = 6; i >= 0; i--) {
@@ -168,7 +183,8 @@ router.get('/revenue-chart', authenticate, async (req: AuthRequest, res) => {
 
         const revenue = await prisma.payment.aggregate({
           where: {
-            invoice: { userId: req.user!.id },
+            ...payScope,
+            paymentStatus: 'VERIFIED',
             date: { gte: date, lt: nextDay },
           },
           _sum: { amount: true },
@@ -186,7 +202,8 @@ router.get('/revenue-chart', authenticate, async (req: AuthRequest, res) => {
 
         const revenue = await prisma.payment.aggregate({
           where: {
-            invoice: { userId: req.user!.id },
+            ...payScope,
+            paymentStatus: 'VERIFIED',
             date: { gte: date, lt: nextMonth },
           },
           _sum: { amount: true },
@@ -205,8 +222,9 @@ router.get('/revenue-chart', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/appointment-chart', authenticate, async (req: AuthRequest, res) => {
+router.get('/appointment-chart', async (req: AuthRequest, res) => {
   try {
+    const cid = resolveBusinessClinicId(req);
     const today = new Date();
     const data: { date: string; count: number }[] = [];
 
@@ -219,7 +237,7 @@ router.get('/appointment-chart', authenticate, async (req: AuthRequest, res) => 
 
       const count = await prisma.appointment.count({
         where: {
-          userId: req.user!.id,
+          clinicId: cid,
           date: { gte: date, lt: nextDay },
         },
       });
@@ -236,20 +254,113 @@ router.get('/appointment-chart', authenticate, async (req: AuthRequest, res) => 
   }
 });
 
-router.get('/treatment-stats', authenticate, async (req: AuthRequest, res) => {
+router.get('/treatment-stats', async (req: AuthRequest, res) => {
   try {
+    const cid = resolveBusinessClinicId(req);
     const treatments = await prisma.treatmentPlan.groupBy({
       by: ['procedure'],
-      where: { patient: { userId: req.user!.id } },
+      where: { patient: { clinicId: cid } },
       _count: { id: true },
       orderBy: { _count: { id: 'desc' } },
       take: 10,
     });
 
-    res.json(treatments.map(t => ({
-      procedure: t.procedure,
-      count: t._count.id,
-    })));
+    res.json(
+      treatments.map((t) => ({
+        procedure: t.procedure,
+        count: t._count.id,
+      }))
+    );
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/doctor-revenue', async (req: AuthRequest, res) => {
+  try {
+    const cid = resolveBusinessClinicId(req);
+    const today = new Date();
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const rows = await prisma.invoice.groupBy({
+      by: ['userId'],
+      where: {
+        clinicId: cid,
+        date: { gte: startOfMonth, lte: endOfMonth },
+      },
+      _sum: { paid: true, total: true },
+    });
+
+    const userIds = rows.map((r) => r.userId);
+    const users =
+      userIds.length === 0
+        ? []
+        : await prisma.user.findMany({
+            where: { id: { in: userIds }, clinicId: cid },
+            select: { id: true, name: true },
+          });
+    const nameById = new Map(users.map((u) => [u.id, u.name]));
+
+    res.json(
+      rows.map((r) => ({
+        userId: r.userId,
+        doctorName: nameById.get(r.userId) ?? null,
+        paid: Number(r._sum.paid) || 0,
+        total: Number(r._sum.total) || 0,
+      }))
+    );
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/daily-closing', async (req: AuthRequest, res) => {
+  try {
+    const cid = resolveBusinessClinicId(req);
+    const day = req.query.date ? new Date(String(req.query.date)) : new Date();
+    if (Number.isNaN(day.getTime())) {
+      res.status(400).json({ error: 'Invalid date' });
+      return;
+    }
+    day.setHours(0, 0, 0, 0);
+    const nextDay = new Date(day);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    const payScope = { invoice: { clinicId: cid } };
+
+    const [totals, byMethod, bySource] = await Promise.all([
+      prisma.payment.aggregate({
+        where: { ...payScope, paymentStatus: 'VERIFIED', date: { gte: day, lt: nextDay } },
+        _sum: { amount: true },
+        _count: { id: true },
+      }),
+      prisma.payment.groupBy({
+        by: ['method'],
+        where: { ...payScope, paymentStatus: 'VERIFIED', date: { gte: day, lt: nextDay } },
+        _sum: { amount: true },
+      }),
+      prisma.payment.groupBy({
+        by: ['paymentSource'],
+        where: { ...payScope, paymentStatus: 'VERIFIED', date: { gte: day, lt: nextDay } },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    res.json({
+      clinicId: cid,
+      date: day.toISOString(),
+      paymentCount: totals._count.id,
+      totalPayments: Number(totals._sum.amount) || 0,
+      byMethod: byMethod.map((m) => ({
+        method: m.method,
+        amount: Number(m._sum.amount) || 0,
+      })),
+      byPaymentSource: bySource.map((s) => ({
+        paymentSource: s.paymentSource,
+        amount: Number(s._sum.amount) || 0,
+      })),
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

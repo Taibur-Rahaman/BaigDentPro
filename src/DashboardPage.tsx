@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { PrescriptionPage } from './PrescriptionPage';
+import { ShopUserDashboardPage } from './pages/ShopUserDashboardPage';
 import api from './api';
 
 interface Patient {
@@ -649,7 +650,7 @@ const TOOTH_CHART = {
   ],
 };
 
-type NavSection = 'dashboard' | 'patients' | 'patient-detail' | 'prescription' | 'prescriptions-list' | 
+type NavSection = 'dashboard' | 'shop-dashboard' | 'patients' | 'patient-detail' | 'prescription' | 'prescriptions-list' | 
   'appointments' | 'billing' | 'lab' | 'drugs' | 'sms' | 'settings' | 'clinic-admin' | 'super-admin';
 
 type ServerDashboardStats = {
@@ -2344,6 +2345,15 @@ const printHtml = (title: string, html: string) => {
         <button className={`sidebar-item ${activeNav === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveNav('dashboard')}>
           <i className="fa-solid fa-grid-2"></i> <span>Dashboard</span>
         </button>
+        {(userRole === 'CLINIC_ADMIN' || userRole === 'SUPER_ADMIN') && (
+          <button
+            type="button"
+            className={`sidebar-item ${activeNav === 'shop-dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveNav('shop-dashboard')}
+          >
+            <i className="fa-solid fa-store" /> <span>Shop</span>
+          </button>
+        )}
         <button className={`sidebar-item ${activeNav === 'patients' ? 'active' : ''}`} onClick={() => setActiveNav('patients')}>
           <i className="fa-solid fa-user-group"></i> <span>Patients</span>
         </button>
@@ -5936,6 +5946,7 @@ const printHtml = (title: string, html: string) => {
   const renderContent = () => {
     switch (activeNav) {
       case 'dashboard': return renderDashboard();
+      case 'shop-dashboard': return <ShopUserDashboardPage />;
       case 'patients': return renderPatients();
       case 'patient-detail': return renderPatientDetail();
       case 'prescription':

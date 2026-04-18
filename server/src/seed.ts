@@ -11,17 +11,66 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const prisma = new PrismaClient();
 
+async function seedCatalogPlans() {
+  const platinumFeatures = { branches: 1, roleAccess: false, reports: 'basic', branding: false };
+  const premiumFeatures = { branches: 'unlimited', roleAccess: true, reports: 'advanced', branding: true };
+  const luxuryFeatures = {
+    branches: 'unlimited',
+    roleAccess: true,
+    reports: 'advanced',
+    branding: true,
+    prioritySupport: true,
+  };
+
+  const rows: Array<{ name: string; price: number; deviceLimit: number; features: object }> = [
+    { name: 'FREE', price: 0, deviceLimit: 100, features: {} },
+    { name: 'PLATINUM', price: 700, deviceLimit: 1, features: platinumFeatures },
+    { name: 'PREMIUM', price: 1000, deviceLimit: 5, features: premiumFeatures },
+    { name: 'LUXURY', price: 1500, deviceLimit: 5, features: luxuryFeatures },
+  ];
+
+  for (const p of rows) {
+    await prisma.plan.upsert({
+      where: { name: p.name },
+      update: { price: p.price, deviceLimit: p.deviceLimit, features: p.features },
+      create: { name: p.name, price: p.price, deviceLimit: p.deviceLimit, features: p.features },
+    });
+  }
+}
+
 async function main() {
   console.log('🌱 Seeding database...');
 
+  await seedCatalogPlans();
+
   const demoClinic = await prisma.clinic.upsert({
     where: { id: 'seed-clinic-baigdentpro' },
-    update: { name: 'BaigDentPro Dental Clinic' },
+    update: { name: 'BaigDentPro Dental Clinic', plan: 'PREMIUM', isActive: true },
     create: {
       id: 'seed-clinic-baigdentpro',
       name: 'BaigDentPro Dental Clinic',
+      plan: 'PREMIUM',
+      isActive: true,
       phone: '+880 1617-180711',
       email: 'info@baigdentpro.com',
+    },
+  });
+
+  const premiumPlan = await prisma.plan.findUnique({ where: { name: 'PREMIUM' } });
+  await prisma.subscription.upsert({
+    where: { clinicId: demoClinic.id },
+    update: {
+      plan: 'PREMIUM',
+      planId: premiumPlan?.id ?? null,
+      status: 'ACTIVE',
+      startDate: new Date(),
+    },
+    create: {
+      clinicId: demoClinic.id,
+      plan: 'PREMIUM',
+      planId: premiumPlan?.id ?? null,
+      status: 'ACTIVE',
+      startDate: new Date(),
     },
   });
 
@@ -54,6 +103,11 @@ async function main() {
 
   console.log('✅ Demo clinic admin:', demoUser.email, '(manages doctor access for this clinic)');
 
+  await prisma.clinic.update({
+    where: { id: demoClinic.id },
+    data: { ownerId: demoUser.id, plan: 'PREMIUM' },
+  });
+
   const staffDoctor = await prisma.user.upsert({
     where: { email: 'doctor@baigdentpro.com' },
     update: {
@@ -76,14 +130,64 @@ async function main() {
   });
   console.log('✅ Staff doctor (same clinic):', staffDoctor.email, '/ password123');
 
+  const defaultHeader = (displayName: string) => ({
+    doctorName: displayName,
+    doctorLogo: null as string | null,
+  });
+
+  await prisma.doctorPanelSettings.upsert({
+    where: { userId: demoUser.id },
+    update: { header: defaultHeader(demoUser.name) },
+    create: { userId: demoUser.id, header: defaultHeader(demoUser.name) },
+  });
+  await prisma.doctorPanelSettings.upsert({
+    where: { userId: staffDoctor.id },
+    update: { header: defaultHeader(staffDoctor.name) },
+    create: { userId: staffDoctor.id, header: defaultHeader(staffDoctor.name) },
+  });
+  console.log('✅ Doctor panel settings (header branding) for clinic admin + staff doctor');
+
+  await prisma.patient.upsert({
+    where: { id: 'seed-doctor-panel-patient-1' },
+    update: { userId: staffDoctor.id, clinicId: demoClinic.id },
+    create: {
+      id: 'seed-doctor-panel-patient-1',
+      regNo: 'REG-1001',
+      name: 'Sample Patient One',
+      age: 32,
+      gender: 'F',
+      phone: '+8801700000001',
+      email: 'sample1@example.com',
+      address: 'Dhaka',
+      clinicId: demoClinic.id,
+      userId: staffDoctor.id,
+    },
+  });
+  await prisma.patient.upsert({
+    where: { id: 'seed-doctor-panel-patient-2' },
+    update: { userId: staffDoctor.id, clinicId: demoClinic.id },
+    create: {
+      id: 'seed-doctor-panel-patient-2',
+      regNo: 'REG-1002',
+      name: 'Sample Patient Two',
+      age: 45,
+      gender: 'M',
+      phone: '+8801700000002',
+      clinicId: demoClinic.id,
+      userId: staffDoctor.id,
+    },
+  });
+  console.log('✅ Sample patients for doctor@baigdentpro.com (practice panel)');
+
   const superAdmin = await prisma.user.upsert({
     where: { email: 'superadmin@baigdentpro.com' },
-    update: { isApproved: true, isActive: true },
+    update: { isApproved: true, isActive: true, clinicId: demoClinic.id },
     create: {
       email: 'superadmin@baigdentpro.com',
       password: await bcrypt.hash('super123', 12),
       name: 'Super Admin',
       role: 'SUPER_ADMIN',
+      clinicId: demoClinic.id,
       clinicName: 'BaigDentPro Platform',
       isApproved: true,
       isActive: true,
@@ -139,14 +243,29 @@ async function main() {
   ];
 
   for (const product of products) {
-    await prisma.product.upsert({
+    await prisma.shopProduct.upsert({
       where: { slug: product.slug },
-      update: {},
-      create: product as any,
+      update: {
+        name: product.name,
+        price: product.price,
+        category: product.category,
+        description: product.description ?? null,
+        stock: product.stock,
+        isFeatured: product.isFeatured ?? false,
+      },
+      create: {
+        name: product.name,
+        slug: product.slug,
+        price: product.price,
+        category: product.category,
+        description: product.description ?? null,
+        stock: product.stock,
+        isFeatured: product.isFeatured ?? false,
+      },
     });
   }
 
-  console.log(`✅ Created ${products.length} products`);
+  console.log(`✅ Seeded ${products.length} public shop products (ShopProduct)`);
 
   if (isSupabaseConfigured()) {
     const authSeeds: { email: string; password: string }[] = [

@@ -1,18 +1,25 @@
 import { Router } from 'express';
 import { prisma } from '../index.js';
-import { authenticate, AuthRequest } from '../middleware/auth.js';
+import type { AuthRequest } from '../middleware/auth.js';
+import { resolveBusinessClinicId } from '../utils/requestClinic.js';
 import { generatePrescriptionPDF } from '../services/pdf.js';
 import { sendEmail } from '../services/email.js';
 import { sendWhatsAppMessage } from '../services/whatsapp.js';
+import { blockTenantFromEmr, requirePrescriptionsEmrAccess } from '../middleware/clinicalRbac.js';
 
 const router = Router();
 
-router.get('/', authenticate, async (req: AuthRequest, res) => {
+router.use(blockTenantFromEmr);
+router.use(requirePrescriptionsEmrAccess);
+
+const clinicRxScope = (req: AuthRequest) => ({ patient: { clinicId: resolveBusinessClinicId(req) } });
+
+router.get('/', async (req: AuthRequest, res) => {
   try {
     const { patientId, startDate, endDate, page = '1', limit = '20' } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
 
-    const where: any = { userId: req.user!.id };
+    const where: any = { ...clinicRxScope(req) };
     if (patientId) where.patientId = patientId;
     if (startDate && endDate) {
       where.date = {
@@ -41,10 +48,10 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/:id', authenticate, async (req: AuthRequest, res) => {
+router.get('/:id', async (req: AuthRequest, res) => {
   try {
     const prescription = await prisma.prescription.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicRxScope(req) },
       include: {
         patient: true,
         items: true,
@@ -64,12 +71,12 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/', authenticate, async (req: AuthRequest, res) => {
+router.post('/', async (req: AuthRequest, res) => {
   try {
     const { patientId, diagnosis, chiefComplaint, examination, investigation, advice, followUpDate, vitals, items } = req.body;
 
     const patient = await prisma.patient.findFirst({
-      where: { id: patientId, userId: req.user!.id },
+      where: { id: patientId, clinicId: resolveBusinessClinicId(req) },
     });
 
     if (!patient) {
@@ -109,12 +116,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.put('/:id', authenticate, async (req: AuthRequest, res) => {
+router.put('/:id', async (req: AuthRequest, res) => {
   try {
     const { diagnosis, chiefComplaint, examination, investigation, advice, followUpDate, vitals, items } = req.body;
 
     const existing = await prisma.prescription.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicRxScope(req) },
     });
 
     if (!existing) {
@@ -155,10 +162,10 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
+router.delete('/:id', async (req: AuthRequest, res) => {
   try {
     const existing = await prisma.prescription.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicRxScope(req) },
     });
 
     if (!existing) {
@@ -172,10 +179,10 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/:id/pdf', authenticate, async (req: AuthRequest, res) => {
+router.get('/:id/pdf', async (req: AuthRequest, res) => {
   try {
     const prescription = await prisma.prescription.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicRxScope(req) },
       include: {
         patient: true,
         items: true,
@@ -199,10 +206,10 @@ router.get('/:id/pdf', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/send-email', authenticate, async (req: AuthRequest, res) => {
+router.post('/:id/send-email', async (req: AuthRequest, res) => {
   try {
     const prescription = await prisma.prescription.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicRxScope(req) },
       include: { patient: true, items: true, user: true },
     });
 
@@ -255,10 +262,10 @@ router.post('/:id/send-email', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/send-whatsapp', authenticate, async (req: AuthRequest, res) => {
+router.post('/:id/send-whatsapp', async (req: AuthRequest, res) => {
   try {
     const prescription = await prisma.prescription.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id, ...clinicRxScope(req) },
       include: { patient: true, items: true, user: true },
     });
 

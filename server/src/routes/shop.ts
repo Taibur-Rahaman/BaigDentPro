@@ -19,21 +19,34 @@ router.get('/admin/stats', requireAuth, requireAdmin, async (req, res) => {
       todayOrders,
       totalRevenue,
       todayRevenue,
+      orderItemsForProfit,
     ] = await Promise.all([
-      prisma.product.count(),
-      prisma.product.count({ where: { isActive: true } }),
-      prisma.product.count({ where: { stock: { lte: 5 }, isActive: true } }),
-      prisma.order.count(),
-      prisma.order.count({ where: { status: 'PENDING' } }),
-      prisma.order.count({
+      prisma.shopProduct.count(),
+      prisma.shopProduct.count({ where: { isActive: true } }),
+      prisma.shopProduct.count({ where: { stock: { lte: 5 }, isActive: true } }),
+      prisma.shopOrder.count(),
+      prisma.shopOrder.count({ where: { status: 'PENDING' } }),
+      prisma.shopOrder.count({
         where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } },
       }),
-      prisma.order.aggregate({ _sum: { total: true } }),
-      prisma.order.aggregate({
+      prisma.shopOrder.aggregate({ _sum: { total: true } }),
+      prisma.shopOrder.aggregate({
         where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } },
         _sum: { total: true },
       }),
+      prisma.shopOrderItem.findMany({
+        select: {
+          quantity: true,
+          total: true,
+          product: { select: { cost: true } },
+        },
+      }),
     ]);
+
+    const totalProfit = orderItemsForProfit.reduce((sum, row) => {
+      const unitCost = row.product.cost != null ? Number(row.product.cost) : 0;
+      return sum + (Number(row.total) - unitCost * row.quantity);
+    }, 0);
 
     res.json({
       products: { total: totalProducts, active: activeProducts, lowStock: lowStockProducts },
@@ -42,6 +55,7 @@ router.get('/admin/stats', requireAuth, requireAdmin, async (req, res) => {
         total: Number(totalRevenue._sum.total) || 0, 
         today: Number(todayRevenue._sum.total) || 0 
       },
+      profit: { total: Math.round(totalProfit * 100) / 100 },
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -58,14 +72,14 @@ router.get('/admin/orders', requireAuth, requireAdmin, async (req, res) => {
     if (status) where.status = status;
 
     const [orders, total] = await Promise.all([
-      prisma.order.findMany({
+      prisma.shopOrder.findMany({
         where,
         skip,
         take: parseInt(limit as string),
         orderBy: { createdAt: 'desc' },
         include: { items: true },
       }),
-      prisma.order.count({ where }),
+      prisma.shopOrder.count({ where }),
     ]);
 
     res.json({ orders, total, page: parseInt(page as string), limit: parseInt(limit as string) });
@@ -79,7 +93,7 @@ router.put('/admin/orders/:id/status', requireAuth, requireAdmin, async (req, re
   try {
     const { status, trackingNumber } = req.body;
 
-    const order = await prisma.order.update({
+    const order = await prisma.shopOrder.update({
       where: { id: req.params.id },
       data: { 
         status, 
@@ -103,7 +117,7 @@ router.post('/admin/products', requireAuth, requireAdmin, async (req, res) => {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const uniqueSlug = `${slug}-${Date.now().toString(36)}`;
 
-    const product = await prisma.product.create({
+    const product = await prisma.shopProduct.create({
       data: {
         name,
         slug: uniqueSlug,
@@ -132,7 +146,7 @@ router.put('/admin/products/:id', requireAuth, requireAdmin, async (req, res) =>
   try {
     const { name, description, shortDesc, price, comparePrice, cost, sku, barcode, category, images, stock, isActive, isFeatured } = req.body;
 
-    const product = await prisma.product.update({
+    const product = await prisma.shopProduct.update({
       where: { id: req.params.id },
       data: {
         ...(name && { name }),
@@ -160,7 +174,7 @@ router.put('/admin/products/:id', requireAuth, requireAdmin, async (req, res) =>
 // Admin: Delete product
 router.delete('/admin/products/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
-    await prisma.product.delete({ where: { id: req.params.id } });
+    await prisma.shopProduct.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -183,13 +197,13 @@ router.get('/admin/products', requireAuth, requireAdmin, async (req, res) => {
     }
 
     const [products, total] = await Promise.all([
-      prisma.product.findMany({
+      prisma.shopProduct.findMany({
         where,
         skip,
         take: parseInt(limit as string),
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.product.count({ where }),
+      prisma.shopProduct.count({ where }),
     ]);
 
     res.json({ products, total, page: parseInt(page as string), limit: parseInt(limit as string) });
@@ -203,7 +217,7 @@ router.get('/admin/products', requireAuth, requireAdmin, async (req, res) => {
 async function generateOrderNo(): Promise<string> {
   const date = new Date();
   const prefix = `ORD${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
-  const count = await prisma.order.count({
+  const count = await prisma.shopOrder.count({
     where: { orderNo: { startsWith: prefix } },
   });
   return `${prefix}${String(count + 1).padStart(4, '0')}`;
@@ -225,13 +239,13 @@ router.get('/products', async (req, res) => {
     }
 
     const [products, total] = await Promise.all([
-      prisma.product.findMany({
+      prisma.shopProduct.findMany({
         where,
         skip,
         take: parseInt(limit as string),
         orderBy: [{ isFeatured: 'desc' }, { createdAt: 'desc' }],
       }),
-      prisma.product.count({ where }),
+      prisma.shopProduct.count({ where }),
     ]);
 
     res.json({ products, total, page: parseInt(page as string), limit: parseInt(limit as string) });
@@ -255,7 +269,7 @@ router.get('/products/categories', async (req, res) => {
       { id: 'OTHER', name: 'Other', icon: '📦' },
     ];
 
-    const counts = await prisma.product.groupBy({
+    const counts = await prisma.shopProduct.groupBy({
       by: ['category'],
       where: { isActive: true },
       _count: { id: true },
@@ -274,7 +288,7 @@ router.get('/products/categories', async (req, res) => {
 
 router.get('/products/:slug', async (req, res) => {
   try {
-    const product = await prisma.product.findFirst({
+    const product = await prisma.shopProduct.findFirst({
       where: { slug: req.params.slug, isActive: true },
     });
 
@@ -324,7 +338,7 @@ router.post('/cart/add', async (req, res) => {
       sessionId = uuidv4();
     }
 
-    const product = await prisma.product.findUnique({ where: { id: productId } });
+    const product = await prisma.shopProduct.findUnique({ where: { id: productId } });
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
@@ -480,7 +494,7 @@ router.post('/checkout', async (req, res) => {
 
     const orderNo = await generateOrderNo();
 
-    const order = await prisma.order.create({
+    const order = await prisma.shopOrder.create({
       data: {
         orderNo,
         customerName,
@@ -511,7 +525,7 @@ router.post('/checkout', async (req, res) => {
     await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
 
     for (const item of cart.items) {
-      await prisma.product.update({
+      await prisma.shopProduct.update({
         where: { id: item.productId },
         data: { stock: { decrement: item.quantity } },
       });
@@ -525,7 +539,7 @@ router.post('/checkout', async (req, res) => {
 
 router.get('/orders/:orderNo', async (req, res) => {
   try {
-    const order = await prisma.order.findUnique({
+    const order = await prisma.shopOrder.findUnique({
       where: { orderNo: req.params.orderNo },
       include: { items: true },
     });
@@ -542,7 +556,7 @@ router.get('/orders/:orderNo', async (req, res) => {
 
 router.get('/orders/phone/:phone', async (req, res) => {
   try {
-    const orders = await prisma.order.findMany({
+    const orders = await prisma.shopOrder.findMany({
       where: { customerPhone: req.params.phone },
       orderBy: { createdAt: 'desc' },
       include: { items: true },

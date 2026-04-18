@@ -106,3 +106,18 @@ export async function deleteSupabaseUserByEmail(email: string): Promise<void> {
     console.warn('[supabaseAuthSync] delete user:', error.message);
   }
 }
+
+/** Keeps Supabase JWT `app_metadata.session_version` aligned with Prisma `User.sessionVersion` for API auth parity. */
+export async function syncSupabaseSessionVersionForEmail(email: string, sessionVersion: number): Promise<void> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+  const em = normalizeAuthEmail(email);
+  const id = await findSupabaseUserIdByEmail(em);
+  if (!id) return;
+  const { error } = await admin.auth.admin.updateUserById(id, {
+    app_metadata: { session_version: sessionVersion },
+  });
+  if (error) {
+    console.warn('[supabaseAuthSync] session_version metadata:', error.message);
+  }
+}

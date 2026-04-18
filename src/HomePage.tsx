@@ -29,9 +29,12 @@ interface Category {
 
 interface HomePageProps {
   onLoginClick: () => void;
+  /** Prisma clinic registration + legacy sign-in (e.g. `/portal`). */
+  onPortalClick?: () => void;
+  onApiTestClick?: () => void;
 }
 
-export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
+export const HomePage: React.FC<HomePageProps> = ({ onLoginClick, onPortalClick, onApiTestClick }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [cart, setCart] = useState<{ items: CartItem[]; total: number }>({ items: [], total: 0 });
@@ -199,11 +202,23 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
             <a href="#pricing" className="neo-nav-link">Pricing</a>
           </nav>
           <div className="neo-header-actions">
+            {onApiTestClick && (
+              <button type="button" className="neo-btn neo-btn-secondary" onClick={onApiTestClick} title="Tenant products & orders API">
+                <i className="fa-solid fa-plug" />
+                <span>Catalog API</span>
+              </button>
+            )}
             <button className="neo-cart-btn" onClick={() => setShowCart(true)}>
               <i className="fa-solid fa-shopping-cart"></i>
               {cart.items.length > 0 && <span className="neo-cart-badge">{cart.items.length}</span>}
             </button>
-            <button className="neo-btn neo-btn-primary" onClick={onLoginClick}>
+            {onPortalClick && (
+              <button type="button" className="neo-btn neo-btn-secondary" onClick={onPortalClick}>
+                <i className="fa-solid fa-hospital" />
+                <span>Clinic portal</span>
+              </button>
+            )}
+            <button type="button" className="neo-btn neo-btn-primary" onClick={onLoginClick}>
               <i className="fa-solid fa-user-doctor"></i>
               <span>Dentist Portal</span>
             </button>
@@ -227,7 +242,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
             seamless patient management, and integrated e-commerce — all in one beautiful platform.
           </p>
           <div className="neo-hero-buttons">
-            <button className="neo-btn neo-btn-primary neo-btn-lg" onClick={onLoginClick}>
+            <button type="button" className="neo-btn neo-btn-primary neo-btn-lg" onClick={onLoginClick}>
               <i className="fa-solid fa-rocket"></i>
               <span>Launch Dashboard</span>
             </button>
@@ -496,7 +511,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
               <div className="neo-pricing-card-header">
                 <h3 className="neo-pricing-name">Premium</h3>
                 <p className="neo-pricing-desc">For busy clinics with multiple rooms and branches</p>
-                <div className="neo-pricing-discount-pill">5+ devices and branches</div>
+                <div className="neo-pricing-discount-pill">Up to 5 devices · multi-branch</div>
               </div>
               <div className="neo-pricing-price-block">
                 <div className="neo-pricing-price-main">
@@ -513,11 +528,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
               </button>
               <ul className="neo-pricing-features">
                 <li><i className="fa-solid fa-check"></i>Everything in Platinum</li>
-                <li><i className="fa-solid fa-check"></i>Access from 5+ devices and branches</li>
-                <li><i className="fa-solid fa-check"></i>Role‑based access & activity logs</li>
-                <li><i className="fa-solid fa-check"></i>Branch‑wise revenue & chair utilization</li>
-                <li><i className="fa-solid fa-check"></i>Custom branding on reports & prescriptions</li>
-                <li><i className="fa-solid fa-check"></i>Dedicated onboarding & success manager</li>
+                <li><i className="fa-solid fa-check"></i>Up to 5 devices with multi‑branch</li>
+                <li><i className="fa-solid fa-check"></i>Role‑based access & clinic activity logs</li>
+                <li><i className="fa-solid fa-check"></i>Advanced analytics & exports</li>
+                <li><i className="fa-solid fa-check"></i>Branding on reports & prescriptions</li>
               </ul>
             </div>
 
@@ -526,7 +540,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
               <div className="neo-pricing-card-header">
                 <h3 className="neo-pricing-name">Luxury</h3>
                 <p className="neo-pricing-desc">For premium clinics and multi‑branch groups</p>
-                <div className="neo-pricing-discount-pill">Up to 5+ devices</div>
+                <div className="neo-pricing-discount-pill">Up to 5 devices</div>
               </div>
               <div className="neo-pricing-price-block">
                 <div className="neo-pricing-price-main">
@@ -543,11 +557,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick }) => {
               </button>
               <ul className="neo-pricing-features">
                 <li><i className="fa-solid fa-check"></i>Everything in Premium</li>
-                <li><i className="fa-solid fa-check"></i>Access from 5+ devices and branches</li>
-                <li><i className="fa-solid fa-check"></i>Role‑based access & activity logs</li>
-                <li><i className="fa-solid fa-check"></i>Branch‑wise revenue & chair utilization</li>
-                <li><i className="fa-solid fa-check"></i>Custom branding on reports & prescriptions</li>
-                <li><i className="fa-solid fa-check"></i>Dedicated onboarding & success manager</li>
+                <li><i className="fa-solid fa-check"></i>Priority support channel</li>
+                <li><i className="fa-solid fa-check"></i>White‑label branding on exports & patient comms</li>
+                <li><i className="fa-solid fa-check"></i>Advanced analytics & branch dashboards</li>
+                <li><i className="fa-solid fa-check"></i>Device pool sized for multi‑location teams</li>
               </ul>
             </div>
           </div>
