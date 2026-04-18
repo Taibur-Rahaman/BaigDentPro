@@ -19,7 +19,7 @@
     "db:setup:doctor": "prisma migrate deploy && npm run db:seed"
   },
   "dependencies": {
-    "@prisma/client": "^5.10.0",
+    "@prisma/client": "^7.7.0",
     "@supabase/supabase-js": "^2.101.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
