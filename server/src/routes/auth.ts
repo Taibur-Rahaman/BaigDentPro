@@ -136,6 +136,13 @@ type LoginUserRow = {
   accountStatus?: string | null;
 };
 
+function hasPrismaErrorCode(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  if (!('code' in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code.startsWith('P');
+}
+
 async function findUserByEmailInsensitive(email: string): Promise<LoginUserRow | null> {
   const trimmed = email.trim();
   const normalizedLower = trimmed.toLowerCase();
@@ -175,6 +182,9 @@ async function findUserByEmailInsensitive(email: string): Promise<LoginUserRow |
     if (!row) return null;
     return row as LoginUserRow;
   } catch (e) {
+    if (hasPrismaErrorCode(e)) {
+      throw e;
+    }
     if (isPrismaSchemaDriftError(e)) {
       console.warn('[auth] login user-query fallback due to schema drift');
     } else {
@@ -197,6 +207,9 @@ async function findUserByEmailInsensitive(email: string): Promise<LoginUserRow |
       accountStatus: 'ACTIVE',
     };
   } catch (e) {
+    if (hasPrismaErrorCode(e)) {
+      throw e;
+    }
     if (!isPrismaSchemaDriftError(e)) {
       console.warn(
         '[auth] login insensitive minimal select failed — exact-email fallback',
@@ -225,8 +238,15 @@ async function findUserByEmailInsensitive(email: string): Promise<LoginUserRow |
 function logFailedLoginAttempt(req: { ip?: string; socket?: { remoteAddress?: string } }, normalizedEmail: string): void {
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   const id = createHash('sha256').update(normalizedEmail.toLowerCase()).digest('hex').slice(0, 16);
+  console.warn(`[AUTH_INVALID_LOGIN] email_hash=${id}`);
   console.warn(`[security] failed_login ip=${ip} email_hash=${id}`);
   void recordFailedLoginFraud(ip, id);
+}
+
+function logDisabledAccountAttempt(req: { ip?: string; socket?: { remoteAddress?: string } }, normalizedEmail: string): void {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const id = createHash('sha256').update(normalizedEmail.toLowerCase()).digest('hex').slice(0, 16);
+  console.warn(`[AUTH_DISABLED_ACCOUNT] email_hash=${id} ip=${ip}`);
 }
 
 async function handleRegisterSaas(req: Request, res: Response): Promise<void> {
@@ -460,6 +480,13 @@ router.post(
 
 async function handleLogin(req: Request, res: Response): Promise<void> {
   try {
+    if (!process.env.DATABASE_URL?.trim()) {
+      throw new Error('AUTH_SYSTEM_DATABASE_URL_MISSING');
+    }
+    if (!process.env.JWT_SECRET?.trim()) {
+      throw new Error('AUTH_SYSTEM_JWT_SECRET_MISSING');
+    }
+
     const body = req.body as LoginBody;
     const { email: rawEmail, password } = body;
     const email = normalizeAuthEmail(String(rawEmail));
@@ -500,9 +527,8 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
     }
 
     if (!user.isActive) {
-      res.status(403).json({
-        error: 'This account has been disabled. Contact your clinic administrator.',
-      });
+      logDisabledAccountAttempt(req, email);
+      res.status(403).json({ error: 'Invalid credentials' });
       return;
     }
 
@@ -697,7 +723,7 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
       tenant,
     });
   } catch (err) {
-    console.error('[auth.login] AUTH LOGIN ERROR', err);
+    console.error('[AUTH_SYSTEM_ERROR]', err);
     const safeMsg = err instanceof Error ? err.message : String(err);
     if (process.env.DEBUG_AUTH_ERRORS === '1' && process.env.NODE_ENV !== 'production') {
       res.status(500).json({ error: safeMsg, code: 'AUTH_INTERNAL_ERROR' });
