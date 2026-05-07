@@ -35,6 +35,15 @@ export function handleRouteError(res: Response, err: unknown, logContext: string
     res.status(400).json({ success: false, error: 'Invalid request data' });
     return;
   }
+  if (
+    process.env.DEBUG_AUTH_ERRORS === '1' &&
+    (logContext.includes('auth.login') || logContext.includes('auth/login'))
+  ) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[DEBUG_AUTH_ERRORS]', logContext, err);
+    res.status(500).json({ error: message, code: 'AUTH_INTERNAL_ERROR', context: logContext });
+    return;
+  }
   sendSafeError(res, 500, err, logContext);
 }
 

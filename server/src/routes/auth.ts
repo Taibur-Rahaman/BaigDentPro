@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../index.js';
+import { prisma, prismaBase } from '../db/prisma.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { JWT_SECRET } from '../utils/config.js';
 import { signAccessToken } from '../utils/accessToken.js';
@@ -18,7 +18,7 @@ import { normalizeAuthEmail, syncSupabasePasswordForEmail, syncSupabaseSessionVe
 import { asyncRoute } from '../utils/routeErrors.js';
 import { validateBody } from '../middleware/validateBody.js';
 import { strictAuthLimiter, loginBruteLimiter, registerEmailLimiter } from '../middleware/authLimits.js';
-import { isPrismaUniqueViolation } from '../utils/prismaErrors.js';
+import { isPrismaSchemaDriftError, isPrismaUniqueViolation } from '../utils/prismaErrors.js';
 import { bumpSessionVersion } from '../services/sessionVersionService.js';
 import {
   loginBodySchema,
@@ -35,6 +35,7 @@ import {
   type RegisterClinicBody,
   type AuthProfileBody,
 } from '../validation/schemas.js';
+import { sanitizeDegree, sanitizeSpecialization, sanitizeTitle } from '../utils/professionalIdentity.js';
 import { writeAuditLog } from '../services/auditLogService.js';
 import { recordFailedLoginFraud } from '../services/fraudAlertService.js';
 import { logActivity } from '../services/clinicActivityLogService.js';
@@ -44,7 +45,9 @@ import {
   resolveDeviceLimit,
   type SubscriptionWithPlan,
 } from '../services/planCatalog.js';
+import { resolveProductFeaturesForClinic } from '../services/productFeatures.js';
 import { assertDeviceCapacityForLogin, computeLoginDeviceId, recordDeviceSession } from '../services/deviceSessionService.js';
+import { resolveJwtCapabilitiesForUser } from '../services/capabilityJwtPayload.js';
 
 // Centralized in config.ts
 
@@ -72,6 +75,8 @@ type SubscriptionTenantPayload = {
   deviceLimit: number;
   expiresAt: Date | null;
   endDate: Date | null;
+  planTier: string;
+  productFeatures: Record<string, boolean>;
 };
 
 async function subscriptionTenantPayload(clinicId: string | null): Promise<SubscriptionTenantPayload | null> {
@@ -80,11 +85,19 @@ async function subscriptionTenantPayload(clinicId: string | null): Promise<Subsc
     where: { clinicId },
     include: { planRef: true },
   });
-  const clinic = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { plan: true } });
+  const clinic = await prisma.clinic.findUnique({
+    where: { id: clinicId },
+    select: { plan: true, planTier: true },
+  });
   const row = sub as SubscriptionWithPlan | null;
   const plan = effectivePlanName(row, clinic?.plan ?? 'FREE');
   const merged = mergePlanFeatures(row?.planRef?.features, row?.features);
   const deviceLimit = await resolveDeviceLimit(row);
+  const productFeaturesObj = await resolveProductFeaturesForClinic(clinicId);
+  const productFeatures: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(productFeaturesObj)) {
+    productFeatures[k] = v;
+  }
   return {
     clinicId,
     plan,
@@ -95,6 +108,8 @@ async function subscriptionTenantPayload(clinicId: string | null): Promise<Subsc
     deviceLimit,
     expiresAt: row?.expiresAt ?? null,
     endDate: row?.endDate ?? null,
+    planTier: clinic?.planTier ?? 'STARTER',
+    productFeatures,
   };
 }
 
@@ -108,12 +123,103 @@ function parseBearerAccessToken(req: { headers: { authorization?: string }; body
   return bodyToken || null;
 }
 
-async function findUserByEmailInsensitive(email: string) {
+type LoginUserRow = {
+  id: string;
+  email: string;
+  password: string | null;
+  name: string;
+  role: string;
+  clinicId: string;
+  clinicName: string | null;
+  isApproved: boolean;
+  isActive: boolean;
+  accountStatus?: string | null;
+};
+
+async function findUserByEmailInsensitive(email: string): Promise<LoginUserRow | null> {
   const trimmed = email.trim();
-  return prisma.user.findFirst({
-    where: { email: { equals: trimmed, mode: 'insensitive' } },
-  });
+  const normalizedLower = trimmed.toLowerCase();
+
+  /** Minimal compatible shape when newer columns aren’t migrated yet or the ORM rejects the full select. */
+  async function lookupMinimal(where: { email: string } | { email: { equals: string; mode: 'insensitive' } }) {
+    return prismaBase.user.findFirst({
+      where,
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        name: true,
+        role: true,
+        clinicId: true,
+        clinicName: true,
+      },
+    });
+  }
+
+  try {
+    const row = await prismaBase.user.findFirst({
+      where: { email: { equals: trimmed, mode: 'insensitive' } },
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        name: true,
+        role: true,
+        clinicId: true,
+        isApproved: true,
+        isActive: true,
+        clinicName: true,
+        accountStatus: true,
+      },
+    });
+    if (!row) return null;
+    return row as LoginUserRow;
+  } catch (e) {
+    if (isPrismaSchemaDriftError(e)) {
+      console.warn('[auth] login user-query fallback due to schema drift');
+    } else {
+      console.warn(
+        '[auth] login full user select failed — retrying minimal/compatibility path',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+
+  try {
+    const legacy = await lookupMinimal({
+      email: { equals: trimmed, mode: 'insensitive' },
+    });
+    if (!legacy) return null;
+    return {
+      ...legacy,
+      isApproved: true,
+      isActive: true,
+      accountStatus: 'ACTIVE',
+    };
+  } catch (e) {
+    if (!isPrismaSchemaDriftError(e)) {
+      console.warn(
+        '[auth] login insensitive minimal select failed — exact-email fallback',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+
+  try {
+    const exact = await lookupMinimal({ email: normalizedLower });
+    if (!exact) return null;
+    return {
+      ...exact,
+      isApproved: true,
+      isActive: true,
+      accountStatus: 'ACTIVE',
+    };
+  } catch (e2) {
+    console.error('[auth] login user lookup failed (all fallbacks exhausted)', e2 instanceof Error ? e2.message : e2);
+    throw e2;
+  }
 }
+
 
 /** Correlates attempts in logs without printing the full email (monitoring / incident review). */
 function logFailedLoginAttempt(req: { ip?: string; socket?: { remoteAddress?: string } }, normalizedEmail: string): void {
@@ -123,6 +229,113 @@ function logFailedLoginAttempt(req: { ip?: string; socket?: { remoteAddress?: st
   void recordFailedLoginFraud(ip, id);
 }
 
+async function handleRegisterSaas(req: Request, res: Response): Promise<void> {
+  try {
+    const { email: rawEmail, password, name: nameRaw } = req.body as RegisterSaasBody;
+    const email = normalizeAuthEmail(rawEmail);
+    console.info(`[auth] register-saas request received email=${email || 'missing'}`);
+
+    assertPasswordAcceptable(password, 'Password');
+
+    if (!email) {
+      res.status(400).json({ error: 'Email is required' });
+      return;
+    }
+
+    const existing = await prismaBase.user.findUnique({ where: { email } });
+    if (existing) {
+      res.status(400).json({ error: 'Email already registered' });
+      return;
+    }
+
+    const name = (nameRaw?.trim() || email.split('@')[0] || 'User').slice(0, 200);
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await prisma.$transaction(async (tx) => {
+      const clinic = await tx.clinic.create({
+        data: {
+          name: `${name}'s workspace`,
+        },
+      });
+
+      const freePlan = await tx.plan.findUnique({ where: { name: 'FREE' } });
+      await tx.subscription.create({
+        data: {
+          clinicId: clinic.id,
+          plan: freePlan?.name ?? 'FREE',
+          planId: freePlan?.id,
+          status: 'ACTIVE',
+          startDate: new Date(),
+        },
+      });
+
+      const created = await tx.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+          name,
+          role: 'TENANT',
+          clinicId: clinic.id,
+          isApproved: true,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          clinicId: true,
+          isApproved: true,
+          sessionVersion: true,
+        },
+      });
+
+      await tx.clinic.update({ where: { id: clinic.id }, data: { ownerId: created.id } });
+      return created;
+    });
+
+    void syncSupabasePasswordForEmail(email, password).then((r) => {
+      if (!r.synced && r.note && r.note !== 'supabase_not_configured') {
+        console.warn('[register-saas] Supabase Auth sync:', r.note);
+      }
+    });
+
+    void syncSupabaseSessionVersionForEmail(user.email, user.sessionVersion);
+
+    const planSnapshot = await subscriptionPlanSnapshot(user.clinicId);
+    const capabilities = await resolveJwtCapabilitiesForUser({ role: user.role, clinicId: user.clinicId });
+    const token = signAccessToken(user, { planSnapshot, capabilities });
+    const refreshToken = await issueRefreshToken(user.id);
+
+    void logActivity({
+      userId: user.id,
+      clinicId: user.clinicId,
+      action: 'USER_CREATED',
+      entity: 'USER',
+      entityId: user.id,
+      meta: { source: 'REGISTER_SAAS' },
+    });
+
+    void writeAuditLog({
+      userId: user.id,
+      action: 'REGISTER_SAAS',
+      entityId: user.id,
+      metadata: { clinicId: user.clinicId },
+    });
+
+    const tenant = await subscriptionTenantPayload(user.clinicId);
+    console.info(`[auth] register-saas success userId=${user.id} clinicId=${user.clinicId}`);
+    res.status(201).json({ user, token, refreshToken, tenant });
+  } catch (e: unknown) {
+    console.error(`[auth] register-saas failed: ${e instanceof Error ? e.message : String(e)}`);
+    if (isPrismaUniqueViolation(e)) {
+      res.status(400).json({ error: 'Email already exists' });
+      return;
+    }
+    throw e;
+  }
+}
+
 /** Self-service SaaS tenant: approved immediately, receives JWT (catalog + orders APIs). */
 router.post(
   '/register-saas',
@@ -130,109 +343,111 @@ router.post(
   loginBruteLimiter,
   strictAuthLimiter,
   validateBody(registerSaasBodySchema),
-  asyncRoute('auth.register-saas', async (req, res) => {
-    try {
-      const { email: rawEmail, password, name: nameRaw } = req.body as RegisterSaasBody;
-      const email = normalizeAuthEmail(rawEmail);
-
-      assertPasswordAcceptable(password, 'Password');
-
-      if (!email) {
-        res.status(400).json({ error: 'Email is required' });
-        return;
-      }
-
-      const existing = await prisma.user.findUnique({ where: { email } });
-      if (existing) {
-        res.status(400).json({ error: 'Email already registered' });
-        return;
-      }
-
-      const name = (nameRaw?.trim() || email.split('@')[0] || 'User').slice(0, 200);
-      const hashedPassword = await bcrypt.hash(password, 12);
-
-      const user = await prisma.$transaction(async (tx) => {
-        const clinic = await tx.clinic.create({
-          data: {
-            name: `${name}'s workspace`,
-          },
-        });
-
-        const freePlan = await tx.plan.findUnique({ where: { name: 'FREE' } });
-        await tx.subscription.create({
-          data: {
-            clinicId: clinic.id,
-            plan: freePlan?.name ?? 'FREE',
-            planId: freePlan?.id,
-            status: 'ACTIVE',
-            startDate: new Date(),
-          },
-        });
-
-        const created = await tx.user.create({
-          data: {
-            email,
-            password: hashedPassword,
-            name,
-            role: 'TENANT',
-            clinicId: clinic.id,
-            isApproved: true,
-            isActive: true,
-          },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            role: true,
-            clinicId: true,
-            isApproved: true,
-            sessionVersion: true,
-          },
-        });
-
-        await tx.clinic.update({ where: { id: clinic.id }, data: { ownerId: created.id } });
-        return created;
-      });
-
-      void syncSupabasePasswordForEmail(email, password).then((r) => {
-        if (!r.synced && r.note && r.note !== 'supabase_not_configured') {
-          console.warn('[register-saas] Supabase Auth sync:', r.note);
-        }
-      });
-
-      void syncSupabaseSessionVersionForEmail(user.email, user.sessionVersion);
-
-      const planSnapshot = await subscriptionPlanSnapshot(user.clinicId);
-      const token = signAccessToken(user, { planSnapshot });
-      const refreshToken = await issueRefreshToken(user.id);
-
-      void logActivity({
-        userId: user.id,
-        clinicId: user.clinicId,
-        action: 'USER_CREATED',
-        entity: 'USER',
-        entityId: user.id,
-        meta: { source: 'REGISTER_SAAS' },
-      });
-
-      void writeAuditLog({
-        userId: user.id,
-        action: 'REGISTER_SAAS',
-        entityId: user.id,
-        metadata: { clinicId: user.clinicId },
-      });
-
-      const tenant = await subscriptionTenantPayload(user.clinicId);
-      res.status(201).json({ user, token, refreshToken, tenant });
-    } catch (e: unknown) {
-      if (isPrismaUniqueViolation(e)) {
-        res.status(400).json({ error: 'Email already exists' });
-        return;
-      }
-      throw e;
-    }
-  })
+  asyncRoute('auth.register-saas', handleRegisterSaas)
 );
+
+async function handleRegister(req: Request, res: Response): Promise<void> {
+  try {
+    const { email: rawEmail, password, name, clinicName, phone, title, degree } = req.body as RegisterClinicBody;
+    const email = normalizeAuthEmail(rawEmail);
+    console.info(`[auth] register request received email=${email || 'missing'}`);
+
+    assertPasswordAcceptable(password, 'Password');
+
+    if (!email) {
+      res.status(400).json({ error: 'Email is required' });
+      return;
+    }
+
+    const existing = await prismaBase.user.findUnique({ where: { email } });
+    if (existing) {
+      res.status(400).json({ error: 'Email already registered' });
+      return;
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await prisma.$transaction(async (tx) => {
+      const clinic = await tx.clinic.create({
+        data: {
+          name: clinicName || `${name}'s Clinic`,
+          phone,
+        },
+      });
+
+      const freePlan = await tx.plan.findUnique({ where: { name: 'FREE' } });
+      await tx.subscription.create({
+        data: {
+          clinicId: clinic.id,
+          plan: freePlan?.name ?? 'FREE',
+          planId: freePlan?.id,
+          status: 'ACTIVE',
+          startDate: new Date(),
+        },
+      });
+
+      const created = await tx.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+          name,
+          clinicName,
+          phone,
+          title: sanitizeTitle(title),
+          degree: sanitizeDegree(degree),
+          role: 'PENDING_APPROVAL',
+          clinicId: clinic.id,
+          isApproved: false,
+          accountStatus: 'PENDING',
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          title: true,
+          degree: true,
+          role: true,
+          clinicName: true,
+          clinicId: true,
+          isApproved: true,
+          accountStatus: true,
+          sessionVersion: true,
+        },
+      });
+
+      await tx.clinic.update({ where: { id: clinic.id }, data: { ownerId: created.id } });
+      return created;
+    });
+
+    void syncSupabasePasswordForEmail(email, password).then((r) => {
+      if (!r.synced && r.note && r.note !== 'supabase_not_configured') {
+        console.warn('[register] Supabase Auth sync:', r.note);
+      }
+    });
+
+    void writeAuditLog({
+      userId: user.id,
+      action: 'REGISTER_CLINIC',
+      entityId: user.id,
+      metadata: { clinicId: user.clinicId, pendingApproval: true },
+    });
+
+    res.status(201).json({
+      user,
+      pendingApproval: true,
+      message:
+        'Your clinic registration was received. A platform administrator must verify your professional details, assign your role and plan, and activate your account before you can sign in.',
+    });
+    console.info(`[auth] register success userId=${user.id} clinicId=${user.clinicId}`);
+  } catch (e: unknown) {
+    console.error(`[auth] register failed: ${e instanceof Error ? e.message : String(e)}`);
+    if (isPrismaUniqueViolation(e)) {
+      res.status(400).json({ error: 'Email already exists' });
+      return;
+    }
+    throw e;
+  }
+}
 
 router.post(
   '/register',
@@ -240,124 +455,43 @@ router.post(
   loginBruteLimiter,
   strictAuthLimiter,
   validateBody(registerClinicBodySchema),
-  asyncRoute('auth.register', async (req, res) => {
-    try {
-      const { email: rawEmail, password, name, clinicName, phone } = req.body as RegisterClinicBody;
-      const email = normalizeAuthEmail(rawEmail);
-
-      assertPasswordAcceptable(password, 'Password');
-
-      if (!email) {
-        res.status(400).json({ error: 'Email is required' });
-        return;
-      }
-
-      const existing = await prisma.user.findUnique({ where: { email } });
-      if (existing) {
-        res.status(400).json({ error: 'Email already registered' });
-        return;
-      }
-
-      const hashedPassword = await bcrypt.hash(password, 12);
-
-      const user = await prisma.$transaction(async (tx) => {
-        const clinic = await tx.clinic.create({
-          data: {
-            name: clinicName || `${name}'s Clinic`,
-            phone,
-          },
-        });
-
-        const freePlan = await tx.plan.findUnique({ where: { name: 'FREE' } });
-        await tx.subscription.create({
-          data: {
-            clinicId: clinic.id,
-            plan: freePlan?.name ?? 'FREE',
-            planId: freePlan?.id,
-            status: 'ACTIVE',
-            startDate: new Date(),
-          },
-        });
-
-        const created = await tx.user.create({
-          data: {
-            email,
-            password: hashedPassword,
-            name,
-            clinicName,
-            phone,
-            role: 'CLINIC_ADMIN',
-            clinicId: clinic.id,
-            isApproved: false,
-          },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            role: true,
-            clinicName: true,
-            clinicId: true,
-            isApproved: true,
-            sessionVersion: true,
-          },
-        });
-
-        await tx.clinic.update({ where: { id: clinic.id }, data: { ownerId: created.id } });
-        return created;
-      });
-
-      void syncSupabasePasswordForEmail(email, password).then((r) => {
-        if (!r.synced && r.note && r.note !== 'supabase_not_configured') {
-          console.warn('[register] Supabase Auth sync:', r.note);
-        }
-      });
-
-      void writeAuditLog({
-        userId: user.id,
-        action: 'REGISTER_CLINIC',
-        entityId: user.id,
-        metadata: { clinicId: user.clinicId, pendingApproval: true },
-      });
-
-      res.status(201).json({
-        user,
-        pendingApproval: true,
-        message:
-          'Your clinic account was created and is pending approval. You will be able to sign in after a platform administrator approves it.',
-      });
-    } catch (e: unknown) {
-      if (isPrismaUniqueViolation(e)) {
-        res.status(400).json({ error: 'Email already exists' });
-        return;
-      }
-      throw e;
-    }
-  })
+  asyncRoute('auth.register', handleRegister)
 );
 
-router.post(
-  '/login',
-  loginBruteLimiter,
-  strictAuthLimiter,
-  validateBody(loginBodySchema),
-  asyncRoute('auth.login', async (req, res) => {
+async function handleLogin(req: Request, res: Response): Promise<void> {
+  try {
     const body = req.body as LoginBody;
     const { email: rawEmail, password } = body;
     const email = normalizeAuthEmail(String(rawEmail));
+    console.info(`[auth] login request received email=${email || 'missing'}`);
 
     if (!email || !password) {
       res.status(400).json({ error: 'Email and password are required' });
       return;
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await findUserByEmailInsensitive(email);
     if (!user) {
       logFailedLoginAttempt(req, email);
       res.status(401).json({ error: 'Invalid credentials' });
       return;
     }
 
-    const isValid = await bcrypt.compare(password, user.password);
+    if (typeof user.password !== 'string' || user.password.length === 0) {
+      console.error('[auth.login] user password missing/corrupt', { userId: user.id });
+      res.status(500).json({ error: 'User data corrupted', code: 'AUTH_PASSWORD_MISSING' });
+      return;
+    }
+
+    let isValid = false;
+    try {
+      isValid = await bcrypt.compare(password, user.password);
+    } catch (e) {
+      console.error('[auth.login] bcrypt compare failed', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ error: 'Auth failed', code: 'AUTH_COMPARE_FAILED' });
+      return;
+    }
+
     if (!isValid) {
       logFailedLoginAttempt(req, email);
       res.status(401).json({ error: 'Invalid credentials' });
@@ -378,30 +512,137 @@ router.post(
       return;
     }
 
-    const subscription = await prisma.subscription.findUnique({
-      where: { clinicId: user.clinicId },
-      include: { planRef: true },
-    });
+    if (user.role !== 'SUPER_ADMIN') {
+      const st = String(user.accountStatus ?? 'ACTIVE').toUpperCase();
+      if (st !== 'ACTIVE') {
+        res.status(403).json({
+          error:
+            st === 'SUSPENDED'
+              ? 'This account has been suspended. Contact your clinic administrator.'
+              : 'Your account is pending activation by a platform administrator.',
+        });
+        return;
+      }
+    }
+
+    let subscription: SubscriptionWithPlan | null = null;
+    try {
+      subscription = (await prisma.subscription.findUnique({
+        where: { clinicId: user.clinicId },
+        include: { planRef: true },
+      })) as SubscriptionWithPlan | null;
+    } catch (e) {
+      if (isPrismaSchemaDriftError(e)) {
+        console.warn('[auth] login subscription fallback due to schema drift', e);
+      } else {
+        throw e;
+      }
+    }
     const skipDevice = user.role === 'SUPER_ADMIN';
     const deviceId = computeLoginDeviceId(req);
-    const gate = await assertDeviceCapacityForLogin({
-      clinicId: user.clinicId,
-      userId: user.id,
-      deviceId,
-      subscription: subscription as SubscriptionWithPlan | null,
-      skipLimit: skipDevice,
-    });
+    let gate: { ok: true } | { ok: false; message: string } = { ok: true };
+    try {
+      gate = await assertDeviceCapacityForLogin({
+        clinicId: user.clinicId,
+        userId: user.id,
+        deviceId,
+        subscription,
+        skipLimit: skipDevice,
+      });
+    } catch (e) {
+      if (isPrismaSchemaDriftError(e)) {
+        console.warn('[auth] login device capacity fallback due to schema drift', e);
+      } else {
+        throw e;
+      }
+    }
     if (!gate.ok) {
       res.status(403).json({ error: gate.message });
       return;
     }
-    await recordDeviceSession(user.id, user.clinicId, deviceId);
+    try {
+      await recordDeviceSession(user.id, user.clinicId, deviceId);
+    } catch (e) {
+      if (isPrismaSchemaDriftError(e)) {
+        console.warn('[auth] login recordDevice fallback due to schema drift', e);
+      } else {
+        throw e;
+      }
+    }
 
-    void syncSupabaseSessionVersionForEmail(user.email, user.sessionVersion);
+    let planSnapshot = await subscriptionPlanSnapshot(user.clinicId);
+    let capabilities: string[] = user.role === 'SUPER_ADMIN' ? ['*'] : [];
+    try {
+      capabilities = await resolveJwtCapabilitiesForUser({ role: user.role, clinicId: user.clinicId });
+    } catch (e) {
+      if (isPrismaSchemaDriftError(e)) {
+        console.warn('[auth] login capabilities fallback due to schema drift', e);
+      } else {
+        throw e;
+      }
+    }
+    if (!planSnapshot && subscription?.plan) {
+      planSnapshot = subscription.plan;
+    }
+    let tokenSessionVersion = 0;
+    let profileExtras: {
+      clinicAddress: string | null;
+      clinicPhone: string | null;
+      title: string | null;
+      degree: string | null;
+      specialization: string | null;
+      professionalVerified: boolean;
+    } = {
+      clinicAddress: null,
+      clinicPhone: null,
+      title: null,
+      degree: null,
+      specialization: null,
+      professionalVerified: false,
+    };
+    try {
+      const profile = await prismaBase.user.findUnique({
+        where: { id: user.id },
+        select: {
+          sessionVersion: true,
+          clinicAddress: true,
+          clinicPhone: true,
+          title: true,
+          degree: true,
+          specialization: true,
+          professionalVerified: true,
+        },
+      });
+      if (profile) {
+        tokenSessionVersion = typeof profile.sessionVersion === 'number' ? profile.sessionVersion : 0;
+        profileExtras = {
+          clinicAddress: profile.clinicAddress ?? null,
+          clinicPhone: profile.clinicPhone ?? null,
+          title: profile.title ?? null,
+          degree: profile.degree ?? null,
+          specialization: profile.specialization ?? null,
+          professionalVerified: Boolean(profile.professionalVerified),
+        };
+      }
+    } catch (e) {
+      if (isPrismaSchemaDriftError(e)) {
+        console.warn('[auth] login profile/sessionVersion fallback due to schema drift', e);
+      } else {
+        throw e;
+      }
+    }
 
-    const planSnapshot = await subscriptionPlanSnapshot(user.clinicId);
-    const token = signAccessToken(user, { planSnapshot });
-    const refreshToken = await issueRefreshToken(user.id);
+    const token = signAccessToken({ ...user, sessionVersion: tokenSessionVersion }, { planSnapshot, capabilities });
+    let refreshToken: string | undefined;
+    try {
+      refreshToken = await issueRefreshToken(user.id);
+    } catch (e) {
+      if (isPrismaSchemaDriftError(e)) {
+        console.warn('[auth] login refresh-token fallback due to schema drift', e);
+      } else {
+        throw e;
+      }
+    }
 
     void logActivity({
       userId: user.id,
@@ -409,7 +650,7 @@ router.post(
       action: 'LOGIN_SUCCESS',
       entity: 'USER',
       entityId: user.id,
-      meta: { method: 'password' },
+      meta: { method: 'prisma_password' },
       req,
     });
 
@@ -424,7 +665,17 @@ router.post(
       metadata: { method: 'password' },
     });
 
-    const tenant = await subscriptionTenantPayload(user.clinicId);
+    let tenant: SubscriptionTenantPayload | null = null;
+    try {
+      tenant = await subscriptionTenantPayload(user.clinicId);
+    } catch (e) {
+      if (isPrismaSchemaDriftError(e)) {
+        console.warn('[auth] login tenant fallback due to schema drift', e);
+      } else {
+        throw e;
+      }
+    }
+    console.info(`[auth] login success userId=${user.id} clinicId=${user.clinicId}`);
     res.json({
       user: {
         id: user.id,
@@ -433,92 +684,134 @@ router.post(
         role: user.role,
         clinicId: user.clinicId,
         clinicName: user.clinicName,
-        clinicAddress: user.clinicAddress,
-        clinicPhone: user.clinicPhone,
-        degree: user.degree,
-        specialization: user.specialization,
+        clinicAddress: profileExtras.clinicAddress,
+        clinicPhone: profileExtras.clinicPhone,
+        title: profileExtras.title,
+        degree: profileExtras.degree,
+        specialization: profileExtras.specialization,
+        professionalVerified: profileExtras.professionalVerified,
       },
       token,
       refreshToken,
       tenant,
     });
-  })
+  } catch (err) {
+    console.error('[auth.login] AUTH LOGIN ERROR', err);
+    const safeMsg = err instanceof Error ? err.message : String(err);
+    if (process.env.DEBUG_AUTH_ERRORS === '1') {
+      res.status(500).json({ error: safeMsg, code: 'AUTH_INTERNAL_ERROR' });
+      return;
+    }
+    res.status(500).json({ error: 'Auth failed', code: 'AUTH_INTERNAL_ERROR' });
+  }
+}
+
+async function handleAuthRefresh(req: Request, res: Response): Promise<void> {
+  const { refreshToken: raw } = req.body as { refreshToken: string };
+  const row = await validateRefreshToken(raw);
+  if (!row) {
+    res.status(401).json({ error: 'Invalid or expired refresh token' });
+    return;
+  }
+  await revokeRefreshTokenByRaw(raw);
+  const refreshToken = await issueRefreshToken(row.userId);
+  void syncSupabaseSessionVersionForEmail(row.user.email, row.user.sessionVersion);
+  const planSnapshot = await subscriptionPlanSnapshot(row.user.clinicId);
+  const capabilities = await resolveJwtCapabilitiesForUser({ role: row.user.role, clinicId: row.user.clinicId });
+  const token = signAccessToken(row.user, { planSnapshot, capabilities });
+  const tenant = await subscriptionTenantPayload(row.user.clinicId);
+  res.json({
+    user: {
+      id: row.user.id,
+      email: row.user.email,
+      name: row.user.name,
+      role: row.user.role,
+      clinicId: row.user.clinicId,
+      clinicName: row.user.clinicName,
+      clinicAddress: row.user.clinicAddress,
+      clinicPhone: row.user.clinicPhone,
+      title: row.user.title,
+      degree: row.user.degree,
+      specialization: row.user.specialization,
+      professionalVerified: row.user.professionalVerified,
+    },
+    token,
+    refreshToken,
+    tenant,
+  });
+}
+
+router.post(
+  '/login',
+  loginBruteLimiter,
+  strictAuthLimiter,
+  validateBody(loginBodySchema),
+  asyncRoute('auth.login', handleLogin)
 );
 
 router.post(
   '/refresh',
   strictAuthLimiter,
   validateBody(authRefreshBodySchema),
-  asyncRoute('auth.refresh', async (req, res) => {
-    const { refreshToken: raw } = req.body as { refreshToken: string };
-    const row = await validateRefreshToken(raw);
-    if (!row) {
-      res.status(401).json({ error: 'Invalid or expired refresh token' });
-      return;
-    }
-    await revokeRefreshTokenByRaw(raw);
-    const refreshToken = await issueRefreshToken(row.userId);
-    void syncSupabaseSessionVersionForEmail(row.user.email, row.user.sessionVersion);
-    const planSnapshot = await subscriptionPlanSnapshot(row.user.clinicId);
-    const token = signAccessToken(row.user, { planSnapshot });
-    const tenant = await subscriptionTenantPayload(row.user.clinicId);
-    res.json({
-      user: {
-        id: row.user.id,
-        email: row.user.email,
-        name: row.user.name,
-        role: row.user.role,
-        clinicId: row.user.clinicId,
-      },
-      token,
-      refreshToken,
-      tenant,
-    });
-  })
+  asyncRoute('auth.refresh', handleAuthRefresh)
 );
+
+async function handleLogout(req: Request, res: Response): Promise<void> {
+  const { refreshToken: bodyRt } = req.body as { refreshToken?: string };
+
+  const authHeader = req.header('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const bearer = authHeader.slice(7).trim();
+    if (bearer) {
+      try {
+        const decoded = jwt.verify(bearer, JWT_SECRET, { algorithms: ['HS256'] }) as { userId?: string };
+        if (decoded.userId) {
+          await revokeAllRefreshTokensForUser(decoded.userId);
+          await bumpSessionVersion(decoded.userId);
+          if (bodyRt) await revokeRefreshTokenByRaw(bodyRt);
+          void writeAuditLog({
+            userId: decoded.userId,
+            action: 'LOGOUT',
+            entityId: decoded.userId,
+            metadata: { via: 'access_token' },
+          });
+          res.json({ success: true, message: 'Logged out' });
+          return;
+        }
+      } catch {
+        /* fall through: e.g. expired access token — still allow refresh-only logout */
+      }
+    }
+  }
+
+  if (bodyRt) {
+    await revokeRefreshTokenByRaw(bodyRt);
+    res.json({ success: true, message: 'Logged out' });
+    return;
+  }
+
+  res.status(400).json({
+    error: 'Provide refreshToken in JSON body and/or a valid Authorization bearer to revoke sessions',
+  });
+}
+
+async function handleLogoutAll(req: AuthRequest, res: Response): Promise<void> {
+  await revokeAllRefreshTokensForUser(req.user!.id);
+  await bumpSessionVersion(req.user!.id);
+  void writeAuditLog({
+    userId: req.user!.id,
+    action: 'LOGOUT_ALL_DEVICES',
+    entityId: req.user!.id,
+    metadata: {},
+  });
+  res.json({ success: true, message: 'All sessions revoked; sign in again on this device.' });
+}
 
 router.post(
   '/logout',
   strictAuthLimiter,
   validateBody(authLogoutBodySchema),
-  asyncRoute('auth.logout', async (req, res) => {
-    const { refreshToken: bodyRt } = req.body as { refreshToken?: string };
-
-    const authHeader = req.header('Authorization');
-    if (authHeader?.startsWith('Bearer ')) {
-      const bearer = authHeader.slice(7).trim();
-      if (bearer) {
-        try {
-          const decoded = jwt.verify(bearer, JWT_SECRET, { algorithms: ['HS256'] }) as { userId?: string };
-          if (decoded.userId) {
-            await revokeAllRefreshTokensForUser(decoded.userId);
-            await bumpSessionVersion(decoded.userId);
-            if (bodyRt) await revokeRefreshTokenByRaw(bodyRt);
-            void writeAuditLog({
-              userId: decoded.userId,
-              action: 'LOGOUT',
-              entityId: decoded.userId,
-              metadata: { via: 'access_token' },
-            });
-            res.json({ success: true, message: 'Logged out' });
-            return;
-          }
-        } catch {
-          /* fall through: e.g. expired access token — still allow refresh-only logout */
-        }
-      }
-    }
-
-    if (bodyRt) {
-      await revokeRefreshTokenByRaw(bodyRt);
-      res.json({ success: true, message: 'Logged out' });
-      return;
-    }
-
-    res.status(400).json({
-      error: 'Provide refreshToken in JSON body and/or a valid Authorization bearer to revoke sessions',
-    });
-  })
+  asyncRoute('auth.logout', handleLogout)
 );
 
 router.post(
@@ -526,126 +819,7 @@ router.post(
   strictAuthLimiter,
   authenticate,
   validateBody(authLogoutAllBodySchema),
-  asyncRoute('auth.logout-all', async (req: AuthRequest, res) => {
-    await revokeAllRefreshTokensForUser(req.user!.id);
-    await bumpSessionVersion(req.user!.id);
-    void writeAuditLog({
-      userId: req.user!.id,
-      action: 'LOGOUT_ALL_DEVICES',
-      entityId: req.user!.id,
-      metadata: {},
-    });
-    res.json({ success: true, message: 'All sessions revoked; sign in again on this device.' });
-  })
-);
-
-/** Exchange a valid Supabase access token for an app JWT (user must exist in Prisma with same email). */
-router.post(
-  '/supabase-session',
-  strictAuthLimiter,
-  asyncRoute('auth.supabase-session', async (req, res) => {
-    const accessToken = parseBearerAccessToken(req);
-    if (!accessToken) {
-      res.status(400).json({ error: 'Missing access token' });
-      return;
-    }
-
-    const admin = getSupabaseAdmin();
-    if (!admin) {
-      res.status(503).json({ error: 'Supabase authentication is not configured on the server' });
-      return;
-    }
-
-    const { data: authData, error: authErr } = await admin.auth.getUser(accessToken);
-    if (authErr || !authData.user?.email) {
-      res.status(401).json({ error: 'Invalid or expired Supabase session' });
-      return;
-    }
-
-    const user = await findUserByEmailInsensitive(authData.user.email);
-    if (!user) {
-      res.status(403).json({
-        error:
-          'No BaigDentPro account exists for this email. Register first, or ask an administrator to link your Supabase user.',
-      });
-      return;
-    }
-
-    if (!user.isActive) {
-      res.status(403).json({
-        error: 'This account has been disabled. Contact your clinic administrator.',
-      });
-      return;
-    }
-
-    if (!user.isApproved) {
-      res.status(403).json({
-        error: 'Your registration is still pending approval by a platform administrator. You cannot sign in yet.',
-      });
-      return;
-    }
-
-    const subscription = await prisma.subscription.findUnique({
-      where: { clinicId: user.clinicId },
-      include: { planRef: true },
-    });
-    const skipDevice = user.role === 'SUPER_ADMIN';
-    const deviceId = computeLoginDeviceId(req);
-    const gate = await assertDeviceCapacityForLogin({
-      clinicId: user.clinicId,
-      userId: user.id,
-      deviceId,
-      subscription: subscription as SubscriptionWithPlan | null,
-      skipLimit: skipDevice,
-    });
-    if (!gate.ok) {
-      res.status(403).json({ error: gate.message });
-      return;
-    }
-    await recordDeviceSession(user.id, user.clinicId, deviceId);
-
-    void syncSupabaseSessionVersionForEmail(user.email, user.sessionVersion);
-
-    const planSnapshot = await subscriptionPlanSnapshot(user.clinicId);
-    const token = signAccessToken(user, { planSnapshot });
-    const refreshToken = await issueRefreshToken(user.id);
-
-    void logActivity({
-      userId: user.id,
-      clinicId: user.clinicId,
-      action: 'LOGIN_SUCCESS',
-      entity: 'USER',
-      entityId: user.id,
-      meta: { method: 'supabase_exchange' },
-      req,
-    });
-
-    void writeAuditLog({
-      userId: user.id,
-      action: 'LOGIN',
-      entityId: user.id,
-      metadata: { method: 'supabase_exchange' },
-    });
-
-    const tenant = await subscriptionTenantPayload(user.clinicId);
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        clinicId: user.clinicId,
-        clinicName: user.clinicName,
-        clinicAddress: user.clinicAddress,
-        clinicPhone: user.clinicPhone,
-        degree: user.degree,
-        specialization: user.specialization,
-      },
-      token,
-      refreshToken,
-      tenant,
-    });
-  })
+  asyncRoute('auth.logout-all', handleLogoutAll)
 );
 
 /** After Supabase password recovery, keep Prisma `password` in sync so legacy API login still works. */
@@ -693,60 +867,84 @@ router.post(
   })
 );
 
-router.get(
-  '/me',
-  authenticate,
-  asyncRoute('auth.me', async (req: AuthRequest, res) => {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        clinicId: true,
-        isActive: true,
-        isApproved: true,
-        phone: true,
-        clinicName: true,
-        clinicAddress: true,
-        clinicPhone: true,
-        clinicEmail: true,
-        clinicLogo: true,
-        degree: true,
-        specialization: true,
-        licenseNo: true,
-      },
-    });
-    if (!user) {
-      res.status(401).json({ success: false, error: 'User not found' });
-      return;
-    }
+async function handleMe(req: AuthRequest, res: Response): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user!.id },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      clinicId: true,
+      isActive: true,
+      isApproved: true,
+      accountStatus: true,
+      phone: true,
+      clinicName: true,
+      clinicAddress: true,
+      clinicPhone: true,
+      clinicEmail: true,
+      clinicLogo: true,
+      title: true,
+      degree: true,
+      specialization: true,
+      licenseNo: true,
+      professionalVerified: true,
+      professionalVerifiedAt: true,
+    },
+  });
+  if (!user) {
+    res.status(401).json({ success: false, error: 'User not found' });
+    return;
+  }
 
-    if (user.role === 'TENANT' && !user.clinicId) {
-      res.status(403).json({ success: false, error: 'Account is missing clinic assignment' });
-      return;
-    }
+  if (user.role === 'TENANT' && !user.clinicId) {
+    res.status(403).json({ success: false, error: 'Account is missing clinic assignment' });
+    return;
+  }
 
-    const scopeClinicId = req.effectiveClinicId ?? user.clinicId;
-    const tenant = await subscriptionTenantPayload(scopeClinicId);
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        clinicId: user.clinicId,
-        name: user.name,
-        phone: user.phone,
-        clinicName: user.clinicName,
-        isActive: user.isActive,
-        isApproved: user.isApproved,
-      },
-      tenant,
-    });
-  })
-);
+  const scopeClinicId = req.effectiveClinicId ?? user.clinicId;
+  const tenant = await subscriptionTenantPayload(scopeClinicId);
+
+  let capabilities: string[];
+  if (user.role === 'SUPER_ADMIN') {
+    capabilities = ['*'];
+  } else if (req.effectiveCapabilities !== undefined && req.effectiveCapabilities.size > 0) {
+    capabilities = [...req.effectiveCapabilities];
+  } else if (req.jwtCapabilities?.length) {
+    capabilities = [...req.jwtCapabilities];
+  } else {
+    capabilities = await resolveJwtCapabilitiesForUser({ role: user.role, clinicId: user.clinicId });
+  }
+
+  res.json({
+    success: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      clinicId: user.clinicId,
+      name: user.name,
+      phone: user.phone,
+      clinicName: user.clinicName,
+      clinicAddress: user.clinicAddress,
+      clinicPhone: user.clinicPhone,
+      isActive: user.isActive,
+      isApproved: user.isApproved,
+      accountStatus: user.accountStatus,
+      title: user.title,
+      degree: user.degree,
+      specialization: user.specialization,
+      licenseNo: user.licenseNo,
+      professionalVerified: user.professionalVerified,
+      professionalVerifiedAt: user.professionalVerifiedAt,
+    },
+    tenant,
+    capabilities,
+  });
+}
+
+router.get('/me', authenticate, asyncRoute('auth.me', handleMe));
 
 router.put(
   '/profile',
@@ -754,6 +952,24 @@ router.put(
   validateBody(authProfileBodySchema),
   asyncRoute('auth.profile', async (req: AuthRequest, res) => {
     const body = req.body as AuthProfileBody;
+
+    const current = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { professionalVerified: true },
+    });
+    if (!current) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const touchesCredentials =
+      body.title !== undefined || body.degree !== undefined || body.specialization !== undefined;
+    if (current.professionalVerified && touchesCredentials) {
+      res.status(403).json({
+        error: 'Professional title and credentials are verified and can only be changed by a platform administrator.',
+      });
+      return;
+    }
 
     const user = await prisma.user.update({
       where: { id: req.user!.id },
@@ -766,8 +982,9 @@ router.put(
         ...(body.clinicEmail !== undefined
           ? { clinicEmail: body.clinicEmail === '' ? null : body.clinicEmail }
           : {}),
-        ...(body.degree !== undefined ? { degree: body.degree } : {}),
-        ...(body.specialization !== undefined ? { specialization: body.specialization } : {}),
+        ...(body.title !== undefined ? { title: sanitizeTitle(body.title) } : {}),
+        ...(body.degree !== undefined ? { degree: sanitizeDegree(body.degree) } : {}),
+        ...(body.specialization !== undefined ? { specialization: sanitizeSpecialization(body.specialization) } : {}),
         ...(body.licenseNo !== undefined ? { licenseNo: body.licenseNo } : {}),
       },
       select: {
@@ -779,9 +996,11 @@ router.put(
         clinicAddress: true,
         clinicPhone: true,
         clinicEmail: true,
+        title: true,
         degree: true,
         specialization: true,
         licenseNo: true,
+        professionalVerified: true,
       },
     });
 
