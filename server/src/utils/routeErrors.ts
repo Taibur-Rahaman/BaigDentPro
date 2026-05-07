@@ -37,6 +37,7 @@ export function handleRouteError(res: Response, err: unknown, logContext: string
   }
   if (
     process.env.DEBUG_AUTH_ERRORS === '1' &&
+    process.env.NODE_ENV !== 'production' &&
     (logContext.includes('auth.login') || logContext.includes('auth/login'))
   ) {
     const message = err instanceof Error ? err.message : String(err);

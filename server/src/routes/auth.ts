@@ -479,7 +479,8 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
 
     if (typeof user.password !== 'string' || user.password.length === 0) {
       console.error('[auth.login] user password missing/corrupt', { userId: user.id });
-      res.status(500).json({ error: 'User data corrupted', code: 'AUTH_PASSWORD_MISSING' });
+      logFailedLoginAttempt(req, email);
+      res.status(401).json({ error: 'Invalid credentials' });
       return;
     }
 
@@ -698,7 +699,7 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
   } catch (err) {
     console.error('[auth.login] AUTH LOGIN ERROR', err);
     const safeMsg = err instanceof Error ? err.message : String(err);
-    if (process.env.DEBUG_AUTH_ERRORS === '1') {
+    if (process.env.DEBUG_AUTH_ERRORS === '1' && process.env.NODE_ENV !== 'production') {
       res.status(500).json({ error: safeMsg, code: 'AUTH_INTERNAL_ERROR' });
       return;
     }
