@@ -6,10 +6,12 @@ import { requireRole } from '../middleware/requireRole.js';
 import { asyncRoute } from '../utils/routeErrors.js';
 import { activityTimelineQuerySchema } from '../validation/schemas.js';
 import { requireCapability } from '../middleware/requireCapability.js';
+import { blockReceptionist } from '../security/blockReceptionistRoutes.js';
 
 const router = Router();
 
 router.use(requireRole('CLINIC_ADMIN', 'SUPER_ADMIN', 'DOCTOR', 'RECEPTIONIST'));
+router.use(blockReceptionist);
 router.use(requireCapability('dpms:access'));
 
 router.get(

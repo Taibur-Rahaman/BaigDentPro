@@ -9,8 +9,10 @@ import { subscriptionUpgradeBodySchema, type SubscriptionUpgradeBody } from '../
 import { logActivity } from '../services/clinicActivityLogService.js';
 import { blockImpersonationBilling } from '../middleware/blockImpersonationBilling.js';
 import { applyVerifiedSubscriptionPayment } from '../services/subscriptionPaymentApply.js';
+import { blockReceptionist } from '../security/blockReceptionistRoutes.js';
 
 const router = Router();
+router.use(blockReceptionist);
 
 function resolveTargetClinicId(req: AuthRequest, body: SubscriptionUpgradeBody): string | null {
   if (req.user!.role === 'SUPER_ADMIN') {
