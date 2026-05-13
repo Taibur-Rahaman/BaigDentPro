@@ -13,6 +13,7 @@ import { writeAuditLog } from '../services/auditLogService.js';
 import { bumpSessionVersion } from '../services/sessionVersionService.js';
 import { revokeAllRefreshTokensForUser } from '../services/refreshTokenService.js';
 import { validateBody } from '../middleware/validateBody.js';
+import { normalizeLifecycle } from '../security/normalizeUserLifecycle.js';
 import {
   adminDisableClinicBodySchema,
   adminMasterLogoUpdateBodySchema,
@@ -726,7 +727,7 @@ router.put('/users/:id', requireCapability('clinic:users:manage'), async (req: A
         return res.status(404).json({ error: 'User not found' });
       }
       console.info('[admin.users.update] noop', { actorId: req.user!.id, targetId: id });
-      return res.json(unchanged);
+      return res.json(normalizeLifecycle(unchanged));
     }
 
     console.info('[admin.users.update]', {
@@ -786,7 +787,7 @@ router.put('/users/:id', requireCapability('clinic:users:manage'), async (req: A
       });
     }
 
-    res.json(user);
+    res.json(normalizeLifecycle(user));
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.includes('Password') || msg.includes('characters')) {

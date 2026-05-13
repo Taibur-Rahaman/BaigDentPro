@@ -12,6 +12,7 @@ import { sanitizeDegree, sanitizeSpecialization, sanitizeTitle } from '../utils/
 import { requireCapability } from '../middleware/requireCapability.js';
 import { CAPABILITIES, isCapabilityString } from '../security/capabilities.js';
 import { CAPABILITY_REQUIRES_FEATURE } from '../security/capabilityEngine.js';
+import { normalizeLifecycle } from '../security/normalizeUserLifecycle.js';
 
 const router = Router();
 
@@ -433,7 +434,7 @@ router.post(
         }
       });
 
-      res.json(user);
+      res.json(normalizeLifecycle(user));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
