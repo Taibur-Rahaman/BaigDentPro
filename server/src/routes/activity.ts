@@ -2,17 +2,21 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import { prisma } from '../index.js';
 import type { AuthRequest } from '../middleware/auth.js';
-import { requireRole } from '../middleware/requireRole.js';
 import { asyncRoute } from '../utils/routeErrors.js';
 import { activityTimelineQuerySchema } from '../validation/schemas.js';
 import { requireCapability } from '../middleware/requireCapability.js';
 import { blockReceptionist } from '../security/blockReceptionistRoutes.js';
+import { rbacGuardBuilder } from '../security/rbacGuardBuilder.js';
 
 const router = Router();
 
-router.use(requireRole('CLINIC_ADMIN', 'SUPER_ADMIN', 'DOCTOR', 'RECEPTIONIST'));
-router.use(blockReceptionist);
-router.use(requireCapability('dpms:access'));
+router.use(
+  ...rbacGuardBuilder({
+    roles: ['CLINIC_ADMIN', 'SUPER_ADMIN', 'DOCTOR', 'RECEPTIONIST'],
+    capability: 'dpms:access',
+    extra: [blockReceptionist],
+  }),
+);
 
 router.get(
   '/timeline',
