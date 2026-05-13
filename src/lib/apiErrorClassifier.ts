@@ -21,22 +21,20 @@ export function parseApiErrorJsonBody(rawBody: string): {
   }
 }
 
-/** Subscription / product feature gate (not RBAC): safe to degrade UI. */
+/**
+ * Product / subscription feature denial (never RBAC).
+ *
+ * Rules (strict):
+ * - HTTP **402** → treat as feature gate (server uses this for `productFeatureGate` denials).
+ * - Body `error === "FEATURE_DISABLED"` on any status **except 403** → soft feature denial.
+ * - HTTP **403** is **never** interpreted as feature-disabled — RBAC / session / tenancy only → hard.
+ */
 export function isFeatureDisabledError(e: unknown): boolean {
   if (!isApiHttpError(e)) return false;
+  if (e.status === 403) return false;
+  if (e.status === 402) return true;
   const parsed = parseApiErrorJsonBody(e.rawBody);
-  if (parsed?.error === 'FEATURE_DISABLED') return true;
-  /** Pre–402 productFeatureGate responses (deploy overlap). */
-  if (
-    e.status === 403 &&
-    parsed?.success === false &&
-    parsed.feature &&
-    typeof parsed.error === 'string' &&
-    parsed.error.includes('capability is not enabled')
-  ) {
-    return true;
-  }
-  return false;
+  return parsed?.error === 'FEATURE_DISABLED';
 }
 
 export function classifyApiError(e: unknown): ClassifiedApiFailure {

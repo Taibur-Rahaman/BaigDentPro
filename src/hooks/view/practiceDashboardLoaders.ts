@@ -1,6 +1,8 @@
 import api from '@/api';
+import { createPracticeListRegistry } from '@/lib/dashboardFetchRegistry';
+import { dashboardAggregatesParallel, dashboardEntityListPromiseAll } from '@/lib/dashboardPromiseAll';
 import { isApiHttpError } from '@/lib/apiErrors';
-import { safeFeatureCall } from '@/lib/safeFeatureCall';
+import { validateDashboardLoaderContract } from '@/lib/validateDashboardLoaderContract';
 import type {
   DashboardAppointmentChartPoint,
   DashboardRevenueChartPoint,
@@ -37,13 +39,6 @@ export interface PracticeListsLoadResult {
   labOrders: LabListPayload['labOrders'];
 }
 
-function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
-  if (result.status === 'rejected') {
-    throw result.reason;
-  }
-  return result.value;
-}
-
 /** API uses `invoices` (not `items`); matches {@link coreApiInvoicesList} response shape. */
 const EMPTY_INVOICES_LIST: InvoicesListPayload = { invoices: [], total: 0, page: 1, limit: 500 };
 const EMPTY_LAB_LIST: LabListPayload = { labOrders: [], total: 0, page: 1, limit: 500 };
@@ -52,31 +47,26 @@ const EMPTY_LAB_LIST: LabListPayload = { labOrders: [], total: 0, page: 1, limit
  * Parallel entity lists (transport shapes from api) — map to view models in the bundle hook.
  *
  * Core EMR calls (patients, appointments, prescriptions) are required: failures surface as load errors.
- * Feature-gated billing/lab lists use {@link safeFeatureCall} so subscription / product gates
+ * Feature-gated billing/lab lists use {@link safeFeatureCall} (via registry) so subscription / product gates
  * (`FEATURE_DISABLED` / HTTP 402) never take down the whole dashboard.
  */
 export async function loadPracticeLists(): Promise<PracticeListsLoadResult> {
-  const settled = await Promise.allSettled([
-    api.patients.list({ limit: 500 }),
-    api.appointments.list(),
-    api.prescriptions.list({ page: 1, limit: 500 }),
-    safeFeatureCall(() => api.invoices.list({ page: 1, limit: 500 }), EMPTY_INVOICES_LIST),
-    safeFeatureCall(() => api.lab.list({ page: 1, limit: 500 }), EMPTY_LAB_LIST),
-  ]);
+  const reg = createPracticeListRegistry();
+  reg.registerCoreFetch('patients', () => api.patients.list({ limit: 500 }));
+  reg.registerCoreFetch('appointments', () => api.appointments.list());
+  reg.registerCoreFetch('prescriptions', () => api.prescriptions.list({ page: 1, limit: 500 }));
+  reg.registerOptionalFetch('invoices', () => api.invoices.list({ page: 1, limit: 500 }), EMPTY_INVOICES_LIST);
+  reg.registerOptionalFetch('lab', () => api.lab.list({ page: 1, limit: 500 }), EMPTY_LAB_LIST);
 
-  const patientsRes = unwrapSettled(settled[0]);
-  const appointmentsRes = unwrapSettled(settled[1]);
-  const prescriptionsRes = unwrapSettled(settled[2]);
-  const invoicesRes = unwrapSettled(settled[3]);
-  const labRes = unwrapSettled(settled[4]);
+  const { core, optional } = reg.getMaps();
+  validateDashboardLoaderContract({
+    coreKeys: Array.from(core.keys()),
+    optionalKeys: Array.from(optional.keys()),
+    coreFactories: core,
+    optionalFactories: optional,
+  });
 
-  return {
-    patients: patientsRes.patients,
-    appointments: appointmentsRes,
-    prescriptions: prescriptionsRes.prescriptions,
-    invoices: invoicesRes.invoices,
-    labOrders: labRes.labOrders,
-  };
+  return dashboardEntityListPromiseAll(core, optional);
 }
 
 export interface DashboardAggregatesLoadResult {
@@ -88,7 +78,7 @@ export interface DashboardAggregatesLoadResult {
 
 /** Dashboard stats + chart series — map to view models in the bundle hook. */
 export async function loadDashboardAggregates(): Promise<DashboardAggregatesLoadResult> {
-  const [dashStats, dashRecent, revC, apptC] = await Promise.all([
+  const [dashStats, dashRecent, revC, apptC] = await dashboardAggregatesParallel([
     api.dashboard.stats().catch(nullOnError<DashboardStatsPayload>('dashboard.stats')),
     api.dashboard.recentPatients().catch(nullOnError<RecentPatientsPayload>('dashboard.recentPatients')),
     api.dashboard
