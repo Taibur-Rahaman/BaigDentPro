@@ -55,7 +55,26 @@ function resolveViteApiUrlFromEnvAndFiles(rootDir) {
     'VITE_API_URL'
   );
 
-  return shellBase || shellOrigin || localBase || localOrigin || prodBase || prodOrigin || null;
+  const deployDefaultBase = normalizeBaseOrOrigin(
+    readViteApiValueFromFile(rootDir, 'deploy/vite-api.production.env', 'VITE_API_BASE_URL'),
+    'VITE_API_BASE_URL'
+  );
+  const deployDefaultOrigin = normalizeBaseOrOrigin(
+    readViteApiValueFromFile(rootDir, 'deploy/vite-api.production.env', 'VITE_API_URL'),
+    'VITE_API_URL'
+  );
+
+  return (
+    shellBase ||
+    shellOrigin ||
+    localBase ||
+    localOrigin ||
+    prodBase ||
+    prodOrigin ||
+    deployDefaultBase ||
+    deployDefaultOrigin ||
+    null
+  );
 }
 
 function assertHttpUrl(label, value) {
