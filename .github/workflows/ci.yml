@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify required paths tracked (no orphan workspace modules)
+        run: npm run verify:ssot
+
       - name: Ops verify (no secrets in git)
         run: npm run ops:verify
 
