@@ -96,9 +96,9 @@ export function businessApiProductFeatures(req: Request, res: Response, next: Ne
 
   const enabled = authReq.clinicSubscription.productFeatures[feat];
   if (!enabled) {
-    res.status(403).json({
+    res.status(402).json({
       success: false,
-      error: 'This capability is not enabled for your subscription tier.',
+      error: 'FEATURE_DISABLED',
       feature: feat,
     });
     return;

@@ -1,5 +1,6 @@
 import api from '@/api';
 import { isApiHttpError } from '@/lib/apiErrors';
+import { safeFeatureCall } from '@/lib/safeFeatureCall';
 import type {
   DashboardAppointmentChartPoint,
   DashboardRevenueChartPoint,
@@ -19,22 +20,6 @@ function describeError(e: unknown): string {
   return String(e);
 }
 
-/** Subscription tier / RBAC may return 403 for individual modules; overview must still load. */
-function emptyOnForbidden<T>(fallback: T, label: string): (e: unknown) => T {
-  return (e: unknown) => {
-    if (isApiHttpError(e) && e.status === 403) {
-      if (import.meta.env.DEV) {
-        console.warn(`[dashboardLoader] ${label} → 403, using empty fallback`);
-      }
-      return fallback;
-    }
-    if (import.meta.env.DEV) {
-      console.warn(`[dashboardLoader] ${label} rejected: ${describeError(e)}`);
-    }
-    throw e;
-  };
-}
-
 function nullOnError<T>(label: string): (e: unknown) => T | null {
   return (e: unknown) => {
     if (import.meta.env.DEV) {
@@ -52,23 +37,39 @@ export interface PracticeListsLoadResult {
   labOrders: LabListPayload['labOrders'];
 }
 
-/** Parallel entity lists (transport shapes from api) — map to view models in the bundle hook. */
+function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
+  if (result.status === 'rejected') {
+    throw result.reason;
+  }
+  return result.value;
+}
+
+/** API uses `invoices` (not `items`); matches {@link coreApiInvoicesList} response shape. */
+const EMPTY_INVOICES_LIST: InvoicesListPayload = { invoices: [], total: 0, page: 1, limit: 500 };
+const EMPTY_LAB_LIST: LabListPayload = { labOrders: [], total: 0, page: 1, limit: 500 };
+
+/**
+ * Parallel entity lists (transport shapes from api) — map to view models in the bundle hook.
+ *
+ * Core EMR calls (patients, appointments, prescriptions) are required: failures surface as load errors.
+ * Feature-gated billing/lab lists use {@link safeFeatureCall} so subscription / product gates
+ * (`FEATURE_DISABLED` / HTTP 402) never take down the whole dashboard.
+ */
 export async function loadPracticeLists(): Promise<PracticeListsLoadResult> {
-  const [patientsRes, appointmentsRes, prescriptionsRes, invoicesRes, labRes] = await Promise.all([
-    api.patients
-      .list({ limit: 500 })
-      .catch(emptyOnForbidden({ patients: [], total: 0, page: 1, limit: 500 }, 'patients.list')),
-    api.appointments.list().catch(emptyOnForbidden([], 'appointments.list')),
-    api.prescriptions
-      .list({ page: 1, limit: 500 })
-      .catch(emptyOnForbidden({ prescriptions: [], total: 0, page: 1, limit: 500 }, 'prescriptions.list')),
-    api.invoices
-      .list({ page: 1, limit: 500 })
-      .catch(emptyOnForbidden({ invoices: [], total: 0, page: 1, limit: 500 }, 'invoices.list')),
-    api.lab
-      .list({ page: 1, limit: 500 })
-      .catch(emptyOnForbidden({ labOrders: [], total: 0, page: 1, limit: 500 }, 'lab.list')),
+  const settled = await Promise.allSettled([
+    api.patients.list({ limit: 500 }),
+    api.appointments.list(),
+    api.prescriptions.list({ page: 1, limit: 500 }),
+    safeFeatureCall(() => api.invoices.list({ page: 1, limit: 500 }), EMPTY_INVOICES_LIST),
+    safeFeatureCall(() => api.lab.list({ page: 1, limit: 500 }), EMPTY_LAB_LIST),
   ]);
+
+  const patientsRes = unwrapSettled(settled[0]);
+  const appointmentsRes = unwrapSettled(settled[1]);
+  const prescriptionsRes = unwrapSettled(settled[2]);
+  const invoicesRes = unwrapSettled(settled[3]);
+  const labRes = unwrapSettled(settled[4]);
+
   return {
     patients: patientsRes.patients,
     appointments: appointmentsRes,
