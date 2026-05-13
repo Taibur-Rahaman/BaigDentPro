@@ -10,6 +10,10 @@ import {
   type AdminUserDirectorySortKey,
 } from '@/types/adminUsersDirectory';
 import { useAuth } from '@/hooks/useAuth';
+import {
+  normalizeUserLifecycle,
+  normalizeUserLifecycleList,
+} from '@/lib/normalizeUserLifecycle';
 
 function expandLifecyclePatchForOptimistic(row: AdminUserRow, patch: Record<string, unknown>): Record<string, unknown> {
   if (typeof patch.accountStatus !== 'string') return patch;
@@ -36,7 +40,7 @@ function mergeAdminUserRow(row: AdminUserRow, patch: Record<string, unknown>): A
   if (typeof effective.role === 'string') next = { ...next, role: effective.role };
   if (typeof effective.clinicId === 'string') next = { ...next, clinicId: effective.clinicId };
   if (typeof effective.name === 'string') next = { ...next, name: effective.name };
-  return next;
+  return normalizeUserLifecycle(next);
 }
 
 function useDebouncedValue<T>(value: T, ms: number): T {
@@ -113,7 +117,7 @@ export function useAdminUsersDashboardView(options?: { defaultLimit?: number }) 
         sort: sortApplied,
         ...(searchApplied ? { search: searchApplied } : {}),
       });
-      setRows(res.users);
+      setRows(normalizeUserLifecycleList(res.users));
       setTotal(res.total);
     } catch (e) {
       setRows([]);
