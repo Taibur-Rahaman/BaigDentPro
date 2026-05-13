@@ -3,10 +3,28 @@ import { prisma } from '../index.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { resolveBusinessClinicId } from '../utils/requestClinic.js';
 import { requireCapability } from '../middleware/requireCapability.js';
+import { rbacGuardBuilder } from '../security/rbacGuardBuilder.js';
 
 const router = Router();
 
-router.use(requireCapability('dpms:access'));
+/**
+ * Router-level role gate (replaces a router-level `requireCapability('dpms:access')`
+ * which silently 403'd entire clinics whenever `patient_management` product feature
+ * was disabled via override). Per-endpoint capability checks remain on analytics
+ * endpoints below. Other DPMS routers (patients, appointments, ...) gate on the same
+ * role surface via clinical-rbac middlewares, so this matches existing convention.
+ */
+const DASHBOARD_ROLES: readonly string[] = [
+  'SUPER_ADMIN',
+  'CLINIC_ADMIN',
+  'CLINIC_OWNER',
+  'DOCTOR',
+  'RECEPTIONIST',
+  'LAB_TECH',
+  'DENTAL_ASSISTANT',
+];
+
+router.use(...rbacGuardBuilder({ roles: DASHBOARD_ROLES }));
 
 router.get('/stats', async (req: AuthRequest, res) => {
   try {
