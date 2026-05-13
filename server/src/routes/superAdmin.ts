@@ -2,11 +2,33 @@ import { Router } from 'express';
 import { prisma, prismaBase } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { requireRole } from '../middleware/requireRole.js';
+import { validateBody } from '../middleware/validateBody.js';
+import { approveSignupBodySchema, superAdminCapabilityOverridesPutBodySchema, type ApproveSignupBody } from '../validation/schemas.js';
 import { deleteSupabaseUserByEmail, inviteSupabaseUserIfAbsent } from '../services/supabaseAuthSync.js';
 import { writeAuditLog } from '../services/auditLogService.js';
 import { auditSuperAdminPrismaBaseAccess } from '../utils/superAdminPrismaAudit.js';
+import { resetAllDemoClinics } from '../services/demoClinicReset.js';
+import { sanitizeDegree, sanitizeSpecialization, sanitizeTitle } from '../utils/professionalIdentity.js';
+import { requireCapability } from '../middleware/requireCapability.js';
+import { CAPABILITIES, isCapabilityString } from '../security/capabilities.js';
+import { CAPABILITY_REQUIRES_FEATURE } from '../security/capabilityEngine.js';
 
 const router = Router();
+
+async function findClinicById(clinicId: string) {
+  return prisma.clinic.findUnique({ where: { id: clinicId }, select: { id: true } });
+}
+
+/** Last occurrence wins — avoids Prisma unique violations on duplicate keys in one payload. */
+function dedupeCapabilityOverrides(
+  rows: readonly { capabilityKey: string; grant: boolean }[],
+): { capabilityKey: string; grant: boolean }[] {
+  const map = new Map<string, boolean>();
+  for (const row of rows) {
+    map.set(row.capabilityKey, row.grant);
+  }
+  return [...map.entries()].map(([capabilityKey, grant]) => ({ capabilityKey, grant }));
+}
 
 router.use(authenticate);
 router.use(requireRole('SUPER_ADMIN'));
@@ -24,6 +46,87 @@ router.use((req, res, next) => {
   });
   next();
 });
+
+router.get('/capabilities/catalog', requireCapability('system:admin'), (_req: AuthRequest, res) => {
+  res.json({
+    capabilities: CAPABILITIES.map((key) => ({
+      key,
+      requiresProductFeature: CAPABILITY_REQUIRES_FEATURE[key] ?? null,
+    })),
+  });
+});
+
+router.get(
+  '/clinics/:clinicId/capability-overrides',
+  requireCapability('system:admin'),
+  async (req: AuthRequest, res) => {
+    try {
+      const { clinicId } = req.params;
+      const clinic = await findClinicById(clinicId);
+      if (!clinic) {
+        res.status(404).json({ error: 'Clinic not found' });
+        return;
+      }
+      const overrides = await prisma.clinicCapabilityOverride.findMany({
+        where: { clinicId },
+        select: { capabilityKey: true, grant: true },
+        orderBy: { capabilityKey: 'asc' },
+      });
+      res.json({ clinicId, overrides });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: msg });
+    }
+  },
+);
+
+router.put(
+  '/clinics/:clinicId/capability-overrides',
+  requireCapability('system:admin'),
+  validateBody(superAdminCapabilityOverridesPutBodySchema),
+  async (req: AuthRequest, res) => {
+    try {
+      const { clinicId } = req.params;
+      const clinic = await findClinicById(clinicId);
+      if (!clinic) {
+        res.status(404).json({ error: 'Clinic not found' });
+        return;
+      }
+      const raw = (req.body as { overrides: { capabilityKey: string; grant: boolean }[] }).overrides;
+      const overrides = dedupeCapabilityOverrides(raw);
+      for (const row of overrides) {
+        if (!isCapabilityString(row.capabilityKey)) {
+          res.status(400).json({ error: `Unknown capability: ${row.capabilityKey}` });
+          return;
+        }
+      }
+      await prisma.$transaction(async (tx) => {
+        await tx.clinicCapabilityOverride.deleteMany({ where: { clinicId } });
+        if (overrides.length > 0) {
+          await tx.clinicCapabilityOverride.createMany({
+            data: overrides.map((o) => ({
+              clinicId,
+              capabilityKey: o.capabilityKey,
+              grant: o.grant,
+            })),
+          });
+        }
+      });
+      void writeAuditLog({
+        userId: req.user!.id,
+        clinicId,
+        action: 'SUPER_ADMIN_CAPABILITY_OVERRIDES',
+        entityType: 'CLINIC',
+        entityId: clinicId,
+        metadata: { count: overrides.length },
+      });
+      res.json({ ok: true, clinicId, count: overrides.length });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: msg });
+    }
+  },
+);
 
 // List all clinics (users) with basic stats
 router.get('/clinics', async (req: AuthRequest, res) => {
@@ -49,6 +152,7 @@ router.get('/clinics', async (req: AuthRequest, res) => {
         orderBy: { createdAt: 'desc' },
         select: {
           id: true,
+          clinicId: true,
           email: true,
           name: true,
           role: true,
@@ -188,7 +292,11 @@ router.get('/activity-logs', async (req: AuthRequest, res) => {
 router.get('/pending-signups', async (_req: AuthRequest, res) => {
   try {
     const pending = await prisma.user.findMany({
-      where: { isApproved: false },
+      where: {
+        role: { not: 'SUPER_ADMIN' },
+        /** Must match reject-signup guard (`!isApproved`). Do not include approved rows — OR `accountStatus: PENDING` alone matched approved users stuck with legacy PENDING status and made Reject return 400. */
+        isApproved: false,
+      },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
@@ -196,8 +304,13 @@ router.get('/pending-signups', async (_req: AuthRequest, res) => {
         name: true,
         phone: true,
         clinicName: true,
+        title: true,
+        degree: true,
+        specialization: true,
+        professionalVerified: true,
         role: true,
         clinicId: true,
+        accountStatus: true,
         createdAt: true,
         clinic: { select: { id: true, name: true } },
       },
@@ -208,52 +321,124 @@ router.get('/pending-signups', async (_req: AuthRequest, res) => {
   }
 });
 
-router.post('/users/:id/approve-signup', async (req: AuthRequest, res) => {
-  try {
-    const { id } = req.params;
-    const existing = await prisma.user.findUnique({ where: { id } });
-    if (!existing) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    if (existing.isApproved) {
-      return res.status(400).json({ error: 'Account is already approved' });
-    }
-    const user = await prisma.user.update({
-      where: { id },
-      data: { isApproved: true },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        clinicName: true,
-        clinicId: true,
-        isApproved: true,
-      },
-    });
-    await prisma.activityLog
-      .create({
-        data: {
-          userId: req.user!.id,
-          action: 'SUPER_ADMIN_APPROVE_SIGNUP',
-          entity: 'USER',
-          entityId: id,
-          details: JSON.stringify({ email: user.email }),
+router.post(
+  '/users/:id/approve-signup',
+  validateBody(approveSignupBodySchema),
+  async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const body = req.body as ApproveSignupBody;
+      const existing = await prisma.user.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          email: true,
+          isApproved: true,
+          clinicId: true,
         },
-      })
-      .catch(() => {});
-
-    void inviteSupabaseUserIfAbsent(user.email).then((r) => {
-      if (r.invited) {
-        console.log('[approve-signup] Supabase invite sent for', user.email);
+      });
+      if (!existing) {
+        return res.status(404).json({ error: 'User not found' });
       }
-    });
+      if (existing.isApproved) {
+        return res.status(400).json({ error: 'Account is already approved' });
+      }
 
-    res.json(user);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+      const now = new Date();
+      const user = await prisma.$transaction(async (tx) => {
+        if (body.catalogPlanName && existing.clinicId) {
+          const plan = await tx.plan.findUnique({ where: { name: body.catalogPlanName } });
+          if (!plan) {
+            throw new Error(`Plan ${body.catalogPlanName} not found. Run database seed.`);
+          }
+          await tx.subscription.upsert({
+            where: { clinicId: existing.clinicId },
+            create: {
+              clinicId: existing.clinicId,
+              planId: plan.id,
+              plan: plan.name,
+              status: 'ACTIVE',
+              startDate: now,
+            },
+            update: {
+              planId: plan.id,
+              plan: plan.name,
+              status: 'ACTIVE',
+              startDate: now,
+              endDate: null,
+              expiresAt: null,
+            },
+          });
+          await tx.clinic.update({
+            where: { id: existing.clinicId },
+            data: { plan: plan.name },
+          });
+        }
+
+        const data = {
+          isApproved: true,
+          accountStatus: 'ACTIVE',
+          role: body.role,
+          ...(body.title !== undefined ? { title: sanitizeTitle(body.title) } : {}),
+          ...(body.degree !== undefined ? { degree: sanitizeDegree(body.degree) } : {}),
+          ...(body.specialization !== undefined ? { specialization: sanitizeSpecialization(body.specialization) } : {}),
+          ...(body.professionalVerified === true
+            ? { professionalVerified: true, professionalVerifiedAt: now }
+            : body.professionalVerified === false
+              ? { professionalVerified: false, professionalVerifiedAt: null }
+              : {}),
+        };
+
+        return tx.user.update({
+          where: { id },
+          data,
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            title: true,
+            degree: true,
+            specialization: true,
+            professionalVerified: true,
+            professionalVerifiedAt: true,
+            role: true,
+            clinicName: true,
+            clinicId: true,
+            isApproved: true,
+            accountStatus: true,
+          },
+        });
+      });
+
+      await prisma.activityLog
+        .create({
+          data: {
+            userId: req.user!.id,
+            action: 'SUPER_ADMIN_APPROVE_SIGNUP',
+            entity: 'USER',
+            entityId: id,
+            details: JSON.stringify({
+              email: user.email,
+              role: user.role,
+              catalogPlanName: body.catalogPlanName,
+              professionalVerified: user.professionalVerified,
+            }),
+          },
+        })
+        .catch(() => {});
+
+      void inviteSupabaseUserIfAbsent(user.email).then((r) => {
+        if (r.invited) {
+          console.log('[approve-signup] Supabase invite sent for', user.email);
+        }
+      });
+
+      res.json(user);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   }
-});
+);
 
 router.post('/users/:id/reject-signup', async (req: AuthRequest, res) => {
   try {
@@ -269,14 +454,20 @@ router.post('/users/:id/reject-signup', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Invalid operation' });
     }
     const clinicId = user.clinicId;
-    await deleteSupabaseUserByEmail(user.email);
-    await prisma.user.delete({ where: { id } });
-    if (clinicId) {
-      const remaining = await prisma.user.count({ where: { clinicId } });
-      if (remaining === 0) {
-        await prisma.clinic.delete({ where: { id: clinicId } }).catch(() => {});
+    const emailSnapshot = user.email;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.delete({ where: { id } });
+      if (clinicId) {
+        const remaining = await tx.user.count({ where: { clinicId } });
+        if (remaining === 0) {
+          await tx.clinic.delete({ where: { id: clinicId } }).catch(() => {});
+        }
       }
-    }
+    });
+
+    await deleteSupabaseUserByEmail(emailSnapshot);
+
     await prisma.activityLog
       .create({
         data: {
@@ -284,13 +475,34 @@ router.post('/users/:id/reject-signup', async (req: AuthRequest, res) => {
           action: 'SUPER_ADMIN_REJECT_SIGNUP',
           entity: 'USER',
           entityId: id,
-          details: JSON.stringify({ email: user.email }),
+          details: JSON.stringify({ email: emailSnapshot }),
         },
       })
       .catch(() => {});
+
+    void writeAuditLog({
+      userId: req.user!.id,
+      clinicId: null,
+      action: 'SUPER_ADMIN_REJECT_SIGNUP',
+      entityType: 'USER',
+      entityId: id,
+      metadata: { rejectedEmail: emailSnapshot },
+    });
+
+    console.info('[super-admin] reject-signup ok', { actorId: req.user!.id, rejectedUserId: id, email: emailSnapshot });
     res.json({ ok: true });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[super-admin] reject-signup failed', { error: msg });
+    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : '';
+    if (code === 'P2003') {
+      res.status(409).json({
+        error:
+          'Cannot delete this signup: related records still reference this user. Remove dependent data or contact support.',
+      });
+      return;
+    }
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -370,8 +582,10 @@ router.get('/doctors', async (req: AuthRequest, res) => {
           clinicName: true,
           clinicAddress: true,
           clinicPhone: true,
+          title: true,
           degree: true,
           specialization: true,
+          professionalVerified: true,
           isActive: true,
           createdAt: true,
           _count: {
@@ -393,7 +607,7 @@ router.get('/doctors', async (req: AuthRequest, res) => {
   }
 });
 
-router.put('/doctors/:id', async (req: AuthRequest, res) => {
+router.put('/doctors/:id', requireCapability('clinic:doctors:manage'), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const target = await prisma.user.findUnique({
@@ -407,17 +621,41 @@ router.put('/doctors/:id', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Cannot modify super admin account from this endpoint' });
     }
 
-    const { name, phone, clinicName, clinicAddress, clinicPhone, degree, specialization, isActive, role } = req.body as {
+    const {
+      name,
+      phone,
+      clinicName,
+      clinicAddress,
+      clinicPhone,
+      title,
+      degree,
+      specialization,
+      isActive,
+      role,
+      professionalVerified,
+    } = req.body as {
       name?: string;
       phone?: string;
       clinicName?: string;
       clinicAddress?: string;
       clinicPhone?: string;
-      degree?: string;
-      specialization?: string;
+      title?: string | null;
+      degree?: string | null;
+      specialization?: string | null;
       isActive?: boolean;
       role?: string;
+      professionalVerified?: boolean;
     };
+
+    const allowedRoles = new Set([
+      'DOCTOR',
+      'CLINIC_ADMIN',
+      'CLINIC_OWNER',
+      'STORE_MANAGER',
+      'RECEPTIONIST',
+      'LAB_TECH',
+      'DENTAL_ASSISTANT',
+    ]);
 
     const data: Record<string, unknown> = {};
     if (name !== undefined) data.name = String(name).trim();
@@ -425,11 +663,19 @@ router.put('/doctors/:id', async (req: AuthRequest, res) => {
     if (clinicName !== undefined) data.clinicName = clinicName ? String(clinicName).trim() : null;
     if (clinicAddress !== undefined) data.clinicAddress = clinicAddress ? String(clinicAddress).trim() : null;
     if (clinicPhone !== undefined) data.clinicPhone = clinicPhone ? String(clinicPhone).trim() : null;
-    if (degree !== undefined) data.degree = degree ? String(degree).trim() : null;
-    if (specialization !== undefined) data.specialization = specialization ? String(specialization).trim() : null;
+    if (title !== undefined) data.title = sanitizeTitle(title);
+    if (degree !== undefined) data.degree = sanitizeDegree(degree);
+    if (specialization !== undefined) data.specialization = sanitizeSpecialization(specialization);
     if (typeof isActive === 'boolean') data.isActive = isActive;
+    if (professionalVerified === true) {
+      data.professionalVerified = true;
+      data.professionalVerifiedAt = new Date();
+    } else if (professionalVerified === false) {
+      data.professionalVerified = false;
+      data.professionalVerifiedAt = null;
+    }
     if (role !== undefined) {
-      if (role !== 'DOCTOR' && role !== 'CLINIC_ADMIN') {
+      if (!allowedRoles.has(role)) {
         return res.status(400).json({ error: 'Invalid role' });
       }
       data.role = role;
@@ -448,8 +694,11 @@ router.put('/doctors/:id', async (req: AuthRequest, res) => {
         clinicName: true,
         clinicAddress: true,
         clinicPhone: true,
+        title: true,
         degree: true,
         specialization: true,
+        professionalVerified: true,
+        professionalVerifiedAt: true,
         isActive: true,
       },
     });
@@ -722,6 +971,80 @@ router.put('/prescriptions/:id', async (req: AuthRequest, res) => {
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/demo/reset', requireCapability('system:demo:reset'), async (req: AuthRequest, res) => {
+  try {
+    const r = await resetAllDemoClinics();
+    await prisma.activityLog
+      .create({
+        data: {
+          userId: req.user!.id,
+          action: 'SUPER_ADMIN_DEMO_RESET',
+          entity: 'CLINIC',
+          entityId: 'demo',
+          details: JSON.stringify({ clinicsReset: r.clinicsReset }),
+        },
+      })
+      .catch(() => {});
+    res.json({ ok: true, ...r });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Reset failed';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.patch('/clinics/:clinicId/plan-tier', async (req: AuthRequest, res) => {
+  try {
+    const tier = String((req.body as { planTier?: string })?.planTier ?? '').toUpperCase();
+    if (!['STARTER', 'GROWTH', 'ENTERPRISE'].includes(tier)) {
+      res.status(400).json({ error: 'planTier must be STARTER, GROWTH, or ENTERPRISE' });
+      return;
+    }
+    const clinic = await prisma.clinic.update({
+      where: { id: req.params.clinicId },
+      data: { planTier: tier },
+      select: { id: true, name: true, planTier: true },
+    });
+    res.json(clinic);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Update failed';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.put('/clinics/:clinicId/feature-flags/:featureKey', async (req: AuthRequest, res) => {
+  try {
+    const enabled = Boolean((req.body as { enabled?: boolean })?.enabled);
+    const row = await prisma.clinicFeatureFlag.upsert({
+      where: {
+        clinicId_featureKey: { clinicId: req.params.clinicId, featureKey: req.params.featureKey },
+      },
+      create: {
+        clinicId: req.params.clinicId,
+        featureKey: req.params.featureKey,
+        enabled,
+      },
+      update: { enabled },
+    });
+    res.json(row);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Update failed';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/clinics/:clinicId/feature-flags', async (req: AuthRequest, res) => {
+  try {
+    const rows = await prisma.clinicFeatureFlag.findMany({
+      where: { clinicId: req.params.clinicId },
+      orderBy: { featureKey: 'asc' },
+    });
+    res.json({ flags: rows });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Load failed';
+    res.status(500).json({ error: msg });
   }
 });
 

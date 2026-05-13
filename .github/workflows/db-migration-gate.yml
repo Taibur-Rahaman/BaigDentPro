@@ -1,0 +1,43 @@
+# Drift detection + migration integrity (optional DATABASE_URL / DIRECT_URL secrets).
+# Rule: if drift would block production deploy, fail early when secrets are configured.
+
+name: DB migration integrity
+
+on:
+  pull_request:
+    paths:
+      - "server/prisma/**"
+      - "server/scripts/db-drift-check.ts"
+      - "server/src/utils/envSecurity.ts"
+      - ".github/workflows/db-migration-gate.yml"
+  workflow_dispatch:
+
+jobs:
+  drift-and-status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate (server)
+        run: cd server && npx prisma generate
+
+      - name: Migrate status + drift gate (requires DATABASE_URL + DIRECT_URL secrets)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: |
+          if [ -z "${DATABASE_URL:-}" ] || [ -z "${DIRECT_URL:-}" ]; then
+            echo "::notice title=DB migration gate::Skipping — add DATABASE_URL and DIRECT_URL repository secrets to enforce drift checks."
+            exit 0
+          fi
+          cd server && npx prisma migrate status
+          cd server && npm run db:drift -- --fail-on-drift

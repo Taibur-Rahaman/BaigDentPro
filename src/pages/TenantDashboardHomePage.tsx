@@ -5,6 +5,7 @@ import { FeatureGate } from '@/components/FeatureGate';
 import { useCurrentUser } from '@/hooks/useCurrentUserApi';
 import { useOrders } from '@/hooks/useOrdersApi';
 import { useProducts } from '@/hooks/useProductsApi';
+import { canAccessCommerceOnlyAccount } from '@/lib/routeAccess';
 
 const formatMoney = (n: number) =>
   `৳${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
@@ -34,8 +35,8 @@ export const TenantDashboardHomePage: React.FC = () => {
   return (
     <div className="tenant-page">
       <div className="tenant-page-header">
-        <h1>Dashboard</h1>
-        <p className="tenant-page-lead">Overview of your catalog and tenant orders.</p>
+        <h1>Shop dashboard</h1>
+        <p className="tenant-page-lead">Catalog overview, SaaS tenant orders, and product profit estimates.</p>
         {me.user ? (
           <p className="tenant-page-lead" style={{ marginTop: 8, opacity: 0.85 }}>
             Signed in as <strong>{me.user.name}</strong> <span style={{ color: 'var(--neo-text-muted, #64748b)' }}>({me.user.email})</span>
@@ -89,10 +90,24 @@ export const TenantDashboardHomePage: React.FC = () => {
             </p>
           </FeatureGate>
 
-          <p className="tenant-practice-hint">
-            Need the full practice workspace (patients, appointments, prescriptions)?{' '}
-            <Link to="/dashboard/practice">Open practice dashboard</Link>
-          </p>
+          {me.user && !canAccessCommerceOnlyAccount(me.user.role) ? (
+            <div style={{ marginTop: '1.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+              <Link
+                to="/dashboard/appointments"
+                className="neo-btn neo-btn-primary"
+                style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}
+              >
+                <i className="fa-solid fa-stethoscope" aria-hidden /> Go to clinical dashboard
+              </Link>
+              <span className="tenant-page-lead" style={{ margin: 0 }}>
+                Patients, appointments, prescriptions &amp; billing
+              </span>
+            </div>
+          ) : (
+            <p className="tenant-practice-hint">
+              Need clinical tools? Ask your administrator for workspace access — this page stays focused on the shop catalog.
+            </p>
+          )}
         </>
       )}
     </div>

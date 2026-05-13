@@ -1,41 +1,22 @@
 import React, { useState } from 'react';
-import api from '@/api';
 import { useAuth } from '@/hooks/useAuth';
+import { type InviteStaffRole, parseInviteStaffRole, useInvitesDashboardView } from '@/hooks/view/useInvitesDashboardView';
 
 export const InvitesPage: React.FC = () => {
   const { user } = useAuth();
+  const { busy, message, error, sendInvite } = useInvitesDashboardView();
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'DOCTOR' | 'RECEPTIONIST' | 'ADMIN'>('DOCTOR');
+  const [role, setRole] = useState<InviteStaffRole>('DOCTOR');
   const [clinicId, setClinicId] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setMessage(null);
-    setBusy(true);
-    try {
-      const body: {
-        email: string;
-        role: 'DOCTOR' | 'RECEPTIONIST' | 'ADMIN';
-        clinicId?: string;
-      } = {
-        email: email.trim(),
-        role,
-      };
-      if (user?.role === 'SUPER_ADMIN' && clinicId.trim()) {
-        body.clinicId = clinicId.trim();
-      }
-      const res = await api.invite.create(body);
-      setMessage(`Invite sent. Link: ${res.acceptUrl}`);
-      setEmail('');
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Invite failed');
-    } finally {
-      setBusy(false);
-    }
+    const ok = await sendInvite({
+      email,
+      role,
+      clinicId: user?.role === 'SUPER_ADMIN' && clinicId.trim() ? clinicId : undefined,
+    });
+    if (ok) setEmail('');
   };
 
   return (
@@ -59,9 +40,16 @@ export const InvitesPage: React.FC = () => {
         </label>
         <label className="neo-field">
           <span>Role</span>
-          <select value={role} onChange={(e) => setRole(e.target.value as typeof role)}>
+          <select
+            value={role}
+            onChange={(e) => {
+              const next = parseInviteStaffRole(e.target.value);
+              if (next) setRole(next);
+            }}
+          >
             <option value="DOCTOR">Doctor</option>
             <option value="RECEPTIONIST">Receptionist</option>
+            <option value="STORE_MANAGER">Store manager (shop)</option>
             <option value="ADMIN">Clinic admin</option>
           </select>
         </label>

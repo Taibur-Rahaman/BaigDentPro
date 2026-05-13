@@ -14,6 +14,21 @@ router.use(requirePrescriptionsEmrAccess);
 
 const clinicRxScope = (req: AuthRequest) => ({ patient: { clinicId: resolveBusinessClinicId(req) } });
 
+function parseDoseNumber(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const n = Number.parseFloat(value.replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function validateItemDoseSafety(item: Record<string, unknown>): string | null {
+  const dose = parseDoseNumber(item.dosage);
+  const maxDailyDose = parseDoseNumber(item.maxDailyDose);
+  const allowOverride = item.allowDoseOverride === true;
+  if (dose === null || maxDailyDose === null || maxDailyDose <= 0) return null;
+  if (dose <= maxDailyDose || allowOverride) return null;
+  return 'Dosage exceeds configured max daily dose. Set allowDoseOverride=true to continue.';
+}
+
 router.get('/', async (req: AuthRequest, res) => {
   try {
     const { patientId, startDate, endDate, page = '1', limit = '20' } = req.query;
@@ -83,6 +98,13 @@ router.post('/', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Patient not found' });
     }
 
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        const err = validateItemDoseSafety((item ?? {}) as Record<string, unknown>);
+        if (err) return res.status(400).json({ error: err });
+      }
+    }
+
     const prescription = await prisma.prescription.create({
       data: {
         patientId,
@@ -104,7 +126,10 @@ router.post('/', async (req: AuthRequest, res) => {
             beforeFood: item.beforeFood || false,
             afterFood: item.afterFood || true,
             instructions: item.instructions,
-          })) || [],
+            maxDailyDose: item.maxDailyDose ?? null,
+            doctorNotes: item.doctorNotes ?? null,
+            allowDoseOverride: item.allowDoseOverride === true,
+          }) as any) || [],
         },
       },
       include: { patient: true, items: true },
@@ -119,6 +144,13 @@ router.post('/', async (req: AuthRequest, res) => {
 router.put('/:id', async (req: AuthRequest, res) => {
   try {
     const { diagnosis, chiefComplaint, examination, investigation, advice, followUpDate, vitals, items } = req.body;
+
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        const err = validateItemDoseSafety((item ?? {}) as Record<string, unknown>);
+        if (err) return res.status(400).json({ error: err });
+      }
+    }
 
     const existing = await prisma.prescription.findFirst({
       where: { id: req.params.id, ...clinicRxScope(req) },
@@ -150,7 +182,10 @@ router.put('/:id', async (req: AuthRequest, res) => {
             beforeFood: item.beforeFood || false,
             afterFood: item.afterFood || true,
             instructions: item.instructions,
-          })) || [],
+            maxDailyDose: item.maxDailyDose ?? null,
+            doctorNotes: item.doctorNotes ?? null,
+            allowDoseOverride: item.allowDoseOverride === true,
+          }) as any) || [],
         },
       },
       include: { patient: true, items: true },

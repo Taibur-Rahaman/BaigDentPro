@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import { ApiError } from '@/components/ApiError';
-import { userMessageFromUnknown } from '@/lib/apiErrors';
-import { fetchAdminAuditLogs, type AdminAuditLogRow } from '@/services/adminPanelService';
+import { useAdminAuditLogsView } from '@/hooks/view/useAdminAuditLogsView';
 
 function formatMeta(meta: unknown): string {
   if (meta === null || meta === undefined) return '—';
@@ -13,42 +12,24 @@ function formatMeta(meta: unknown): string {
   }
 }
 
-export const AdminAuditLogsPage: React.FC = () => {
-  const [rows, setRows] = useState<AdminAuditLogRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await fetchAdminAuditLogs({ page: 1, limit: 80 });
-      setRows(res.logs);
-      setTotal(res.total);
-    } catch (e) {
-      setRows([]);
-      setTotal(0);
-      setError(userMessageFromUnknown(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+export const AdminAuditLogsPage: React.FC<{ hideIntro?: boolean }> = ({ hideIntro }) => {
+  const { rows, total, loading, error, reload } = useAdminAuditLogsView(1, 80);
 
   return (
     <div className="tenant-page">
-      <div className="tenant-page-header">
-        <h1>Audit logs</h1>
-        <p className="tenant-page-lead">
-          Structured events from <code>/api/admin/audit-logs</code>. Review metadata carefully — upstream features may store operational fields.
-        </p>
-        {!loading && !error ? <p style={{ margin: 0, color: 'var(--neo-text-muted)' }}>Total: {total}</p> : null}
-      </div>
-      {error ? <ApiError message={error} title="Could not load audit logs" onRetry={() => void load()} /> : null}
+      {!hideIntro ? (
+        <div className="tenant-page-header">
+          <h1>Audit logs</h1>
+          <p className="tenant-page-lead">
+            Structured events from <code>/api/admin/audit-logs</code>. Review metadata carefully — upstream features may store
+            operational fields.
+          </p>
+          {!loading && !error ? <p style={{ margin: 0, color: 'var(--neo-text-muted)' }}>Total: {total}</p> : null}
+        </div>
+      ) : !loading && !error ? (
+        <p style={{ margin: '0 0 12px', color: 'var(--neo-text-muted)' }}>Total: {total}</p>
+      ) : null}
+      {error ? <ApiError message={error} title="Could not load audit logs" onRetry={() => void reload()} /> : null}
       {loading ? (
         <div className="tenant-loading" role="status">
           <div className="neo-loading-spinner tenant-spinner" />

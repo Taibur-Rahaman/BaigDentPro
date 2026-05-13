@@ -58,7 +58,11 @@ export function createApp(): express.Express {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
-  const allowedOrigins = new Set([...configuredOrigins, ...staticAllowedOrigins]);
+  const devLocalOrigins =
+    process.env.NODE_ENV !== 'production'
+      ? ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:4173', 'http://127.0.0.1:4173']
+      : [];
+  const allowedOrigins = new Set([...configuredOrigins, ...devLocalOrigins, ...staticAllowedOrigins]);
 
   if (process.env.NODE_ENV === 'production') {
     app.set('trust proxy', 1);
@@ -147,6 +151,17 @@ export function createApp(): express.Express {
   app.use('/api/auth', authLimiter);
 
   app.use(express.json({ limit: '10mb' }));
+  app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const e = err as Error & { status?: number; statusCode?: number; type?: string };
+    const code = e.status ?? e.statusCode;
+    const isJsonParse =
+      e.type === 'entity.parse.failed' || (e.name === 'SyntaxError' && code === 400);
+    if (isJsonParse) {
+      res.status(400).json({ error: e.message || 'Invalid request body' });
+      return;
+    }
+    next(err);
+  });
   app.use(express.urlencoded({ extended: true }));
   const uploadsDir = path.resolve(process.cwd(), 'uploads');
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -158,11 +173,16 @@ export function createApp(): express.Express {
   app.use(businessApiProductFeatures);
   app.use((req, res, next) => clinicTierRateLimiter()(req, res, next));
   app.use(autoActivityLogger);
-  app.use((req, _res, next) => {
-    const startedAt = new Date().toISOString();
-    console.info(`[${startedAt}] ${req.method} ${req.originalUrl}`);
-    next();
-  });
+  /** Per-request access logs: off in production unless DEBUG_HTTP_LOG=1 (reduces noise / log volume). */
+  const logEveryHttpRequest =
+    process.env.DEBUG_HTTP_LOG === '1' || process.env.NODE_ENV !== 'production';
+  if (logEveryHttpRequest) {
+    app.use((req, _res, next) => {
+      const startedAt = new Date().toISOString();
+      console.info(`[${startedAt}] ${req.method} ${req.originalUrl}`);
+      next();
+    });
+  }
 
   app.get('/', (_req, res) => {
     res.status(200).json({

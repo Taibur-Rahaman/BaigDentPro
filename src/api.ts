@@ -1,594 +1,514 @@
-import { getApiBaseUrl, HTML_API_ERROR } from '@/config/api';
-import { getSupabaseAccessToken } from '@/lib/supabaseClient';
-
-const DEBUG_API =
-  import.meta.env.DEV || (import.meta.env as { VITE_DEBUG_API?: string }).VITE_DEBUG_API === '1';
-
-/**
- * Base for legacy `api` client: `{getApiBaseUrl()}/api` or same-origin `/api` (dev / non-production modes only).
- * Route paths are like `/auth/login` (mounted under `/api` on the server).
- */
-function legacyApiRoot(): string {
-  const origin = getApiBaseUrl();
-  if (origin) return `${origin}/api`;
-  return '/api';
-}
-
-function assertNoSameOriginFallbackInProductionMode(): void {
-  if (!import.meta.env.PROD || import.meta.env.MODE !== 'production') return;
-  const origin = getApiBaseUrl();
-  if (!origin) {
-    throw new Error(
-      '[BaigDentPro] API origin is empty in a production-mode bundle. Set VITE_API_URL at build time.'
-    );
-  }
-}
-
-interface ApiOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  body?: any;
-  headers?: Record<string, string>;
-}
+import { API_BASE } from '@/config/api';
+import { coreApiBillingSubscription } from '@/lib/core';
+import type {
+  ClinicActivityLogsResponse,
+  ClinicProfile,
+  ClinicSubscriptionPayload,
+} from '@/types/clinicWorkspace';
+import type {
+  PatientPortalAppointmentRow,
+  PatientPortalInvoiceRow,
+  PatientPortalMedicalSection,
+  PatientPortalPaymentLinkResult,
+  PatientPortalProfile,
+} from '@/types/patientPortal';
+import type { OrganizationNode, NetworkStaffRole } from '@/types/network';
+import {
+  clearCoreApiSession,
+  coreApiActivityTimeline,
+  coreApiAdminAuditLogs,
+  coreApiAdminClinics,
+  coreApiAdminCreateUser,
+  coreApiAdminDisableClinic,
+  coreApiAdminMasterLogoGet,
+  coreApiAdminMasterLogoUpdate,
+  coreApiAdminPlatformOrders,
+  coreApiAdminStats,
+  coreApiAdminSubscriptionPaymentsList,
+  coreApiAdminSubscriptionPaymentPatch,
+  coreApiAdminSubscriptionsList,
+  coreApiAdminRevokeUserSessions,
+  coreApiAdminUpdateUser,
+  coreApiAdminUpgradePlan,
+  coreApiAdminUsers,
+  coreApiAppointmentById,
+  coreApiAppointmentCancel,
+  coreApiAppointmentComplete,
+  coreApiAppointmentConfirm,
+  coreApiAppointmentCreate,
+  coreApiAppointmentDelete,
+  coreApiAppointmentUpdate,
+  coreApiAppointmentsCalendar,
+  coreApiAppointmentsList,
+  coreApiAppointmentsToday,
+  coreApiAppointmentsUpcoming,
+  coreApiAuthChangePassword,
+  coreApiAuthMe,
+  coreApiAuthRegister,
+  coreApiAuthRegisterSaas,
+  coreApiAuthUpdateProfile,
+  coreApiBillingCheckout,
+  coreApiBillingStatus,
+  coreApiBootstrapStorage,
+  coreApiClinicActivityLogs,
+  coreApiClinicBranches,
+  coreApiClinicCreateBranch,
+  coreApiClinicDeleteBranch,
+  coreApiClinicProfileGet,
+  coreApiClinicProfileUpdate,
+  coreApiClinicSubscription,
+  coreApiClinicUpdateBranch,
+  type ClinicProfileUpdateInput,
+  corePatientPortalAppointmentBook,
+  corePatientPortalAppointmentCancel,
+  corePatientPortalAppointmentsList,
+  corePatientPortalInvoices,
+  corePatientPortalLogout,
+  corePatientPortalMedicalSummaryGet,
+  corePatientPortalPaymentLink,
+  corePatientPortalProfileGet,
+  corePatientPortalProfileUpdate,
+  corePatientPortalRefresh,
+  corePatientPortalRequestOtp,
+  corePatientPortalVerifyOtp,
+  type PatientPortalBookInput,
+  type PatientPortalProfileUpdate,
+  coreApiCommunicationAppointmentReminder,
+  coreApiCommunicationBulkReminders,
+  coreApiCommunicationEmailLogs,
+  coreApiCommunicationSendEmail,
+  coreApiCommunicationSendSms,
+  coreApiCommunicationSendWhatsApp,
+  coreApiCommunicationSmsLogs,
+  coreApiDashboardAppointmentChart,
+  coreApiDashboardRecentPatients,
+  coreApiDashboardRevenueChart,
+  coreApiDashboardStats,
+  coreApiDashboardToday,
+  coreApiDashboardTreatmentStats,
+  coreApiDiagnosticsTenantStatus,
+  coreApiHealthPing,
+  coreApiInviteAccept,
+  coreApiInviteCreate,
+  coreApiInvitePreview,
+  coreApiSettingsGet,
+  coreApiSettingsUpdate,
+  coreApiInvoiceAddPayment,
+  coreApiInvoiceById,
+  coreApiInvoiceCreate,
+  coreApiInvoiceDelete,
+  coreApiInvoiceSendEmail,
+  coreApiInvoiceSendWhatsApp,
+  coreApiInvoiceUpdate,
+  coreApiInvoicesList,
+  coreApiInvoicesStats,
+  coreApiLabCreate,
+  coreApiLabDelete,
+  coreApiLabList,
+  coreApiLabMarkDelivered,
+  coreApiLabMarkFitted,
+  coreApiLabMarkReady,
+  coreApiLabOrderById,
+  coreApiLabPending,
+  coreApiLabSendToLab,
+  coreApiLabStats,
+  coreApiLabUpdate,
+  coreApiLogin,
+  coreApiLogoutAllDevices,
+  coreApiManualRefreshSession,
+  coreApiPatientAddConsent,
+  coreApiPatientCreate,
+  coreApiPatientDelete,
+  coreApiPatientGet,
+  coreApiPatientTimeline,
+  coreApiPatientUpdate,
+  coreApiPatientUpdateDentalChart,
+  coreApiPatientUpdateMedicalHistory,
+  coreApiPatientsAddTreatmentPlan,
+  coreApiPatientsAddTreatmentRecord,
+  coreApiPatientsDeleteTreatmentPlan,
+  coreApiPatientsDeleteTreatmentRecord,
+  coreApiPatientsList,
+  coreApiPatientsUpdateTreatmentRecord,
+  coreApiPatientsUpdateTreatmentPlan,
+  coreApiManualPaymentInitiate,
+  coreApiPracticePatientWorkspaceHydration,
+  coreApiPrescriptionById,
+  coreApiPrescriptionCreate,
+  coreApiPrescriptionDelete,
+  coreApiPrescriptionSendEmail,
+  coreApiPrescriptionSendWhatsApp,
+  coreApiPrescriptionUpdate,
+  coreApiPrescriptionsList,
+  coreApiRemoteLogout,
+  coreApiSerializeMedicalHistoryForUpdate,
+  coreApiShopAdminCreateProduct,
+  coreApiShopAdminDeleteProduct,
+  coreApiShopAdminOrdersList,
+  coreApiShopAdminProductsList,
+  coreApiShopAdminStats,
+  coreApiShopAdminUpdateOrderStatus,
+  coreApiShopAdminUpdateProduct,
+  coreApiShopCart,
+  coreApiShopCartAdd,
+  coreApiShopCartClear,
+  coreApiShopCartRemove,
+  coreApiShopCartUpdate,
+  coreApiShopCheckout,
+  coreApiShopOrder,
+  coreApiShopOrdersByPhone,
+  coreApiShopProductBySlug,
+  coreApiShopProductCategories,
+  coreApiShopProductsList,
+  coreApiSubscriptionUpgrade,
+  coreApiSuperAdminActivityLogs,
+  coreApiSuperAdminCapabilitiesCatalog,
+  coreApiSuperAdminApproveSignup,
+  type ApproveSignupPayload,
+  coreApiSuperAdminChairUtilization,
+  coreApiSuperAdminClinics,
+  coreApiSuperAdminGetClinicCapabilityOverrides,
+  coreApiSuperAdminPutClinicCapabilityOverrides,
+  coreApiSuperAdminDemoReset,
+  coreApiSuperAdminDoctors,
+  coreApiSuperAdminPatients,
+  coreApiSuperAdminPendingSignups,
+  coreApiSuperAdminPrescriptions,
+  coreApiSuperAdminRejectSignup,
+  coreApiSuperAdminRevenueByBranch,
+  coreApiSuperAdminStats,
+  coreApiSuperAdminUpdateDoctor,
+  coreApiSuperAdminUpdatePatient,
+  coreApiSuperAdminUpdatePrescription,
+  coreApiSyncPrismaPassword,
+  coreApiTenantOrderById,
+  coreApiTenantOrderCreate,
+  coreApiTenantOrderRemove,
+  coreApiTenantOrdersList,
+  coreApiTenantProductById,
+  coreApiTenantProductCreate,
+  coreApiTenantProductRemove,
+  coreApiTenantUploadProductImage,
+  coreApiTenantProductUpdate,
+  coreApiTenantProductsList,
+  coreApiUiHydrateDashboardHeaderDraft,
+  coreApiUiHydrateDashboardPrintDraft,
+  coreApiUiHydrateFullPrescriptionPrintSetup,
+  coreApiUiHydratePrescriptionHeader,
+  coreApiUiLoadBillingProcedureList,
+  coreApiUiMergeDashboardHeaderClinicPatch,
+  coreApiUiMergeDashboardHeaderDoctorPatch,
+  coreApiUiPersistPrescriptionHeader,
+  coreApiUiPersistPrescriptionPrintSetup,
+  coreApiUiReadHeaderSettingsRecord,
+  coreApiUiSaveDashboardPrintOverrides,
+  activeBranchForClinic,
+  assertTenantIsolation,
+  branchScopedQueryKey,
+  buildDeterministicPatientSummary,
+  detectSchedulingGaps,
+  evaluateNetworkPermission,
+  findPossiblyUnbilledMarkers,
+  MOCK_ORG_ROLES,
+  resolveOrganizationTree,
+  suggestInvoiceLinesFromTreatmentNotes,
+  suggestSlotEfficiency,
+  suggestTriageFromSymptoms,
+  unifyPatientAcrossBranches,
+  type BillingLineSuggestion,
+  type PatientNarrativeBlock,
+  type SchedulingAssistantInput,
+  type SlotInsight,
+  type TriageSuggestion,
+  type ClinicSettings,
+  coreApiGetUserSnapshotJson,
+  coreApiSetUserSnapshotJson,
+  getAccessToken,
+  optimisticAppointmentFromForm,
+  optimisticPatientFromForm,
+  optimisticPrescriptionFromForm,
+  setCoreApiRefreshFailedLogoutHandler,
+} from '@/lib/apiClient';
 
 class ApiClient {
-  private token: string | null = null;
-  private sessionId: string;
-  private refreshPromise: Promise<boolean> | null = null;
+  health = {
+    ping: (signal?: AbortSignal) => coreApiHealthPing(signal),
+  };
 
-  constructor() {
-    this.token = localStorage.getItem('baigdentpro:token');
-    this.sessionId = localStorage.getItem('baigdentpro:sessionId') || this.generateSessionId();
-    localStorage.setItem('baigdentpro:sessionId', this.sessionId);
-  }
+  diagnostics = {
+    tenantStatus: () => coreApiDiagnosticsTenantStatus(),
+  };
 
-  private generateSessionId(): string {
-    return 'sess_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-  }
+  tenantProducts = {
+    list: () => coreApiTenantProductsList(),
+    get: (id: string) => coreApiTenantProductById(id),
+    uploadImage: (file: File, assetType?: 'general' | 'clinicLogo' | 'doctorLogo') =>
+      coreApiTenantUploadProductImage(file, assetType),
+    create: (name: string, price: number, costPrice?: number, imageUrl?: string | null) =>
+      coreApiTenantProductCreate(name, price, costPrice ?? 0, imageUrl),
+    update: (id: string, name: string, price: number, costPrice?: number) =>
+      coreApiTenantProductUpdate(id, name, price, costPrice),
+    remove: (id: string) => coreApiTenantProductRemove(id),
+  };
 
-  setToken(token: string | null) {
-    this.token = token;
-    if (token) {
-      localStorage.setItem('baigdentpro:token', token);
-    } else {
-      localStorage.removeItem('baigdentpro:token');
-    }
-  }
-
-  getToken() {
-    return this.token;
-  }
-
-  /** Rotate refresh token and replace access token; returns false if refresh is missing or invalid. */
-  private async refreshAccessToken(): Promise<boolean> {
-    if (this.refreshPromise) return this.refreshPromise;
-    const rawRt = typeof window !== 'undefined' ? window.localStorage.getItem('baigdentpro:refreshToken') : null;
-    const rt = rawRt?.trim();
-    if (!rt) return false;
-
-    const run = (async (): Promise<boolean> => {
-      try {
-        assertNoSameOriginFallbackInProductionMode();
-        const API_URL = legacyApiRoot();
-        const response = await fetch(`${API_URL}/auth/refresh`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-session-id': this.sessionId,
-          },
-          body: JSON.stringify({ refreshToken: rt }),
-        });
-        const text = await response.text();
-        if (!response.ok) {
-          return false;
-        }
-        const result = JSON.parse(text) as { token?: string; refreshToken?: string };
-        if (result.token) {
-          this.setToken(result.token);
-        }
-        if (result.refreshToken && typeof window !== 'undefined') {
-          window.localStorage.setItem('baigdentpro:refreshToken', result.refreshToken);
-        }
-        return Boolean(result.token);
-      } catch {
-        return false;
-      }
-    })();
-
-    this.refreshPromise = run;
-    try {
-      return await run;
-    } finally {
-      this.refreshPromise = null;
-    }
-  }
-
-  private clearAuthStorage(): void {
-    this.setToken(null);
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.removeItem('baigdentpro:user');
-        window.localStorage.removeItem('baigdentpro:refreshToken');
-        window.dispatchEvent(new CustomEvent('baigdentpro:auth-expired'));
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  async request<T>(endpoint: string, options: ApiOptions = {}, retryOnExpired = true): Promise<T> {
-    const { method = 'GET', body, headers = {} } = options;
-
-    assertNoSameOriginFallbackInProductionMode();
-    const API_URL = legacyApiRoot();
-
-    if (DEBUG_API) {
-      let baseLabel: string;
-      try {
-        baseLabel = getApiBaseUrl() || '(same-origin /api)';
-      } catch (e) {
-        baseLabel = e instanceof Error ? e.message : String(e);
-      }
-      console.log('API BASE:', baseLabel);
-      console.log('API Request:', `${API_URL}${endpoint}`);
-    }
-
-    const requestHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'x-session-id': this.sessionId,
-      ...headers,
-    };
-
-    if (!requestHeaders['Authorization']) {
-      const appToken = this.token?.trim();
-      const bearer = appToken || (await getSupabaseAccessToken()) || '';
-      if (bearer) {
-        requestHeaders['Authorization'] = `Bearer ${bearer}`;
-      }
-    }
-
-    let response: Response;
-    try {
-      response = await fetch(`${API_URL}${endpoint}`, {
-        method,
-        headers: requestHeaders,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    } catch (err) {
-      if (err instanceof TypeError) {
-        throw new Error(
-          'Cannot reach the API. Deploy the backend (Node + PostgreSQL) and set Hostinger build env VITE_API_URL to your API base if it is not on the same origin (e.g. https://api.yourdomain.com/api).'
-        );
-      }
-      throw err;
-    }
-
-    const text = await response.text();
-    const requestUrl = `${API_URL}${endpoint}`;
-    const isHtml =
-      (response.headers.get('content-type') || '').toLowerCase().includes('text/html') ||
-      /^\s*</.test(text);
-
-    if (isHtml) {
-      console.error('❌ HTML RESPONSE DETECTED:', {
-        url: requestUrl,
-        preview: text.slice(0, 200),
-      });
-      throw new Error(HTML_API_ERROR);
-    }
-
-    if (!response.ok) {
-      const status = response.status;
-      let message = 'Request failed';
-      try {
-        const parsed = JSON.parse(text) as { error?: string };
-        if (typeof parsed.error === 'string') message = parsed.error;
-      } catch {
-        if (text.length > 0 && text.length < 400) {
-          message = text;
-        }
-      }
-
-      const errorText = String(message).toLowerCase();
-      const isExpired =
-        status === 401 &&
-        this.token &&
-        (errorText.includes('token expired') || errorText.includes('jwt expired'));
-
-      if (isExpired && retryOnExpired && endpoint !== '/auth/refresh') {
-        const refreshed = await this.refreshAccessToken();
-        if (refreshed) {
-          return this.request<T>(endpoint, options, false);
-        }
-        this.clearAuthStorage();
-      }
-
-      // If the token is invalid/expired, clear auth state but don't hard-redirect.
-      if (status === 401 && this.token) {
-        if (
-          errorText.includes('invalid token') ||
-          errorText.includes('no token provided') ||
-          errorText.includes('user not found') ||
-          errorText.includes('unauthorized') ||
-          errorText.includes('token expired') ||
-          errorText.includes('refresh token')
-        ) {
-          if (!isExpired || !retryOnExpired) {
-            this.setToken(null);
-            if (typeof window !== 'undefined') {
-              try {
-                window.localStorage.removeItem('baigdentpro:user');
-                window.localStorage.removeItem('baigdentpro:refreshToken');
-                if (errorText.includes('refresh token')) {
-                  window.dispatchEvent(new CustomEvent('baigdentpro:auth-expired'));
-                }
-              } catch {
-                // ignore storage errors
-              }
-            }
-          }
-        }
-      }
-
-      if (status === 403 && this.token) {
-        const staleText = String(message).toLowerCase();
-        if (
-          staleText.includes('session is outdated') ||
-          staleText.includes('session is out of date') ||
-          staleText.includes('please sign in again')
-        ) {
-          this.clearAuthStorage();
-        }
-      }
-
-      throw new Error(message);
-    }
-
-    if (!text.trim()) {
-      return undefined as T;
-    }
-
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      if (DEBUG_API) {
-        console.warn('Non-JSON response preview:', text.slice(0, 200));
-      }
-      throw new Error(
-        'The server returned an invalid JSON body. If this persists, check the API URL and response shape.'
-      );
-    }
-  }
+  tenantOrders = {
+    list: () => coreApiTenantOrdersList(),
+    get: (id: string) => coreApiTenantOrderById(id),
+    create: (productId: string, quantity: number) => coreApiTenantOrderCreate(productId, quantity),
+    remove: (id: string) => coreApiTenantOrderRemove(id),
+  };
 
   auth = {
-    login: async (email: string, password: string) => {
-      const result = await this.request<{ user: any; token: string; refreshToken?: string }>('/auth/login', {
-        method: 'POST',
-        body: { email, password },
-      });
-      this.setToken(result.token);
-      if (result.refreshToken) {
-        localStorage.setItem('baigdentpro:refreshToken', result.refreshToken);
-      }
-      return result;
-    },
+    login: coreApiLogin,
 
-    register: async (data: { email: string; password: string; name: string; clinicName?: string; phone?: string }) => {
-      const result = await this.request<{
-        user: any;
-        token?: string;
-        pendingApproval?: boolean;
-        message?: string;
-      }>('/auth/register', {
-        method: 'POST',
-        body: data,
-      });
-      if (result.token) {
-        this.setToken(result.token);
-      }
-      return result;
-    },
+    register: coreApiAuthRegister,
 
     /** Instant SaaS tenant (approved + JWT). */
-    registerSaas: async (data: { email: string; password: string; name?: string }) => {
-      const result = await this.request<{ user: any; token: string; refreshToken?: string }>('/auth/register-saas', {
-        method: 'POST',
-        body: data,
-      });
-      this.setToken(result.token);
-      if (result.refreshToken) {
-        localStorage.setItem('baigdentpro:refreshToken', result.refreshToken);
-      }
-      return result;
-    },
+    registerSaas: coreApiAuthRegisterSaas,
 
-    me: async () => {
-      const raw = await this.request<any>('/auth/me');
-      if (raw && typeof raw === 'object' && raw.success === true && raw.user) {
-        return { ...raw.user, tenant: raw.tenant ?? null };
-      }
-      return raw;
-    },
+    me: coreApiAuthMe,
 
     /** Rotate refresh token; call after access JWT expires. Does not retry on 401. */
-    refreshSession: async () => {
-      const rt = localStorage.getItem('baigdentpro:refreshToken')?.trim();
-      if (!rt) {
-        this.clearAuthStorage();
-        throw new Error('No refresh token');
-      }
-      const result = await this.request<{ user: any; token: string; refreshToken?: string }>(
-        '/auth/refresh',
-        { method: 'POST', body: { refreshToken: rt } },
-        false
-      );
-      if (result.token) {
-        this.setToken(result.token);
-      }
-      if (result.refreshToken) {
-        localStorage.setItem('baigdentpro:refreshToken', result.refreshToken);
-      }
-      return result;
-    },
+    refreshSession: coreApiManualRefreshSession,
 
     /** Revoke all refresh tokens and invalidate access JWTs (requires valid access token). */
-    logoutAllDevices: async () => {
-      try {
-        await this.request<{ success?: boolean }>('/auth/logout-all', { method: 'POST', body: {} }, false);
-      } catch {
-        /* still clear local session */
-      }
-      this.clearAuthStorage();
-    },
+    logoutAllDevices: coreApiLogoutAllDevices,
 
-    updateProfile: (data: any) => this.request<any>('/auth/profile', { method: 'PUT', body: data }),
+    updateProfile: (data: Record<string, unknown>) => coreApiAuthUpdateProfile(data),
 
     changePassword: (currentPassword: string, newPassword: string) =>
-      this.request<any>('/auth/password', { method: 'PUT', body: { currentPassword, newPassword } }),
+      coreApiAuthChangePassword(currentPassword, newPassword),
 
-    logout: async () => {
-      const refreshToken = localStorage.getItem('baigdentpro:refreshToken') || undefined;
-      try {
-        await this.request<{ success?: boolean }>('/auth/logout', {
-          method: 'POST',
-          body: { refreshToken },
-        });
-      } catch {
-        /* still clear client session */
-      }
-      localStorage.removeItem('baigdentpro:refreshToken');
-      this.setToken(null);
-      localStorage.removeItem('baigdentpro:user');
-    },
-
-    /** After Supabase sign-in; server verifies JWT and returns app token. */
-    exchangeSupabaseSession: async (accessToken: string) => {
-      const result = await this.request<{ user: any; token: string; refreshToken?: string }>('/auth/supabase-session', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      this.setToken(result.token);
-      if (result.refreshToken) {
-        localStorage.setItem('baigdentpro:refreshToken', result.refreshToken);
-      }
-      return result;
-    },
+    logout: coreApiRemoteLogout,
 
     /** Keeps Prisma password hash aligned after Supabase password recovery. */
-    syncPrismaPassword: async (accessToken: string, password: string) =>
-      this.request<{ message: string }>('/auth/sync-prisma-password', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body: { password },
-      }),
+    syncPrismaPassword: coreApiSyncPrismaPassword,
+  };
+
+  /**
+   * Browser session + user snapshot — implemented in core client; UI must use only via this facade.
+   */
+  session = {
+    bootstrapStorage: coreApiBootstrapStorage,
+    clear: clearCoreApiSession,
+    getAccessToken,
+    getUserSnapshotJson: coreApiGetUserSnapshotJson,
+    setUserSnapshotJson: coreApiSetUserSnapshotJson,
+    setRefreshFailedHandler: setCoreApiRefreshFailedLogoutHandler,
+  };
+
+  /**
+   * Optimistic domain rows for demo/offline UX — implemented in `coreOptimisticFactory`; UI must only call these,
+   * never import the factory or `Practice*` construction paths from `@/lib/core`.
+   */
+  optimistic = {
+    patientFromForm: optimisticPatientFromForm,
+    appointmentFromForm: optimisticAppointmentFromForm,
+    prescriptionFromForm: optimisticPrescriptionFromForm,
   };
 
   patients = {
-    list: (params?: { search?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.search) query.set('search', params.search);
-      if (params?.page) query.set('page', String(params.page));
-      if (params?.limit) query.set('limit', String(params.limit));
-      return this.request<{ patients: any[]; total: number }>(`/patients?${query}`);
-    },
+    list: (params?: { search?: string; page?: number; limit?: number }) =>
+      coreApiPatientsList({
+        search: params?.search,
+        page: params?.page,
+        limit: params?.limit,
+      }),
 
-    get: (id: string) => this.request<any>(`/patients/${id}`),
+    get: (id: string) => coreApiPatientGet(id),
 
-    create: (data: any) => this.request<any>('/patients', { method: 'POST', body: data }),
+    /** Unified timeline (appointments, treatments, invoices, Rx, lab) — `GET /patients/:id/timeline`. */
+    timeline: (id: string) => coreApiPatientTimeline(id),
 
-    update: (id: string, data: any) => this.request<any>(`/patients/${id}`, { method: 'PUT', body: data }),
+    /** Normalized patient sub-documents for practice workspace (from `GET /patients/:id`). */
+    workspaceHydration: (id: string) => coreApiPracticePatientWorkspaceHydration(id),
 
-    delete: (id: string) => this.request<any>(`/patients/${id}`, { method: 'DELETE' }),
+    create: (data: Record<string, unknown>) => coreApiPatientCreate(data),
 
-    updateMedicalHistory: (id: string, data: any) =>
-      this.request<any>(`/patients/${id}/medical-history`, { method: 'PUT', body: data }),
+    update: (id: string, data: Record<string, unknown>) => coreApiPatientUpdate(id, data),
 
-    updateDentalChart: (id: string, data: any) =>
-      this.request<any>(`/patients/${id}/dental-chart`, { method: 'PUT', body: data }),
+    delete: (id: string) => coreApiPatientDelete(id),
 
-    addTreatmentPlan: (id: string, data: any) =>
-      this.request<any>(`/patients/${id}/treatment-plans`, { method: 'POST', body: data }),
+    updateMedicalHistory: (id: string, data: Record<string, unknown>) =>
+      coreApiPatientUpdateMedicalHistory(id, data),
 
-    updateTreatmentPlan: (id: string, planId: string, data: any) =>
-      this.request<any>(`/patients/${id}/treatment-plans/${planId}`, { method: 'PUT', body: data }),
+    updateDentalChart: (id: string, data: Record<string, unknown>) =>
+      coreApiPatientUpdateDentalChart(id, data),
 
-    deleteTreatmentPlan: (id: string, planId: string) =>
-      this.request<any>(`/patients/${id}/treatment-plans/${planId}`, { method: 'DELETE' }),
+    addTreatmentPlan: (id: string, data: Parameters<typeof coreApiPatientsAddTreatmentPlan>[1]) =>
+      coreApiPatientsAddTreatmentPlan(id, data),
 
-    addTreatmentRecord: (id: string, data: any) =>
-      this.request<any>(`/patients/${id}/treatment-records`, { method: 'POST', body: data }),
+    updateTreatmentPlan: (id: string, planId: string, data: Parameters<typeof coreApiPatientsUpdateTreatmentPlan>[2]) =>
+      coreApiPatientsUpdateTreatmentPlan(id, planId, data),
 
-    addConsent: (id: string, data: any) =>
-      this.request<any>(`/patients/${id}/consent`, { method: 'POST', body: data }),
+    deleteTreatmentPlan: (id: string, planId: string) => coreApiPatientsDeleteTreatmentPlan(id, planId),
+
+    addTreatmentRecord: (id: string, data: Parameters<typeof coreApiPatientsAddTreatmentRecord>[1]) =>
+      coreApiPatientsAddTreatmentRecord(id, data),
+
+    updateTreatmentRecord: (
+      id: string,
+      recordId: string,
+      data: Parameters<typeof coreApiPatientsUpdateTreatmentRecord>[2]
+    ) => coreApiPatientsUpdateTreatmentRecord(id, recordId, data),
+
+    deleteTreatmentRecord: (id: string, recordId: string) => coreApiPatientsDeleteTreatmentRecord(id, recordId),
+
+    addConsent: (id: string, data: Record<string, unknown>) => coreApiPatientAddConsent(id, data),
+
+    serializeMedicalHistoryForUpdate: (
+      data: Parameters<typeof coreApiSerializeMedicalHistoryForUpdate>[0]
+    ) => coreApiSerializeMedicalHistoryForUpdate(data),
   };
 
   appointments = {
-    list: (params?: { date?: string; startDate?: string; endDate?: string; status?: string }) => {
-      const query = new URLSearchParams();
-      if (params?.date) query.set('date', params.date);
-      if (params?.startDate) query.set('startDate', params.startDate);
-      if (params?.endDate) query.set('endDate', params.endDate);
-      if (params?.status) query.set('status', params.status);
-      return this.request<any[]>(`/appointments?${query}`);
-    },
+    list: (params?: { date?: string; startDate?: string; endDate?: string; status?: string }) =>
+      coreApiAppointmentsList(params),
 
-    today: () => this.request<any[]>('/appointments/today'),
+    today: () => coreApiAppointmentsToday(),
 
-    upcoming: (limit?: number) => this.request<any[]>(`/appointments/upcoming?limit=${limit || 10}`),
+    upcoming: (limit?: number) => coreApiAppointmentsUpcoming(limit ?? 10),
 
-    calendar: (month: number, year: number) =>
-      this.request<Record<string, any[]>>(`/appointments/calendar?month=${month}&year=${year}`),
+    calendar: (month: number, year: number) => coreApiAppointmentsCalendar(month, year),
 
-    get: (id: string) => this.request<any>(`/appointments/${id}`),
+    get: (id: string) => coreApiAppointmentById(id),
 
-    create: (data: any) => this.request<any>('/appointments', { method: 'POST', body: data }),
+    create: (data: Record<string, unknown>) => coreApiAppointmentCreate(data as Parameters<typeof coreApiAppointmentCreate>[0]),
 
-    update: (id: string, data: any) => this.request<any>(`/appointments/${id}`, { method: 'PUT', body: data }),
+    update: (id: string, data: Record<string, unknown>) => coreApiAppointmentUpdate(id, data),
 
-    delete: (id: string) => this.request<any>(`/appointments/${id}`, { method: 'DELETE' }),
+    delete: (id: string) => coreApiAppointmentDelete(id),
 
-    cancel: (id: string) => this.request<any>(`/appointments/${id}/cancel`, { method: 'POST' }),
+    cancel: (id: string) => coreApiAppointmentCancel(id),
 
-    complete: (id: string) => this.request<any>(`/appointments/${id}/complete`, { method: 'POST' }),
+    complete: (id: string) => coreApiAppointmentComplete(id),
 
-    confirm: (id: string) => this.request<any>(`/appointments/${id}/confirm`, { method: 'POST' }),
+    confirm: (id: string) => coreApiAppointmentConfirm(id),
   };
 
   prescriptions = {
-    list: (params?: { patientId?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.patientId) query.set('patientId', params.patientId);
-      if (params?.startDate) query.set('startDate', params.startDate);
-      if (params?.endDate) query.set('endDate', params.endDate);
-      if (params?.page) query.set('page', String(params.page));
-      if (params?.limit) query.set('limit', String(params.limit));
-      return this.request<{ prescriptions: any[]; total: number }>(`/prescriptions?${query}`);
-    },
+    list: (params?: { patientId?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) =>
+      coreApiPrescriptionsList({
+        patientId: params?.patientId,
+        startDate: params?.startDate,
+        endDate: params?.endDate,
+        page: params?.page,
+        limit: params?.limit,
+      }),
 
-    get: (id: string) => this.request<any>(`/prescriptions/${id}`),
+    get: (id: string) => coreApiPrescriptionById(id),
 
-    create: (data: any) => this.request<any>('/prescriptions', { method: 'POST', body: data }),
+    create: (data: Record<string, unknown>) => coreApiPrescriptionCreate(data),
 
-    update: (id: string, data: any) => this.request<any>(`/prescriptions/${id}`, { method: 'PUT', body: data }),
+    update: (id: string, data: Record<string, unknown>) => coreApiPrescriptionUpdate(id, data),
 
-    delete: (id: string) => this.request<any>(`/prescriptions/${id}`, { method: 'DELETE' }),
+    delete: (id: string) => coreApiPrescriptionDelete(id),
 
-    getPDF: (id: string) => `${legacyApiRoot()}/prescriptions/${id}/pdf`,
+    getPDF: (id: string) => `${API_BASE}/prescriptions/${id}/pdf`,
 
-    sendEmail: (id: string) => this.request<any>(`/prescriptions/${id}/send-email`, { method: 'POST' }),
+    sendEmail: (id: string) => coreApiPrescriptionSendEmail(id),
 
-    sendWhatsApp: (id: string) => this.request<any>(`/prescriptions/${id}/send-whatsapp`, { method: 'POST' }),
+    sendWhatsApp: (id: string) => coreApiPrescriptionSendWhatsApp(id),
   };
 
   invoices = {
-    list: (params?: { patientId?: string; status?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.patientId) query.set('patientId', params.patientId);
-      if (params?.status) query.set('status', params.status);
-      if (params?.page) query.set('page', String(params.page));
-      if (params?.limit) query.set('limit', String(params.limit));
-      return this.request<{ invoices: any[]; total: number }>(`/invoices?${query}`);
-    },
+    list: (params?: {
+      patientId?: string;
+      status?: string;
+      startDate?: string;
+      endDate?: string;
+      page?: number;
+      limit?: number;
+    }) =>
+      coreApiInvoicesList({
+        patientId: params?.patientId,
+        status: params?.status,
+        startDate: params?.startDate,
+        endDate: params?.endDate,
+        page: params?.page,
+        limit: params?.limit,
+      }),
 
-    stats: () => this.request<any>('/invoices/stats'),
+    stats: () => coreApiInvoicesStats(),
 
-    get: (id: string) => this.request<any>(`/invoices/${id}`),
+    get: (id: string) => coreApiInvoiceById(id),
 
-    create: (data: any) => this.request<any>('/invoices', { method: 'POST', body: data }),
+    create: (data: Record<string, unknown>) => coreApiInvoiceCreate(data),
 
-    update: (id: string, data: any) => this.request<any>(`/invoices/${id}`, { method: 'PUT', body: data }),
+    update: (id: string, data: Record<string, unknown>) => coreApiInvoiceUpdate(id, data),
 
-    delete: (id: string) => this.request<any>(`/invoices/${id}`, { method: 'DELETE' }),
+    delete: (id: string) => coreApiInvoiceDelete(id),
 
-    addPayment: (id: string, data: any) => this.request<any>(`/invoices/${id}/payments`, { method: 'POST', body: data }),
+    addPayment: (id: string, data: Record<string, unknown>) => coreApiInvoiceAddPayment(id, data),
 
-    getPDF: (id: string) => `${legacyApiRoot()}/invoices/${id}/pdf`,
+    getPDF: (id: string) => `${API_BASE}/invoices/${id}/pdf`,
 
-    sendEmail: (id: string) => this.request<any>(`/invoices/${id}/send-email`, { method: 'POST' }),
+    sendEmail: (id: string) => coreApiInvoiceSendEmail(id),
 
-    sendWhatsApp: (id: string) => this.request<any>(`/invoices/${id}/send-whatsapp`, { method: 'POST' }),
+    sendWhatsApp: (id: string) => coreApiInvoiceSendWhatsApp(id),
   };
 
   lab = {
-    list: (params?: { patientId?: string; status?: string; workType?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.patientId) query.set('patientId', params.patientId);
-      if (params?.status) query.set('status', params.status);
-      if (params?.workType) query.set('workType', params.workType);
-      if (params?.page) query.set('page', String(params.page));
-      if (params?.limit) query.set('limit', String(params.limit));
-      return this.request<{ labOrders: any[]; total: number }>(`/lab?${query}`);
-    },
+    list: (params?: { patientId?: string; status?: string; workType?: string; page?: number; limit?: number }) =>
+      coreApiLabList({
+        patientId: params?.patientId,
+        status: params?.status,
+        workType: params?.workType,
+        page: params?.page,
+        limit: params?.limit,
+      }),
 
-    pending: () => this.request<any[]>('/lab/pending'),
+    pending: () => coreApiLabPending(),
 
-    stats: () => this.request<any>('/lab/stats'),
+    stats: () => coreApiLabStats(),
 
-    get: (id: string) => this.request<any>(`/lab/${id}`),
+    get: (id: string) => coreApiLabOrderById(id),
 
-    create: (data: any) => this.request<any>('/lab', { method: 'POST', body: data }),
+    create: (data: Record<string, unknown>) => coreApiLabCreate(data),
 
-    update: (id: string, data: any) => this.request<any>(`/lab/${id}`, { method: 'PUT', body: data }),
+    update: (id: string, data: Record<string, unknown>) => coreApiLabUpdate(id, data),
 
-    delete: (id: string) => this.request<any>(`/lab/${id}`, { method: 'DELETE' }),
+    delete: (id: string) => coreApiLabDelete(id),
 
-    sendToLab: (id: string) => this.request<any>(`/lab/${id}/send-to-lab`, { method: 'POST' }),
+    sendToLab: (id: string) => coreApiLabSendToLab(id),
 
-    markReady: (id: string) => this.request<any>(`/lab/${id}/mark-ready`, { method: 'POST' }),
+    markReady: (id: string) => coreApiLabMarkReady(id),
 
-    markDelivered: (id: string) => this.request<any>(`/lab/${id}/mark-delivered`, { method: 'POST' }),
+    markDelivered: (id: string) => coreApiLabMarkDelivered(id),
 
-    markFitted: (id: string) => this.request<any>(`/lab/${id}/mark-fitted`, { method: 'POST' }),
+    markFitted: (id: string) => coreApiLabMarkFitted(id),
   };
 
   shop = {
-    products: (params?: { category?: string; search?: string; featured?: boolean; page?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.category) query.set('category', params.category);
-      if (params?.search) query.set('search', params.search);
-      if (params?.featured) query.set('featured', 'true');
-      if (params?.page) query.set('page', String(params.page));
-      return this.request<{ products: any[]; total: number }>(`/shop/products?${query}`);
-    },
+    products: (params?: { category?: string; search?: string; featured?: boolean; page?: number }) =>
+      coreApiShopProductsList(params),
 
-    categories: () => this.request<any[]>('/shop/products/categories'),
+    categories: () => coreApiShopProductCategories(),
 
-    product: (slug: string) => this.request<any>(`/shop/products/${slug}`),
+    product: (slug: string) => coreApiShopProductBySlug(slug),
 
-    cart: () => this.request<{ sessionId: string; items: any[]; total: number }>('/shop/cart'),
+    cart: () => coreApiShopCart(),
 
-    addToCart: (productId: string, quantity?: number) =>
-      this.request<any>('/shop/cart/add', { method: 'POST', body: { productId, quantity } }),
+    addToCart: (productId: string, quantity?: number) => coreApiShopCartAdd(productId, quantity),
 
-    updateCart: (productId: string, quantity: number) =>
-      this.request<any>('/shop/cart/update', { method: 'PUT', body: { productId, quantity } }),
+    updateCart: (productId: string, quantity: number) => coreApiShopCartUpdate(productId, quantity),
 
-    removeFromCart: (productId: string) => this.request<any>(`/shop/cart/remove/${productId}`, { method: 'DELETE' }),
+    removeFromCart: (productId: string) => coreApiShopCartRemove(productId),
 
-    clearCart: () => this.request<any>('/shop/cart/clear', { method: 'DELETE' }),
+    clearCart: () => coreApiShopCartClear(),
 
-    checkout: (data: any) => this.request<any>('/shop/checkout', { method: 'POST', body: data }),
+    checkout: (data: Record<string, unknown>) => coreApiShopCheckout(data),
 
-    order: (orderNo: string) => this.request<any>(`/shop/orders/${orderNo}`),
+    order: (orderNo: string) => coreApiShopOrder(orderNo),
 
-    ordersByPhone: (phone: string) => this.request<any[]>(`/shop/orders/phone/${phone}`),
+    ordersByPhone: (phone: string) => coreApiShopOrdersByPhone(phone),
   };
 
   shopAdmin = {
-    stats: () => this.request<{
-      products: { total: number; active: number; lowStock: number };
-      orders: { total: number; pending: number; today: number };
-      revenue: { total: number; today: number };
-      profit: { total: number };
-    }>('/shop/admin/stats'),
+    stats: () => coreApiShopAdminStats(),
 
-    products: (params?: { category?: string; search?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.category) query.set('category', params.category);
-      if (params?.search) query.set('search', params.search);
-      if (params?.page) query.set('page', String(params.page));
-      if (params?.limit) query.set('limit', String(params.limit));
-      return this.request<{ products: any[]; total: number }>(`/shop/admin/products?${query}`);
-    },
+    products: (params?: { category?: string; search?: string; page?: number; limit?: number }) =>
+      coreApiShopAdminProductsList(params),
 
     createProduct: (data: {
       name: string;
@@ -603,73 +523,60 @@ class ApiClient {
       images?: string[];
       stock?: number;
       isFeatured?: boolean;
-    }) => this.request<any>('/shop/admin/products', { method: 'POST', body: data }),
+    }) => coreApiShopAdminCreateProduct(data as Record<string, unknown>),
 
-    updateProduct: (id: string, data: any) =>
-      this.request<any>(`/shop/admin/products/${id}`, { method: 'PUT', body: data }),
+    updateProduct: (id: string, data: Record<string, unknown>) => coreApiShopAdminUpdateProduct(id, data),
 
-    deleteProduct: (id: string) =>
-      this.request<any>(`/shop/admin/products/${id}`, { method: 'DELETE' }),
+    deleteProduct: (id: string) => coreApiShopAdminDeleteProduct(id),
 
-    orders: (params?: { status?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.status) query.set('status', params.status);
-      if (params?.page) query.set('page', String(params.page));
-      if (params?.limit) query.set('limit', String(params.limit));
-      return this.request<{ orders: any[]; total: number }>(`/shop/admin/orders?${query}`);
-    },
+    orders: (params?: { status?: string; page?: number; limit?: number }) => coreApiShopAdminOrdersList(params),
 
     updateOrderStatus: (id: string, status: string, trackingNumber?: string) =>
-      this.request<any>(`/shop/admin/orders/${id}/status`, {
-        method: 'PUT',
-        body: { status, trackingNumber },
-      }),
+      coreApiShopAdminUpdateOrderStatus(id, status, trackingNumber),
   };
 
   communication = {
     sendSMS: (phone: string, message: string, type?: string) =>
-      this.request<any>('/communication/sms/send', { method: 'POST', body: { phone, message, type } }),
+      coreApiCommunicationSendSms(phone, message, type),
 
     sendAppointmentReminder: (appointmentId: string) =>
-      this.request<any>('/communication/sms/appointment-reminder', { method: 'POST', body: { appointmentId } }),
+      coreApiCommunicationAppointmentReminder(appointmentId),
 
-    sendBulkReminders: () => this.request<any>('/communication/sms/bulk-reminder', { method: 'POST' }),
+    sendBulkReminders: () => coreApiCommunicationBulkReminders(),
 
-    smsLogs: (page?: number) => this.request<any>(`/communication/sms/logs?page=${page || 1}`),
+    smsLogs: (page?: number) => coreApiCommunicationSmsLogs(page ?? 1),
 
     sendEmail: (to: string, subject: string, body: string, type?: string) =>
-      this.request<any>('/communication/email/send', { method: 'POST', body: { to, subject, body, type } }),
+      coreApiCommunicationSendEmail(to, subject, body, type),
 
-    emailLogs: (page?: number) => this.request<any>(`/communication/email/logs?page=${page || 1}`),
+    emailLogs: (page?: number) => coreApiCommunicationEmailLogs(page ?? 1),
 
-    sendWhatsApp: (phone: string, message: string) =>
-      this.request<any>('/communication/whatsapp/send', { method: 'POST', body: { phone, message } }),
+    sendWhatsApp: (phone: string, message: string) => coreApiCommunicationSendWhatsApp(phone, message),
   };
 
   dashboard = {
-    stats: () => this.request<any>('/dashboard/stats'),
+    stats: () => coreApiDashboardStats(),
 
-    today: () => this.request<any>('/dashboard/today'),
+    today: () => coreApiDashboardToday(),
 
-    recentPatients: () => this.request<any[]>('/dashboard/recent-patients'),
+    recentPatients: () => coreApiDashboardRecentPatients(),
 
-    revenueChart: (period?: 'daily' | 'monthly') => this.request<any[]>(`/dashboard/revenue-chart?period=${period || 'monthly'}`),
+    revenueChart: (period?: 'daily' | 'monthly') => coreApiDashboardRevenueChart(period ?? 'monthly'),
 
-    appointmentChart: () => this.request<any[]>('/dashboard/appointment-chart'),
+    appointmentChart: () => coreApiDashboardAppointmentChart(),
 
-    treatmentStats: () => this.request<any[]>('/dashboard/treatment-stats'),
+    treatmentStats: () => coreApiDashboardTreatmentStats(),
   };
 
   admin = {
-    users: (params?: { search?: string; role?: string; page?: number; limit?: number; clinicId?: string }) => {
-      const query = new URLSearchParams();
-      if (params?.search) query.set('search', params.search);
-      if (params?.role) query.set('role', params.role);
-      if (params?.page) query.set('page', String(params.page));
-      if (params?.limit) query.set('limit', String(params.limit));
-      if (params?.clinicId) query.set('clinicId', params.clinicId);
-      return this.request<{ users: any[]; total: number; page?: number; limit?: number }>(`/admin/users?${query}`);
-    },
+    users: (params?: {
+      search?: string;
+      role?: string;
+      page?: number;
+      limit?: number;
+      clinicId?: string;
+      sort?: string;
+    }) => coreApiAdminUsers(params),
 
     createUser: (data: {
       email: string;
@@ -678,96 +585,170 @@ class ApiClient {
       phone?: string;
       role?: 'DOCTOR' | 'CLINIC_ADMIN';
       clinicId?: string;
-    }) => this.request<any>('/admin/users', { method: 'POST', body: data }),
+    }) => coreApiAdminCreateUser(data as Record<string, unknown>),
 
     updateUser: (
       id: string,
-      data: { role?: string; clinicName?: string; phone?: string; isActive?: boolean; name?: string }
-    ) => this.request<any>(`/admin/users/${id}`, { method: 'PUT', body: data }),
+      data: {
+        role?: string;
+        clinicName?: string;
+        phone?: string;
+        isActive?: boolean;
+        name?: string;
+        clinicId?: string;
+        password?: string;
+        accountStatus?: string;
+        isApproved?: boolean;
+      }
+    ) => coreApiAdminUpdateUser(id, data as Record<string, unknown>),
 
-    clinics: () => this.request<{ clinics: { id: string; name: string; phone?: string | null; email?: string | null }[] }>('/admin/clinics'),
+    revokeUserSessions: (id: string) => coreApiAdminRevokeUserSessions(id),
+
+    clinics: () => coreApiAdminClinics(),
+
+    stats: () => coreApiAdminStats(),
+
+    platformOrders: (params?: { page?: number; limit?: number }) => coreApiAdminPlatformOrders(params),
+
+    auditLogs: (params?: { page?: number; limit?: number }) => coreApiAdminAuditLogs(params),
 
     /** Tenant subscription rows (`adminTenants` router); includes `planRef` when available. */
-    subscriptionsList: () => this.request<{ success: boolean; data: unknown[] }>('/admin/subscriptions'),
+    subscriptionsList: () => coreApiAdminSubscriptionsList(),
 
     upgradePlan: (body: { clinicId: string; planName: 'PLATINUM' | 'PREMIUM' | 'LUXURY' | 'FREE' }) =>
-      this.request<{ ok: boolean; clinicId: string; planName: string }>('/admin/upgrade-plan', { method: 'PUT', body }),
+      coreApiAdminUpgradePlan(body),
 
-    disableClinic: (body: { clinicId: string; disabled: boolean }) =>
-      this.request<{ ok: boolean; clinicId: string; isActive: boolean }>('/admin/disable-clinic', { method: 'POST', body }),
+    disableClinic: (body: { clinicId: string; disabled: boolean }) => coreApiAdminDisableClinic(body),
+    masterLogo: () => coreApiAdminMasterLogoGet(),
+    updateMasterLogo: (logo: string) => coreApiAdminMasterLogoUpdate(logo),
+
+    subscriptionPayments: (params?: { limit?: number }) => coreApiAdminSubscriptionPaymentsList(params),
+
+    subscriptionPaymentPatch: (id: string, body: { status: 'CONTACTED' | 'PAID' | 'REJECTED' }) =>
+      coreApiAdminSubscriptionPaymentPatch(id, body),
   };
 
   clinic = {
-    branches: () => this.request<{ branches: Array<{ id: string; clinicId: string; name: string; address?: string | null }> }>('/clinic/branches'),
-    createBranch: (body: { name: string; address?: string | null }) =>
-      this.request<{ branch: { id: string; name: string; address?: string | null } }>('/clinic/branches', { method: 'POST', body }),
-    updateBranch: (id: string, body: { name?: string; address?: string | null }) =>
-      this.request<{ branch: { id: string; name: string; address?: string | null } }>(`/clinic/branches/${id}`, {
-        method: 'PUT',
-        body,
-      }),
-    deleteBranch: (id: string) => this.request<{ ok: boolean }>(`/clinic/branches/${id}`, { method: 'DELETE' }),
-    subscription: () => this.request<{ clinic: unknown; subscription: unknown }>('/clinic/subscription'),
-    activityLogs: (params?: { page?: number; limit?: number; userId?: string; from?: string; to?: string }) => {
-      const q = new URLSearchParams();
-      if (params?.page) q.set('page', String(params.page));
-      if (params?.limit) q.set('limit', String(params.limit));
-      if (params?.userId) q.set('userId', params.userId);
-      if (params?.from) q.set('from', params.from);
-      if (params?.to) q.set('to', params.to);
-      return this.request<{ logs: unknown[]; total: number; page: number; limit: number }>(
-        `/clinic/activity-logs?${q.toString()}`
-      );
-    },
+    branches: () => coreApiClinicBranches(),
+    createBranch: (body: { name: string; address?: string | null }) => coreApiClinicCreateBranch(body),
+    updateBranch: (id: string, body: { name?: string; address?: string | null }) => coreApiClinicUpdateBranch(id, body),
+    deleteBranch: (id: string) => coreApiClinicDeleteBranch(id),
+    subscription: (): Promise<ClinicSubscriptionPayload> => coreApiClinicSubscription(),
+    activityLogs: (params?: {
+      page?: number;
+      limit?: number;
+      userId?: string;
+      from?: string;
+      to?: string;
+    }): Promise<ClinicActivityLogsResponse> => coreApiClinicActivityLogs(params),
+
+    getProfile: (): Promise<{ profile: ClinicProfile }> => coreApiClinicProfileGet(),
+
+    updateProfile: (body: ClinicProfileUpdateInput): Promise<{ profile: ClinicProfile }> =>
+      coreApiClinicProfileUpdate(body),
+  };
+
+  settings = {
+    get: (): Promise<ClinicSettings> => coreApiSettingsGet(),
+    update: (body: Partial<Omit<ClinicSettings, 'clinicId'>> & { ifMatchVersion?: string }): Promise<ClinicSettings> =>
+      coreApiSettingsUpdate(body),
+  };
+
+  patientPortal = {
+    requestOtp: (body: { phone: string; clinicId: string }) => corePatientPortalRequestOtp(body),
+
+    verifyOtp: (body: { phone: string; clinicId: string; code: string }) => corePatientPortalVerifyOtp(body),
+
+    refresh: () => corePatientPortalRefresh(),
+
+    logout: () => corePatientPortalLogout(),
+
+    getProfile: (): Promise<{ profile: PatientPortalProfile }> => corePatientPortalProfileGet(),
+
+    updateProfile: (body: PatientPortalProfileUpdate): Promise<{ profile: PatientPortalProfile }> =>
+      corePatientPortalProfileUpdate(body),
+
+    getMedicalSummary: (patientId: string): Promise<{ sections: PatientPortalMedicalSection[] }> =>
+      corePatientPortalMedicalSummaryGet(patientId),
+
+    listAppointments: (): Promise<{ appointments: PatientPortalAppointmentRow[] }> =>
+      corePatientPortalAppointmentsList(),
+
+    bookAppointment: (body: PatientPortalBookInput) => corePatientPortalAppointmentBook(body),
+
+    cancelAppointment: (id: string) => corePatientPortalAppointmentCancel(id),
+
+    listInvoices: (): Promise<{ invoices: PatientPortalInvoiceRow[] }> => corePatientPortalInvoices(),
+
+    paymentLink: (invoiceId: string): Promise<PatientPortalPaymentLinkResult> =>
+      corePatientPortalPaymentLink(invoiceId),
+  };
+
+  /** Deterministic AI helpers — suggestions only; no HTTP. */
+  ai = {
+    triageSymptoms: (symptoms: string): TriageSuggestion => suggestTriageFromSymptoms(symptoms),
+
+    schedulingSlot: (input: SchedulingAssistantInput): SlotInsight => suggestSlotEfficiency(input),
+
+    schedulingGaps: (busyMinuteMarks: number[]) => detectSchedulingGaps(busyMinuteMarks),
+
+    billingLines: (treatmentNotes: string): BillingLineSuggestion[] =>
+      suggestInvoiceLinesFromTreatmentNotes(treatmentNotes),
+
+    billingUnbilledMarkers: (treatments: string[], invoiceLabels: string[]) =>
+      findPossiblyUnbilledMarkers(treatments, invoiceLabels),
+
+    patientSummaryBlocks: (
+      parts: Parameters<typeof buildDeterministicPatientSummary>[0]
+    ): PatientNarrativeBlock[] => buildDeterministicPatientSummary(parts),
+  };
+
+  /** Hospital network graph (stub engines; server contracts TBD). */
+  network = {
+    organizationTree: (seed: OrganizationNode[]) => resolveOrganizationTree(seed),
+
+    tenantIsolationOk: (currentOrgId: string, resourceOrgId: string) =>
+      assertTenantIsolation(currentOrgId, resourceOrgId),
+
+    branchForClinic: (clinicId: string) => activeBranchForClinic(clinicId),
+
+    branchQueryKey: (clinicId: string, suffix: string) => branchScopedQueryKey(clinicId, suffix),
+
+    unifyPatients: (patientIds: string[]) => unifyPatientAcrossBranches(patientIds),
+
+    permission: (viewer: NetworkStaffRole[], scope: NetworkStaffRole['scope']) =>
+      evaluateNetworkPermission(viewer, scope),
+
+    mockRoles: MOCK_ORG_ROLES,
   };
 
   superAdmin = {
-    pendingSignups: () => this.request<{ pending: any[]; count: number }>('/super-admin/pending-signups'),
+    pendingSignups: () => coreApiSuperAdminPendingSignups(),
 
-    approveSignup: (userId: string) =>
-      this.request<any>(`/super-admin/users/${userId}/approve-signup`, { method: 'POST' }),
+    approveSignup: (userId: string, body?: ApproveSignupPayload) => coreApiSuperAdminApproveSignup(userId, body ?? {}),
 
-    rejectSignup: (userId: string) =>
-      this.request<{ ok: boolean }>(`/super-admin/users/${userId}/reject-signup`, { method: 'POST' }),
+    rejectSignup: (userId: string) => coreApiSuperAdminRejectSignup(userId),
 
-    stats: () => this.request<any>('/super-admin/stats'),
-    clinics: (params?: { search?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.search) query.set('search', params.search ?? '');
-      if (params?.page) query.set('page', String(params.page ?? 1));
-      if (params?.limit) query.set('limit', String(params.limit ?? 20));
-      return this.request<{ clinics: any[]; total: number; page: number; limit: number }>(`/super-admin/clinics?${query}`);
-    },
-    revenueByBranch: (params?: { startDate?: string; endDate?: string }) => {
-      const query = new URLSearchParams();
-      if (params?.startDate) query.set('startDate', params.startDate);
-      if (params?.endDate) query.set('endDate', params.endDate);
-      return this.request<{ branches: any[]; start: string; end: string }>(`/super-admin/revenue-by-branch?${query}`);
-    },
-    chairUtilization: (params?: { startDate?: string; endDate?: string }) => {
-      const query = new URLSearchParams();
-      if (params?.startDate) query.set('startDate', params.startDate);
-      if (params?.endDate) query.set('endDate', params.endDate);
-      return this.request<{ utilization: any[]; start: string; end: string }>(`/super-admin/chair-utilization?${query}`);
-    },
-    activityLogs: (params?: { userId?: string; action?: string; entity?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.userId) query.set('userId', params.userId);
-      if (params?.action) query.set('action', params.action);
-      if (params?.entity) query.set('entity', params.entity);
-      if (params?.page) query.set('page', String(params?.page ?? 1));
-      if (params?.limit) query.set('limit', String(params?.limit ?? 50));
-      return this.request<{ logs: any[]; total: number; page: number; limit: number }>(`/super-admin/activity-logs?${query}`);
-    },
+    demoReset: () => coreApiSuperAdminDemoReset(),
 
-    doctors: (params?: { search?: string; clinicId?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.search) query.set('search', params.search);
-      if (params?.clinicId) query.set('clinicId', params.clinicId);
-      if (params?.page) query.set('page', String(params?.page ?? 1));
-      if (params?.limit) query.set('limit', String(params?.limit ?? 20));
-      return this.request<{ doctors: any[]; total: number; page: number; limit: number }>(`/super-admin/doctors?${query}`);
-    },
+    capabilitiesCatalog: () => coreApiSuperAdminCapabilitiesCatalog(),
+    clinicCapabilityOverrides: (clinicId: string) => coreApiSuperAdminGetClinicCapabilityOverrides(clinicId),
+    putClinicCapabilityOverrides: (
+      clinicId: string,
+      overrides: { capabilityKey: string; grant: boolean }[]
+    ) => coreApiSuperAdminPutClinicCapabilityOverrides(clinicId, overrides),
+
+    stats: () => coreApiSuperAdminStats(),
+    clinics: (params?: { search?: string; page?: number; limit?: number }) => coreApiSuperAdminClinics(params),
+    revenueByBranch: (params?: { startDate?: string; endDate?: string }) =>
+      coreApiSuperAdminRevenueByBranch(params),
+    chairUtilization: (params?: { startDate?: string; endDate?: string }) =>
+      coreApiSuperAdminChairUtilization(params),
+    activityLogs: (params?: { userId?: string; action?: string; entity?: string; page?: number; limit?: number }) =>
+      coreApiSuperAdminActivityLogs(params),
+
+    doctors: (params?: { search?: string; clinicId?: string; page?: number; limit?: number }) =>
+      coreApiSuperAdminDoctors(params),
 
     updateDoctor: (
       id: string,
@@ -777,21 +758,17 @@ class ApiClient {
         clinicName?: string;
         clinicAddress?: string;
         clinicPhone?: string;
-        degree?: string;
-        specialization?: string;
+        title?: string | null;
+        degree?: string | null;
+        specialization?: string | null;
         isActive?: boolean;
-        role?: 'DOCTOR' | 'CLINIC_ADMIN';
+        professionalVerified?: boolean;
+        role?: 'DOCTOR' | 'CLINIC_ADMIN' | 'CLINIC_OWNER' | 'RECEPTIONIST' | 'LAB_TECH' | 'DENTAL_ASSISTANT';
       }
-    ) => this.request<any>(`/super-admin/doctors/${id}`, { method: 'PUT', body: data }),
+    ) => coreApiSuperAdminUpdateDoctor(id, data as Record<string, unknown>),
 
-    patients: (params?: { search?: string; doctorId?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.search) query.set('search', params.search);
-      if (params?.doctorId) query.set('doctorId', params.doctorId);
-      if (params?.page) query.set('page', String(params?.page ?? 1));
-      if (params?.limit) query.set('limit', String(params?.limit ?? 20));
-      return this.request<{ patients: any[]; total: number; page: number; limit: number }>(`/super-admin/patients?${query}`);
-    },
+    patients: (params?: { search?: string; doctorId?: string; page?: number; limit?: number }) =>
+      coreApiSuperAdminPatients(params),
 
     updatePatient: (
       id: string,
@@ -807,18 +784,10 @@ class ApiClient {
         referredBy?: string;
         notes?: string;
       }
-    ) => this.request<any>(`/super-admin/patients/${id}`, { method: 'PUT', body: data }),
+    ) => coreApiSuperAdminUpdatePatient(id, data as Record<string, unknown>),
 
-    prescriptions: (params?: { doctorId?: string; patientId?: string; page?: number; limit?: number }) => {
-      const query = new URLSearchParams();
-      if (params?.doctorId) query.set('doctorId', params.doctorId);
-      if (params?.patientId) query.set('patientId', params.patientId);
-      if (params?.page) query.set('page', String(params?.page ?? 1));
-      if (params?.limit) query.set('limit', String(params?.limit ?? 20));
-      return this.request<{ prescriptions: any[]; total: number; page: number; limit: number }>(
-        `/super-admin/prescriptions?${query}`
-      );
-    },
+    prescriptions: (params?: { doctorId?: string; patientId?: string; page?: number; limit?: number }) =>
+      coreApiSuperAdminPrescriptions(params),
 
     updatePrescription: (
       id: string,
@@ -841,23 +810,20 @@ class ApiClient {
           instructions?: string;
         }>;
       }
-    ) => this.request<any>(`/super-admin/prescriptions/${id}`, { method: 'PUT', body: data }),
+    ) => coreApiSuperAdminUpdatePrescription(id, data as Record<string, unknown>),
   };
 
   invite = {
-    preview: (token: string) =>
-      this.request<{ ok: boolean; clinicName: string; emailMasked: string; role: string }>(
-        `/invite/preview?token=${encodeURIComponent(token)}`
-      ),
+    preview: (token: string) => coreApiInvitePreview(token),
     create: (body: {
       email: string;
-      role: 'DOCTOR' | 'RECEPTIONIST' | 'ADMIN';
+      role: 'DOCTOR' | 'RECEPTIONIST' | 'ADMIN' | 'STORE_MANAGER';
       branchId?: string | null;
       clinicId?: string;
       expiresInDays?: number;
-    }) => this.request<{ success: boolean; invite: unknown; acceptUrl: string }>('/invite', { method: 'POST', body }),
+    }) => coreApiInviteCreate(body as Record<string, unknown>),
     accept: (body: { token: string; name: string; password: string }) =>
-      this.request<{ message: string; user: unknown }>('/invite/accept', { method: 'POST', body }),
+      coreApiInviteAccept(body as Record<string, unknown>),
   };
 
   subscription = {
@@ -867,43 +833,40 @@ class ApiClient {
       clinicId?: string;
       durationDays?: number;
       autoRenew?: boolean;
-      /** After Stripe succeeds, references the `SubscriptionPayment` row the webhook marked `SUCCESS`. */
+      /** After super-admin marks a manual WhatsApp payment `PAID`, optional reference. */
       verifiedPaymentId?: string;
-    }) => this.request<{ success: boolean; data: unknown }>('/subscription/upgrade', { method: 'POST', body }),
+    }) => coreApiSubscriptionUpgrade(body as Record<string, unknown>),
   };
 
   payment = {
-    initiate: (body: {
-      amount: number;
-      method: 'STRIPE';
-      planCode: string;
-      clinicId?: string;
-    }) =>
-      this.request<{
-        success: boolean;
-        data: {
-          payment: { id: string; clinicId: string; amount: number; method: string; status: string; planCode?: string | null; createdAt: string };
-          stripeClientSecret?: string;
-        };
-      }>('/payment/initiate', { method: 'POST', body }),
+    manualInitiate: (body: { planCode: string; clinicId?: string; amountMinor?: number }) =>
+      coreApiManualPaymentInitiate(body),
   };
 
   activity = {
-    timeline: (params?: { userId?: string; from?: string; to?: string; page?: number; limit?: number }) => {
-      const q = new URLSearchParams();
-      if (params?.userId) q.set('userId', params.userId);
-      if (params?.from) q.set('from', params.from);
-      if (params?.to) q.set('to', params.to);
-      if (params?.page) q.set('page', String(params.page));
-      if (params?.limit) q.set('limit', String(params.limit ?? 50));
-      return this.request<{ success: boolean; data: { items: unknown[]; total: number; page: number; limit: number } }>(
-        `/activity/timeline?${q}`
-      );
-    },
+    timeline: (params?: { userId?: string; from?: string; to?: string; page?: number; limit?: number }) =>
+      coreApiActivityTimeline(params),
   };
 
   billing = {
-    status: () => this.request<{ success: boolean; data: Record<string, unknown> }>('/billing/status'),
+    status: () => coreApiBillingStatus(),
+    subscription: () => coreApiBillingSubscription(),
+    checkout: (body: { planCode?: string }) => coreApiBillingCheckout(body),
+  };
+
+  /** Browser UI persistence for prescriptions/dashboard printing — delegated to core client. */
+  ui = {
+    hydrateDashboardHeaderDraft: coreApiUiHydrateDashboardHeaderDraft,
+    hydrateDashboardPrintDraft: coreApiUiHydrateDashboardPrintDraft,
+    readHeaderSettingsRecord: coreApiUiReadHeaderSettingsRecord,
+    mergeDashboardHeaderClinic: coreApiUiMergeDashboardHeaderClinicPatch,
+    mergeDashboardHeaderDoctor: coreApiUiMergeDashboardHeaderDoctorPatch,
+    saveDashboardPrintOverrides: coreApiUiSaveDashboardPrintOverrides,
+    loadBillingProcedureList: coreApiUiLoadBillingProcedureList,
+    hydratePrescriptionHeader: coreApiUiHydratePrescriptionHeader,
+    hydratePrescriptionPrintSetup: coreApiUiHydrateFullPrescriptionPrintSetup,
+    persistPrescriptionHeader: coreApiUiPersistPrescriptionHeader,
+    persistPrescriptionPrintSetup: coreApiUiPersistPrescriptionPrintSetup,
   };
 }
 

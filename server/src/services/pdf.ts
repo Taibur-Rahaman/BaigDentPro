@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { formatProviderCredentialSuffix, formatProviderPrimaryLine } from '../utils/professionalIdentity.js';
 
 export async function generatePrescriptionPDF(prescription: any): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -20,13 +21,20 @@ export async function generatePrescriptionPDF(prescription: any): Promise<Buffer
       }
 
       doc.moveDown();
-      doc.font('Helvetica-Bold').fontSize(14).text(`Dr. ${prescription.user.name}`, { align: 'center' });
-      
-      if (prescription.user.degree) {
-        doc.font('Helvetica').fontSize(10).text(prescription.user.degree, { align: 'center' });
-      }
-      if (prescription.user.specialization) {
-        doc.text(prescription.user.specialization, { align: 'center' });
+      const u = prescription.user as {
+        name: string;
+        title?: string | null;
+        degree?: string | null;
+        specialization?: string | null;
+      };
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(14)
+        .text(formatProviderPrimaryLine({ name: u.name, title: u.title }), { align: 'center' });
+
+      const credLine = formatProviderCredentialSuffix(u.degree, u.specialization);
+      if (credLine) {
+        doc.font('Helvetica').fontSize(10).text(credLine, { align: 'center' });
       }
 
       doc.moveDown();
@@ -36,7 +44,6 @@ export async function generatePrescriptionPDF(prescription: any): Promise<Buffer
       doc.font('Helvetica-Bold').fontSize(12).text('PRESCRIPTION', { align: 'center' });
       doc.moveDown();
 
-      const patientY = doc.y;
       doc.font('Helvetica-Bold').fontSize(10).text('Patient: ', { continued: true });
       doc.font('Helvetica').text(prescription.patient.name);
       
@@ -100,6 +107,9 @@ export async function generatePrescriptionPDF(prescription: any): Promise<Buffer
           doc.text('');
           
           doc.font('Helvetica').text(`   Dosage: ${item.dosage} | ${item.frequency} | ${item.duration}`);
+          if (item.maxDailyDose) {
+            doc.text(`   Max/day: ${item.maxDailyDose}`);
+          }
           
           const timing = [];
           if (item.beforeFood) timing.push('Before food');
@@ -110,6 +120,9 @@ export async function generatePrescriptionPDF(prescription: any): Promise<Buffer
           
           if (item.instructions) {
             doc.text(`   Note: ${item.instructions}`);
+          }
+          if (item.doctorNotes) {
+            doc.text(`   Doctor notes: ${item.doctorNotes}`);
           }
           
           doc.moveDown(0.5);

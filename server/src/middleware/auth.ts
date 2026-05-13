@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from '../utils/supabaseServer.js';
 import { normalizeAuthEmail } from '../services/supabaseAuthSync.js';
 import { requireRole } from './requireRole.js';
 import { isSupabaseBearerAuthAllowed } from '../utils/supabaseAuthPolicy.js';
+import type { Capability } from '../security/capabilities.js';
 
 // Centralized in config.ts
 
@@ -29,6 +30,8 @@ export interface ClinicSubscriptionContext {
   mergedPlanFeatures: Record<string, unknown>;
   deviceLimit: number;
   planId: string | null;
+  /** DPMS feature gates — enforced server-side + exposed to UI via `/auth/me`. */
+  productFeatures: Record<string, boolean>;
 }
 
 export interface AuthRequest extends Request {
@@ -42,6 +45,10 @@ export interface AuthRequest extends Request {
   impersonating?: boolean;
   /** Plan / tier name from JWT (`plan` claim) for tiered rate limits when subscription middleware did not run. */
   jwtPlan?: string;
+  /** Snapshot from JWT (fast path); superseded when `effectiveCapabilities` is populated from DB subscription pass. */
+  jwtCapabilities?: string[];
+  /** Merged capabilities for this request (`requireActiveSubscription` + clinic overrides); undefined if not computed yet. */
+  effectiveCapabilities?: ReadonlySet<Capability>;
 }
 
 /** Bearer `Authorization` or `X-BaigDentPro-Token` (same value as browser `localStorage['baigdentpro:token']`). */
@@ -81,6 +88,7 @@ async function resolveUserFromSupabaseAccessToken(token: string): Promise<Supaba
       clinicId: true,
       isActive: true,
       isApproved: true,
+      accountStatus: true,
       sessionVersion: true,
     },
   });
@@ -108,6 +116,20 @@ async function resolveUserFromSupabaseAccessToken(token: string): Promise<Supaba
       status: 403,
       error: 'Your account is not approved yet. Contact your platform administrator.',
     };
+  }
+
+  if (user.role !== 'SUPER_ADMIN') {
+    const st = String(user.accountStatus ?? 'PENDING').toUpperCase();
+    if (st !== 'ACTIVE') {
+      return {
+        ok: false,
+        status: 403,
+        error:
+          st === 'SUSPENDED'
+            ? 'Your account has been suspended. Contact your clinic administrator.'
+            : 'Your account is pending activation by a platform administrator.',
+      };
+    }
   }
 
   if (!user.clinicId) {
@@ -156,6 +178,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
         impersonationJti?: string;
         role?: string;
         sessionVersion?: number;
+        capabilities?: unknown;
       };
 
       if (!decoded.userId) {
@@ -172,6 +195,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
           clinicId: true,
           isActive: true,
           isApproved: true,
+          accountStatus: true,
           sessionVersion: true,
         },
       });
@@ -245,10 +269,29 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
         });
       }
 
+      if (user.role !== 'SUPER_ADMIN') {
+        const st = String(user.accountStatus ?? 'PENDING').toUpperCase();
+        if (st !== 'ACTIVE') {
+          return res.status(403).json({
+            error:
+              st === 'SUSPENDED'
+                ? 'Your account has been suspended. Contact your clinic administrator.'
+                : 'Your account is pending activation by a platform administrator.',
+          });
+        }
+      }
+
       req.impersonating = decoded.impersonating === true && user.role === 'SUPER_ADMIN';
       req.effectiveClinicId = effectiveClinicId;
       req.user = user as AuthUser;
       req.jwtPlan = typeof decoded.plan === 'string' && decoded.plan.trim() ? decoded.plan.trim() : undefined;
+
+      const rawCaps = decoded.capabilities;
+      if (Array.isArray(rawCaps)) {
+        const caps = rawCaps.filter((x): x is string => typeof x === 'string' && x.length > 0);
+        req.jwtCapabilities = caps.length ? caps : undefined;
+      }
+
       return next();
     } catch (jwtErr: unknown) {
       const name = jwtErr instanceof Error ? jwtErr.name : '';
@@ -297,13 +340,18 @@ export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFu
             clinicId: true,
             isActive: true,
             isApproved: true,
+            accountStatus: true,
             sessionVersion: true,
           },
         });
         const tokenSessionVersion = typeof decoded.sessionVersion === 'number' ? decoded.sessionVersion : 0;
+        const activeEnough =
+          user?.role === 'SUPER_ADMIN' ||
+          String(user?.accountStatus ?? '').toUpperCase() === 'ACTIVE';
         if (
           user?.isActive &&
           user?.isApproved &&
+          activeEnough &&
           tokenSessionVersion === user.sessionVersion &&
           (!decoded.clinicId || !user.clinicId || decoded.clinicId === user.clinicId) &&
           decoded.impersonating !== true

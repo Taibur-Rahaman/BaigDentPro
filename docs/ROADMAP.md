@@ -1,13 +1,12 @@
-# Roadmap — not in current release
+# Roadmap — product backlog vs current repo
 
-These items are **intentionally out of scope** for the current codebase but commonly asked about for “full” clinic products.
+| Area | Today (verified in code) | Future direction |
+|------|---------------------------|------------------|
+| **SaaS subscription settlement** | **Manual WhatsApp only** — `POST /api/payment/manual/initiate`, policy in `/config/payment.ts`, super-admin marks `SubscriptionPayment` via `/api/admin/subscription-payments`. No Stripe/gateway. | Optional accounting export / reminders — **not** automatic card capture unless product scope changes. |
+| **Clinic invoice payments** | **CASH recording only** on `/api/invoices/.../payments` (online wallets / Stripe paths removed). | If gateways return: new integration project + webhooks + reconciliation rules. |
+| **JWT sessions** | Access JWT + **`POST /auth/refresh`** refresh tokens (`RefreshToken` model). | Optional httpOnly cookie hardening, shorter access TTL. |
+| **CAPTCHA** | None on login/register. | hCaptcha/Turnstile if bots appear. |
+| **WAF / CDN** | Not in repo. | Cloudflare or similar in front of production. |
+| **HIPAA / compliance** | Auth + audit hooks — **not** a certified compliance bundle. | Legal review, BAA, retention policy. |
 
-| Area | Today | Future direction |
-|------|--------|------------------|
-| **Card / wallet payments** | Orders/invoices support **COD** and manual totals; no Stripe, PayPal, or bKash webhooks. | Add a gateway + server webhooks + idempotent payment records. |
-| **JWT refresh tokens** | Single access JWT (`JWT_EXPIRES_IN`). | Short-lived access + httpOnly refresh cookie or rotation. |
-| **CAPTCHA** | None on login/register. | Add hCaptcha/Turnstile on public auth routes if bots appear. |
-| **WAF / CDN** | Not configured in repo. | Put **Cloudflare** (or similar) in front of the public site; use their WAF and TLS. |
-| **HIPAA / compliance** | App provides auth, TLS guidance, backups docs — **not** a certified compliance package. | Legal review, BAA with vendors, audit logging policy, retention. |
-
-Implementing any row above is a **project**, not a toggle; estimate separately.
+Estimate separately for any row’s “Future direction” — these are projects, not toggles.

@@ -7,7 +7,11 @@ import { requireActiveSubscription } from '../middleware/clinicSubscription.js';
 import { requireSaaSClinicScopeAlignment } from '../middleware/tenantClinicGuard.js';
 import { requirePlanFeature } from '../middleware/requirePlanFeature.js';
 import { validateBody } from '../middleware/validateBody.js';
-import { branchCreateBodySchema, branchUpdateBodySchema } from '../validation/schemas.js';
+import {
+  branchCreateBodySchema,
+  branchUpdateBodySchema,
+  clinicProfileUpdateBodySchema,
+} from '../validation/schemas.js';
 import { asyncRoute } from '../utils/routeErrors.js';
 import { effectivePlanName, mergePlanFeatures, resolveDeviceLimit, type SubscriptionWithPlan } from '../services/planCatalog.js';
 
@@ -154,6 +158,105 @@ router.delete(
       })
       .catch(() => {});
     res.json({ ok: true });
+  })
+);
+
+router.get(
+  '/profile',
+  asyncRoute('clinic.profile.get', async (req: AuthRequest, res) => {
+    const clinicId = scopeClinicId(req);
+    if (!clinicId || !assertClinicScope(req, clinicId)) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const clinic = await prisma.clinic.findUnique({
+      where: { id: clinicId },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        phone: true,
+        email: true,
+        logo: true,
+        timezone: true,
+        region: true,
+        plan: true,
+        isActive: true,
+      },
+    });
+    if (!clinic) {
+      res.status(404).json({ error: 'Clinic not found' });
+      return;
+    }
+    res.json({ profile: clinic });
+  })
+);
+
+router.put(
+  '/profile',
+  requireRole('ADMIN'),
+  requireActiveSubscription,
+  requireSaaSClinicScopeAlignment,
+  validateBody(clinicProfileUpdateBodySchema),
+  asyncRoute('clinic.profile.update', async (req: AuthRequest, res) => {
+    const clinicId = scopeClinicId(req);
+    if (!clinicId || !assertClinicScope(req, clinicId)) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const body = req.body as {
+      name?: string;
+      address?: string | null;
+      phone?: string | null;
+      email?: string | null;
+      logo?: string | null;
+      timezone?: string | null;
+    };
+    const existing = await prisma.clinic.findUnique({ where: { id: clinicId } });
+    if (!existing) {
+      res.status(404).json({ error: 'Clinic not found' });
+      return;
+    }
+    const profile = await prisma.clinic.update({
+      where: { id: clinicId },
+      data: {
+        ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+        ...(body.address !== undefined ? { address: body.address === null ? null : body.address.trim() } : {}),
+        ...(body.phone !== undefined ? { phone: body.phone === null ? null : body.phone.trim() } : {}),
+        ...(body.email !== undefined
+          ? { email: body.email === null || body.email === '' ? null : body.email.trim() }
+          : {}),
+        ...(body.logo !== undefined ? { logo: body.logo === null || body.logo === '' ? null : body.logo } : {}),
+        ...(body.timezone !== undefined
+          ? { timezone: body.timezone === null ? null : body.timezone.trim() }
+          : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        phone: true,
+        email: true,
+        logo: true,
+        timezone: true,
+        region: true,
+        plan: true,
+        isActive: true,
+      },
+    });
+    await prisma.activityLog
+      .create({
+        data: {
+          userId: req.user!.id,
+          clinicId,
+          action: 'CLINIC_UPDATE_PROFILE',
+          entity: 'CLINIC',
+          entityId: clinicId,
+          details: JSON.stringify({ clinicId }),
+        },
+      })
+      .catch(() => {});
+    res.json({ profile });
   })
 );
 

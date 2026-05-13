@@ -1,15 +1,27 @@
+/**
+ * @domain RETAIL (shop ecommerce)
+ * ShopProduct catalog stock — not clinical consumables inventory.
+ */
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../index.js';
-import { optionalAuth, requireAuth, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import type { AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
+
+function assertSuperAdmin(req: AuthRequest, res: any): boolean {
+  if (req.user?.role === 'SUPER_ADMIN') return true;
+  (res as any).status(403).json({ error: 'Forbidden' });
+  return false;
+}
 
 // ============== ADMIN ROUTES ==============
 
 // Admin: Get shop statistics
 router.get('/admin/stats', requireAuth, requireAdmin, async (req, res) => {
   try {
+    if (!assertSuperAdmin(req as AuthRequest, res as any)) return;
     const [
       totalProducts,
       activeProducts,
@@ -65,6 +77,7 @@ router.get('/admin/stats', requireAuth, requireAdmin, async (req, res) => {
 // Admin: List all orders with filters
 router.get('/admin/orders', requireAuth, requireAdmin, async (req, res) => {
   try {
+    if (!assertSuperAdmin(req as AuthRequest, res as any)) return;
     const { status, page = '1', limit = '20' } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
 
@@ -91,6 +104,7 @@ router.get('/admin/orders', requireAuth, requireAdmin, async (req, res) => {
 // Admin: Update order status
 router.put('/admin/orders/:id/status', requireAuth, requireAdmin, async (req, res) => {
   try {
+    if (!assertSuperAdmin(req as AuthRequest, res as any)) return;
     const { status, trackingNumber } = req.body;
 
     const order = await prisma.shopOrder.update({
@@ -112,6 +126,7 @@ router.put('/admin/orders/:id/status', requireAuth, requireAdmin, async (req, re
 // Admin: Create product
 router.post('/admin/products', requireAuth, requireAdmin, async (req, res) => {
   try {
+    if (!assertSuperAdmin(req as AuthRequest, res as any)) return;
     const { name, description, shortDesc, price, comparePrice, cost, sku, barcode, category, images, stock, isFeatured } = req.body;
 
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -144,6 +159,7 @@ router.post('/admin/products', requireAuth, requireAdmin, async (req, res) => {
 // Admin: Update product
 router.put('/admin/products/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
+    if (!assertSuperAdmin(req as AuthRequest, res as any)) return;
     const { name, description, shortDesc, price, comparePrice, cost, sku, barcode, category, images, stock, isActive, isFeatured } = req.body;
 
     const product = await prisma.shopProduct.update({
@@ -174,6 +190,7 @@ router.put('/admin/products/:id', requireAuth, requireAdmin, async (req, res) =>
 // Admin: Delete product
 router.delete('/admin/products/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
+    if (!assertSuperAdmin(req as AuthRequest, res as any)) return;
     await prisma.shopProduct.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (error: any) {
@@ -184,6 +201,7 @@ router.delete('/admin/products/:id', requireAuth, requireAdmin, async (req, res)
 // Admin: Get all products (including inactive)
 router.get('/admin/products', requireAuth, requireAdmin, async (req, res) => {
   try {
+    if (!assertSuperAdmin(req as AuthRequest, res as any)) return;
     const { category, search, page = '1', limit = '50' } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
 

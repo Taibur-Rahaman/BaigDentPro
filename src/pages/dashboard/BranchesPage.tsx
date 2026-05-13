@@ -1,65 +1,31 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ApiError } from '@/components/ApiError';
-import api from '@/api';
-import { userMessageFromUnknown } from '@/lib/apiErrors';
 import { useAuth } from '@/hooks/useAuth';
-
-type Branch = { id: string; clinicId: string; name: string; address?: string | null };
+import { useBranchesDashboardView } from '@/hooks/view/useBranchesDashboardView';
 
 export const BranchesPage: React.FC = () => {
   const { user } = useAuth();
   const canManage = user?.role === 'CLINIC_ADMIN' || user?.role === 'SUPER_ADMIN';
-  const [rows, setRows] = useState<Branch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { rows, loading, error, saving, reload, createBranch, removeBranch, clearError } = useBranchesDashboardView();
+
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
-  const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await api.clinic.branches();
-      setRows(res.branches || []);
-    } catch (e) {
-      setRows([]);
-      setError(userMessageFromUnknown(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const createBranch = async (e: React.FormEvent) => {
+  const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await api.clinic.createBranch({ name: name.trim(), address: address.trim() || null });
+    clearError();
+    const ok = await createBranch(name, address);
+    if (ok) {
       setName('');
       setAddress('');
-      await load();
-    } catch (err) {
-      setError(userMessageFromUnknown(err));
-    } finally {
-      setSaving(false);
     }
   };
 
-  const remove = async (id: string) => {
+  const onRemove = async (id: string) => {
     if (!window.confirm('Delete this branch? Users assigned to it will be unassigned from the branch.')) return;
-    setError(null);
-    try {
-      await api.clinic.deleteBranch(id);
-      await load();
-    } catch (err) {
-      setError(userMessageFromUnknown(err));
-    }
+    clearError();
+    await removeBranch(id);
   };
 
   return (
@@ -68,9 +34,9 @@ export const BranchesPage: React.FC = () => {
         <h1>Branch management</h1>
         <p className="tenant-page-lead">Clinic branches via <code>/api/clinic/branches</code>. New branches require a plan that allows multi-branch.</p>
       </div>
-      {error ? <ApiError message={error} title="Request failed" onRetry={() => void load()} /> : null}
+      {error ? <ApiError message={error} title="Request failed" onRetry={() => void reload()} /> : null}
       {canManage ? (
-        <form className="tenant-card" onSubmit={(e) => void createBranch(e)} style={{ marginBottom: '1.25rem' }}>
+        <form className="tenant-card" onSubmit={(e) => void onCreate(e)} style={{ marginBottom: '1.25rem' }}>
           <h2 style={{ marginTop: 0, fontSize: '1.1rem' }}>Add branch</h2>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -109,7 +75,7 @@ export const BranchesPage: React.FC = () => {
                   <td>{b.address || '—'}</td>
                   {canManage ? (
                     <td>
-                      <button type="button" className="neo-btn neo-btn-secondary neo-btn-sm" onClick={() => void remove(b.id)}>
+                      <button type="button" className="neo-btn neo-btn-secondary neo-btn-sm" onClick={() => void onRemove(b.id)}>
                         Delete
                       </button>
                     </td>
@@ -118,7 +84,6 @@ export const BranchesPage: React.FC = () => {
               ))}
             </tbody>
           </table>
-          {!rows.length && !error ? <p style={{ padding: '1rem', margin: 0, color: '#64748b' }}>No branches yet.</p> : null}
         </div>
       )}
     </div>

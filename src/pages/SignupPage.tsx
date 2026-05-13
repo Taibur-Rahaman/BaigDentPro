@@ -44,8 +44,8 @@ export const SignupPage: React.FC = () => {
         password,
         name: saasName.trim() || undefined,
       });
-      setInfo('Account ready. Redirecting to your dashboard…');
-      navigate('/dashboard', { replace: true });
+      setInfo('Account created. If approval is required, sign in after approval.');
+      navigate('/login', { replace: true });
     } catch (err: unknown) {
       setError(isApiHttpError(err) ? err.message : err instanceof Error ? err.message : 'Sign-up failed');
     } finally {
@@ -58,13 +58,15 @@ export const SignupPage: React.FC = () => {
       <div className="neo-auth" style={{ minHeight: '100vh' }}>
         <div className="neo-bg-grid" />
         <div className="neo-bg-glow neo-bg-glow-1" />
-        <div className="neo-auth-container" style={{ maxWidth: 440, margin: '0 auto', padding: '2rem 1rem' }}>
+        <div className="neo-auth-container neo-auth-container--solo">
           <div className="neo-auth-card">
             <div className="neo-auth-card-header">
-              <h2>SaaS sign up</h2>
+              <h2>Create account</h2>
               <p>
-                Instant tenant account (catalog + orders). For full clinic onboarding with approval, use the{' '}
-                <Link to="/portal">clinic portal</Link>.
+                Start your clinic profile here. If you need approval-based onboarding, use{' '}
+                <Link to="/staff-portal">clinic portal registration</Link>
+                {' '}
+                instead.
               </p>
             </div>
             {error ? (
@@ -130,16 +132,22 @@ export const SignupPage: React.FC = () => {
                 ) : (
                   <>
                     <i className="fa-solid fa-user-plus" />
-                    <span>Create SaaS account</span>
+                    <span>Create account</span>
                   </>
                 )}
               </button>
-              <p className="neo-auth-switch">
-                Already have an account? <Link to="/login">Sign in</Link>
-              </p>
-              <p className="neo-auth-switch">
-                <Link to="/portal">Clinic portal</Link> · <Link to="/">Home</Link>
-              </p>
+              <div className="neo-auth-subfooter">
+                <p className="neo-auth-switch" style={{ marginTop: 0 }}>
+                  Already have an account? <Link to="/login">Sign in</Link>
+                </p>
+                <nav className="neo-auth-foot-nav" aria-label="Other pages">
+                  <Link to="/staff-portal">Clinic portal</Link>
+                  <span className="neo-auth-foot-dot" aria-hidden>
+                    ·
+                  </span>
+                  <Link to="/">Home</Link>
+                </nav>
+              </div>
             </form>
           </div>
         </div>
@@ -151,14 +159,14 @@ export const SignupPage: React.FC = () => {
     <div className="neo-auth" style={{ minHeight: '100vh' }}>
       <div className="neo-bg-grid" />
       <div className="neo-bg-glow neo-bg-glow-1" />
-      <div className="neo-auth-container" style={{ maxWidth: 440, margin: '0 auto', padding: '2rem 1rem' }}>
+      <div className="neo-auth-container neo-auth-container--solo">
         <div className="neo-auth-card">
           <div className="neo-auth-card-header">
             <h2>Create account</h2>
             <p>
               {signupChannel === 'supabase'
                 ? 'Sign up with Supabase Auth (email + password).'
-                : 'Instant SaaS tenant — JWT issued immediately for catalog and orders APIs.'}
+                : 'Sign up with BaigDentPro API (stable /auth/register route).'}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -182,7 +190,7 @@ export const SignupPage: React.FC = () => {
                 setInfo('');
               }}
             >
-              SaaS (instant)
+              API
             </button>
           </div>
           {error ? (
@@ -245,12 +253,18 @@ export const SignupPage: React.FC = () => {
                   </>
                 )}
               </button>
-              <p className="neo-auth-switch">
-                Already have an account? <Link to="/login">Sign in</Link>
-              </p>
-              <p className="neo-auth-switch">
-                <Link to="/portal">Clinic portal</Link> · <Link to="/">Home</Link>
-              </p>
+              <div className="neo-auth-subfooter">
+                <p className="neo-auth-switch" style={{ marginTop: 0 }}>
+                  Already have an account? <Link to="/login">Sign in</Link>
+                </p>
+                <nav className="neo-auth-foot-nav" aria-label="Other pages">
+                  <Link to="/staff-portal">Clinic portal</Link>
+                  <span className="neo-auth-foot-dot" aria-hidden>
+                    ·
+                  </span>
+                  <Link to="/">Home</Link>
+                </nav>
+              </div>
             </form>
           ) : (
             <form onSubmit={(e) => void handleSaaSSignup(e)} className="neo-auth-form">
@@ -305,16 +319,22 @@ export const SignupPage: React.FC = () => {
                 ) : (
                   <>
                     <i className="fa-solid fa-user-plus" />
-                    <span>Create SaaS account</span>
+                    <span>Create account</span>
                   </>
                 )}
               </button>
-              <p className="neo-auth-switch">
-                Already have an account? <Link to="/login">Sign in</Link>
-              </p>
-              <p className="neo-auth-switch">
-                <Link to="/portal">Clinic portal</Link> · <Link to="/">Home</Link>
-              </p>
+              <div className="neo-auth-subfooter">
+                <p className="neo-auth-switch" style={{ marginTop: 0 }}>
+                  Already have an account? <Link to="/login">Sign in</Link>
+                </p>
+                <nav className="neo-auth-foot-nav" aria-label="Other pages">
+                  <Link to="/staff-portal">Clinic portal</Link>
+                  <span className="neo-auth-foot-dot" aria-hidden>
+                    ·
+                  </span>
+                  <Link to="/">Home</Link>
+                </nav>
+              </div>
             </form>
           )}
         </div>

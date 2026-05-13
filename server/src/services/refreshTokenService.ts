@@ -36,7 +36,15 @@ export async function validateRefreshToken(raw: string) {
           clinicId: true,
           isActive: true,
           isApproved: true,
+          accountStatus: true,
           sessionVersion: true,
+          title: true,
+          degree: true,
+          specialization: true,
+          clinicName: true,
+          clinicAddress: true,
+          clinicPhone: true,
+          professionalVerified: true,
         },
       },
     },
@@ -44,6 +52,12 @@ export async function validateRefreshToken(raw: string) {
   if (!row || row.revokedAt) return null;
   if (row.expiresAt.getTime() < Date.now()) return null;
   if (!row.user.isActive || !row.user.isApproved) return null;
+  if (
+    row.user.role !== 'SUPER_ADMIN' &&
+    String(row.user.accountStatus ?? '').toUpperCase() !== 'ACTIVE'
+  ) {
+    return null;
+  }
   return row;
 }
 

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- module exports provider + hook */
 import React, { createContext, useContext, useMemo } from 'react';
 import { useToast } from '@/hooks/useToast';
 

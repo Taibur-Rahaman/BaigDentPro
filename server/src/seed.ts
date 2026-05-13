@@ -11,6 +11,83 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const prisma = new PrismaClient();
 
+const DEFAULT_CLINIC_ID = 'seed-clinic-baigdentpro';
+
+const SUPERADMIN_SEED_EMAIL = (process.env.SUPERADMIN_SEED_EMAIL || '').trim().toLowerCase();
+const SUPERADMIN_SEED_PASSWORD = (process.env.SUPERADMIN_SEED_PASSWORD || '').trim();
+const DEMO_SEED_PASSWORD = (process.env.DEMO_SEED_PASSWORD || '').trim();
+
+/**
+ * Platform SUPER_ADMIN tied to the default seeded clinic (`seed-clinic-baigdentpro`).
+ * Idempotent: safe to run against production `DATABASE_URL` (upsert only; does not wipe data).
+ * Re-running resets this account’s password to the seed value via a fresh bcrypt hash (cost 12).
+ */
+async function ensureSuperAdminUser(clinicId: string): Promise<void> {
+  if (!SUPERADMIN_SEED_EMAIL || !SUPERADMIN_SEED_PASSWORD) {
+    throw new Error('Missing SUPERADMIN_SEED_EMAIL or SUPERADMIN_SEED_PASSWORD');
+  }
+  const passwordHash = await bcrypt.hash(SUPERADMIN_SEED_PASSWORD, 12);
+  await prisma.user.upsert({
+    where: { email: SUPERADMIN_SEED_EMAIL },
+    update: {
+      password: passwordHash,
+      role: 'SUPER_ADMIN',
+      clinicId,
+      clinicName: 'BaigDentPro Platform',
+      isActive: true,
+      isApproved: true,
+      accountStatus: 'ACTIVE',
+    },
+    create: {
+      email: SUPERADMIN_SEED_EMAIL,
+      password: passwordHash,
+      name: 'Super Admin',
+      role: 'SUPER_ADMIN',
+      clinicId,
+      clinicName: 'BaigDentPro Platform',
+      isActive: true,
+      isApproved: true,
+      accountStatus: 'ACTIVE',
+    },
+  });
+  console.log('[SEED] SUPER_ADMIN ensured');
+}
+
+async function upsertDefaultClinic() {
+  return prisma.clinic.upsert({
+    where: { id: DEFAULT_CLINIC_ID },
+    update: { name: 'BaigDentPro Dental Clinic', plan: 'PREMIUM', isActive: true },
+    create: {
+      id: DEFAULT_CLINIC_ID,
+      name: 'BaigDentPro Dental Clinic',
+      plan: 'PREMIUM',
+      isActive: true,
+      phone: '+880 1601-677122',
+      email: 'info@baigdentpro.com',
+    },
+  });
+}
+
+async function syncSupabaseAuthPairs(pairs: { email: string; password: string }[]): Promise<void> {
+  if (!isSupabaseConfigured()) {
+    console.log('ℹ️  Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY to sync seeded users to Supabase Auth.');
+    return;
+  }
+  for (const { email, password } of pairs) {
+    const r = await syncSupabasePasswordForEmail(email, password);
+    if (r.synced) console.log('✅ Supabase Auth user:', email);
+    else if (r.note && r.note !== 'supabase_not_configured') console.warn('⚠️ Supabase Auth', email, r.note);
+  }
+}
+
+/** Minimal production-safe setup: default clinic + SUPER_ADMIN only. */
+async function ensureCoreBootstrap(): Promise<void> {
+  const clinic = await upsertDefaultClinic();
+  await ensureSuperAdminUser(clinic.id);
+  await syncSupabaseAuthPairs([{ email: SUPERADMIN_SEED_EMAIL, password: SUPERADMIN_SEED_PASSWORD }]);
+  console.log('[SEED] CORE BOOTSTRAP COMPLETE');
+}
+
 async function seedCatalogPlans() {
   const platinumFeatures = { branches: 1, roleAccess: false, reports: 'basic', branding: false };
   const premiumFeatures = { branches: 'unlimited', roleAccess: true, reports: 'advanced', branding: true };
@@ -38,23 +115,20 @@ async function seedCatalogPlans() {
   }
 }
 
-async function main() {
-  console.log('🌱 Seeding database...');
-
+/** Optional dev/demo datasets — requires `SEED_MODE=demo` (never defaults). */
+async function seedDemoData(): Promise<void> {
+  if (!DEMO_SEED_PASSWORD) {
+    throw new Error('Missing DEMO_SEED_PASSWORD for demo seed mode');
+  }
   await seedCatalogPlans();
 
-  const demoClinic = await prisma.clinic.upsert({
-    where: { id: 'seed-clinic-baigdentpro' },
-    update: { name: 'BaigDentPro Dental Clinic', plan: 'PREMIUM', isActive: true },
-    create: {
-      id: 'seed-clinic-baigdentpro',
-      name: 'BaigDentPro Dental Clinic',
-      plan: 'PREMIUM',
-      isActive: true,
-      phone: '+880 1617-180711',
-      email: 'info@baigdentpro.com',
-    },
-  });
+  const demoClinic = await prisma.clinic.findUnique({ where: { id: DEFAULT_CLINIC_ID } });
+  if (!demoClinic) {
+    throw new Error(`[SEED] Default clinic (${DEFAULT_CLINIC_ID}) missing — run core bootstrap first.`);
+  }
+
+  const omixEmailEnv = process.env.OMIX_SERVICE_USER_EMAIL?.trim();
+  const omixPasswordEnv = process.env.OMIX_SERVICE_USER_PASSWORD?.trim();
 
   const premiumPlan = await prisma.plan.findUnique({ where: { name: 'PREMIUM' } });
   await prisma.subscription.upsert({
@@ -74,15 +148,17 @@ async function main() {
     },
   });
 
-  const hashedPassword = await bcrypt.hash('password123', 12);
+  const hashedPassword = await bcrypt.hash(DEMO_SEED_PASSWORD, 12);
   const demoUser = await prisma.user.upsert({
     where: { email: 'demo@baigdentpro.com' },
     update: {
+      password: hashedPassword,
       clinicId: demoClinic.id,
       role: 'CLINIC_ADMIN',
       clinicName: demoClinic.name,
       isActive: true,
       isApproved: true,
+      accountStatus: 'ACTIVE',
     },
     create: {
       email: 'demo@baigdentpro.com',
@@ -92,12 +168,13 @@ async function main() {
       clinicId: demoClinic.id,
       clinicName: demoClinic.name,
       clinicAddress: 'Dhaka, Bangladesh',
-      clinicPhone: '+880 1617-180711',
+      clinicPhone: '+880 1601-677122',
       clinicEmail: 'info@baigdentpro.com',
       degree: 'BDS, MDS',
       specialization: 'General Dentistry',
       isActive: true,
       isApproved: true,
+      accountStatus: 'ACTIVE',
     },
   });
 
@@ -105,17 +182,19 @@ async function main() {
 
   await prisma.clinic.update({
     where: { id: demoClinic.id },
-    data: { ownerId: demoUser.id, plan: 'PREMIUM' },
+    data: { ownerId: demoUser.id, plan: 'PREMIUM', isDemo: true, planTier: 'ENTERPRISE' },
   });
 
   const staffDoctor = await prisma.user.upsert({
     where: { email: 'doctor@baigdentpro.com' },
     update: {
+      password: hashedPassword,
       clinicId: demoClinic.id,
       clinicName: demoClinic.name,
       role: 'DOCTOR',
       isActive: true,
       isApproved: true,
+      accountStatus: 'ACTIVE',
     },
     create: {
       email: 'doctor@baigdentpro.com',
@@ -126,9 +205,90 @@ async function main() {
       clinicName: demoClinic.name,
       isActive: true,
       isApproved: true,
+      accountStatus: 'ACTIVE',
     },
   });
-  console.log('✅ Staff doctor (same clinic):', staffDoctor.email, '/ password123');
+  console.log('✅ Staff doctor (same clinic):', staffDoctor.email);
+
+  const receptionist = await prisma.user.upsert({
+    where: { email: 'receptionist@baigdentpro.com' },
+    update: {
+      password: hashedPassword,
+      clinicId: demoClinic.id,
+      clinicName: demoClinic.name,
+      role: 'RECEPTIONIST',
+      isActive: true,
+      isApproved: true,
+      accountStatus: 'ACTIVE',
+    },
+    create: {
+      email: 'receptionist@baigdentpro.com',
+      password: hashedPassword,
+      name: 'Front Desk',
+      role: 'RECEPTIONIST',
+      clinicId: demoClinic.id,
+      clinicName: demoClinic.name,
+      isActive: true,
+      isApproved: true,
+      accountStatus: 'ACTIVE',
+    },
+  });
+  console.log('✅ Receptionist (same clinic):', receptionist.email);
+
+  const TENANT_SEED_CLINIC_ID = 'seed-tenant-shop-clinic';
+  const tenantClinic = await prisma.clinic.upsert({
+    where: { id: TENANT_SEED_CLINIC_ID },
+    update: { name: 'Demo Shop Tenant', isActive: true, plan: 'FREE' },
+    create: {
+      id: TENANT_SEED_CLINIC_ID,
+      name: 'Demo Shop Tenant',
+      plan: 'FREE',
+      isActive: true,
+    },
+  });
+  const freePlan = await prisma.plan.findUnique({ where: { name: 'FREE' } });
+  await prisma.subscription.upsert({
+    where: { clinicId: tenantClinic.id },
+    update: {
+      plan: 'FREE',
+      planId: freePlan?.id ?? null,
+      status: 'ACTIVE',
+      startDate: new Date(),
+    },
+    create: {
+      clinicId: tenantClinic.id,
+      plan: 'FREE',
+      planId: freePlan?.id ?? null,
+      status: 'ACTIVE',
+      startDate: new Date(),
+    },
+  });
+  const tenantUser = await prisma.user.upsert({
+    where: { email: 'tenant@baigdentpro.com' },
+    update: {
+      password: hashedPassword,
+      clinicId: tenantClinic.id,
+      role: 'TENANT',
+      isActive: true,
+      isApproved: true,
+      accountStatus: 'ACTIVE',
+    },
+    create: {
+      email: 'tenant@baigdentpro.com',
+      password: hashedPassword,
+      name: 'Shop Demo User',
+      role: 'TENANT',
+      clinicId: tenantClinic.id,
+      isActive: true,
+      isApproved: true,
+      accountStatus: 'ACTIVE',
+    },
+  });
+  await prisma.clinic.update({
+    where: { id: tenantClinic.id },
+    data: { ownerId: tenantUser.id },
+  });
+  console.log('✅ Tenant (separate clinic, shop role):', tenantUser.email);
 
   const defaultHeader = (displayName: string) => ({
     doctorName: displayName,
@@ -179,28 +339,10 @@ async function main() {
   });
   console.log('✅ Sample patients for doctor@baigdentpro.com (practice panel)');
 
-  const superAdmin = await prisma.user.upsert({
-    where: { email: 'superadmin@baigdentpro.com' },
-    update: { isApproved: true, isActive: true, clinicId: demoClinic.id },
-    create: {
-      email: 'superadmin@baigdentpro.com',
-      password: await bcrypt.hash('super123', 12),
-      name: 'Super Admin',
-      role: 'SUPER_ADMIN',
-      clinicId: demoClinic.id,
-      clinicName: 'BaigDentPro Platform',
-      isApproved: true,
-      isActive: true,
-    },
-  });
-  console.log('✅ Created super admin:', superAdmin.email);
-
-  const omixEmail = process.env.OMIX_SERVICE_USER_EMAIL?.trim();
-  const omixPassword = process.env.OMIX_SERVICE_USER_PASSWORD?.trim();
-  if (omixEmail && omixPassword) {
-    const omixHash = await bcrypt.hash(omixPassword, 12);
+  if (omixEmailEnv && omixPasswordEnv) {
+    const omixHash = await bcrypt.hash(omixPasswordEnv, 12);
     const omixUser = await prisma.user.upsert({
-      where: { email: omixEmail },
+      where: { email: omixEmailEnv },
       update: {
         password: omixHash,
         clinicId: demoClinic.id,
@@ -211,7 +353,7 @@ async function main() {
         isApproved: true,
       },
       create: {
-        email: omixEmail,
+        email: omixEmailEnv,
         password: omixHash,
         name: 'Omix Service',
         role: 'CLINIC_ADMIN',
@@ -267,34 +409,49 @@ async function main() {
 
   console.log(`✅ Seeded ${products.length} public shop products (ShopProduct)`);
 
-  if (isSupabaseConfigured()) {
-    const authSeeds: { email: string; password: string }[] = [
-      { email: 'demo@baigdentpro.com', password: 'password123' },
-      { email: 'doctor@baigdentpro.com', password: 'password123' },
-      { email: 'superadmin@baigdentpro.com', password: 'super123' },
-    ];
-    const omixE = process.env.OMIX_SERVICE_USER_EMAIL?.trim();
-    const omixP = process.env.OMIX_SERVICE_USER_PASSWORD?.trim();
-    if (omixE && omixP) {
-      authSeeds.push({ email: omixE, password: omixP });
-    }
-    for (const { email, password } of authSeeds) {
-      const r = await syncSupabasePasswordForEmail(email, password);
-      if (r.synced) console.log('✅ Supabase Auth user:', email);
-      else if (r.note && r.note !== 'supabase_not_configured') console.warn('⚠️ Supabase Auth', email, r.note);
-    }
-  } else {
-    console.log('ℹ️  Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY to sync seeded users to Supabase Auth.');
+  const demoPairs: { email: string; password: string }[] = [
+    { email: 'demo@baigdentpro.com', password: DEMO_SEED_PASSWORD },
+    { email: 'doctor@baigdentpro.com', password: DEMO_SEED_PASSWORD },
+    { email: 'receptionist@baigdentpro.com', password: DEMO_SEED_PASSWORD },
+    { email: 'tenant@baigdentpro.com', password: DEMO_SEED_PASSWORD },
+    { email: SUPERADMIN_SEED_EMAIL, password: SUPERADMIN_SEED_PASSWORD },
+  ];
+  if (omixEmailEnv && omixPasswordEnv) {
+    demoPairs.push({ email: omixEmailEnv, password: omixPasswordEnv });
   }
+  await syncSupabaseAuthPairs(demoPairs);
 
-  console.log('🎉 Seeding completed!');
   console.log('\n📋 Demo Login:');
   console.log('   Email: demo@baigdentpro.com');
-  console.log('   Password: password123');
-  if (omixEmail && omixPassword) {
-    console.log('\n📋 Omix service user seeded (OMIX_SERVICE_USER_* in server/.env).');
-    console.log('   Email:', omixEmail);
+  console.log('   Password: <DEMO_SEED_PASSWORD>');
+
+  console.log('[SEED] DEMO DATA COMPLETE');
+}
+
+async function main() {
+  console.log('🌱 Seeding database...');
+
+  const rawMode = process.env.SEED_MODE?.trim().toLowerCase();
+  const modeLabel =
+    rawMode === 'demo' ? 'demo' : rawMode === 'core' ? 'core' : rawMode?.length ? `default (${rawMode})` : 'default';
+  console.log(`[SEED] MODE = ${modeLabel}`);
+
+  if (rawMode === 'demo' && process.env.NODE_ENV === 'production') {
+    console.warn(
+      '[SEED] WARNING: SEED_MODE=demo against NODE_ENV=production — demo users, shop products, and sample data will be written to DATABASE_URL.'
+    );
   }
+
+  if (rawMode === 'demo') {
+    await ensureCoreBootstrap();
+    await seedDemoData();
+  } else if (rawMode === 'core') {
+    await ensureCoreBootstrap();
+  } else {
+    await ensureCoreBootstrap();
+  }
+
+  console.log('🎉 Seed run finished!');
 }
 
 main()

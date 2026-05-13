@@ -1,0 +1,62 @@
+---
+description: BaigDentPro domain boundaries — retail vs clinical vs finance vs workflow; no cross-domain leakage.
+alwaysApply: true
+---
+
+# Domain classification (SSOT)
+
+Every feature belongs to **exactly ONE** domain. UI, API routes, DB models, and naming MUST align with that domain.
+
+## 1. RETAIL DOMAIN (shop / ecommerce)
+
+- Shop products, catalog stock, orders, ecommerce flows.
+- Code/name prefixes: `shop_*`, `catalog_*` (examples; match existing codebase conventions).
+
+## 2. CLINICAL DOMAIN (medical operations)
+
+- Patients, treatments, odontogram / dental chart, **clinical inventory (consumables)**, prescriptions.
+- Code/name prefixes: `clinical_*`, `patient_*`, `dental_*` (examples).
+
+## 3. FINANCE DOMAIN (clinic accounting)
+
+- Invoices, payments, **clinic ledger**, AR aging, refunds, installments.
+- Code/name prefixes: `finance_*`, `invoice_*`, `payment_*` (examples).
+
+## 4. WORKFLOW ENGINE (orchestration only)
+
+- Appointment lifecycle rules, treatment lifecycle, allowed clinical state transitions.
+- Code/name prefixes: `workflow_*`, `state_*` (examples).
+- **Orchestrates** other domains; **does not** replace domain persistence. Business facts live in clinical/finance/retail stores; workflow holds transitions, guards, and orchestration — not a dumping ground for unrelated tables.
+
+---
+
+## Hard separation rules
+
+| Wrong | Why |
+|-------|-----|
+| Retail/catalog stock as “clinic inventory” | Different lifecycle and compliance |
+| Patient statement / treatment ledger UI treated as **general ledger** | Patient-facing balances ≠ double-entry accounting |
+| Pricing, invoicing, or payment allocation **inside** clinical chart/treatment UI routes/models | Finance owns money truth |
+| Embedding shop order logic in clinical treatment flows | Domain leak |
+
+---
+
+## Definition of done
+
+A feature is **NOT complete** unless:
+
+1. It is assigned to **exactly one** domain above.
+2. It does **not** reuse another domain’s modules or tables incorrectly (call Finance/clinical APIs from workflow is OK; **copying** invoice math into patient routes is not).
+3. UI + API + DB boundaries stay consistent with that domain.
+
+---
+
+## Violations → ARCHITECTURAL BUG
+
+If implementation mixes domains (e.g. shop stock for consumables, patient ledger labeled as accounting ledger, finance rules inside `patients`/`prescriptions` handlers without delegating to billing):
+
+1. **Mark as ARCHITECTURAL BUG** in review / tracker (do not ship as “done”).
+2. **Suggest refactor first**: extract to correct domain module, introduce facade or workflow step, split tables/routes with clear names.
+3. **Do not** paper over with UI-only relabeling while DB/API remain crossed.
+
+When unsure, prefer **new explicitly named** clinical vs retail vs finance artifacts over overloaded legacy names.

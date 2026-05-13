@@ -2,12 +2,13 @@ import { prisma } from '../index.js';
 
 /**
  * Applies a successful `SubscriptionPayment` to the clinic subscription (idempotent on same payment row).
- * Intended to run only from trusted provider webhooks after signature verification.
+ * Runs when an administrator marks a manual WhatsApp payment `PAID`.
  */
 export async function applyVerifiedSubscriptionPayment(paymentId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const pay = await prisma.subscriptionPayment.findUnique({ where: { id: paymentId } });
-  if (!pay || pay.status !== 'SUCCESS') {
-    return { ok: false, error: 'Payment not found or not successful' };
+  const okStatus = pay?.status === 'PAID' || pay?.status === 'SUCCESS';
+  if (!pay || !okStatus) {
+    return { ok: false, error: 'Payment not found or not marked paid' };
   }
   const meta = (pay.metadata as Record<string, unknown> | null) ?? {};
   const applied = meta.applied === true;

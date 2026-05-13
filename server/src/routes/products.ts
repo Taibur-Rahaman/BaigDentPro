@@ -11,6 +11,7 @@ import { requireFeature } from '../middleware/requireFeature.js';
 import { resolveTenantClinicId, scopeProductWhere } from '../utils/tenantScope.js';
 import { writeAuditLog } from '../services/auditLogService.js';
 import { productCreateBodySchema, productUpdateBodySchema } from '../validation/schemas.js';
+import { requireCapability } from '../middleware/requireCapability.js';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ const productSelect = {
 router.get(
   '/',
   requireFeature('products.read'),
+  requireCapability('shop:products:read'),
   asyncRoute('products.list', async (req: AuthRequest, res: Response) => {
     const clinicId = resolveTenantClinicId(req);
     const rows = await prisma.product.findMany({
@@ -46,6 +48,7 @@ router.get(
 router.post(
   '/',
   requireFeature('products.write'),
+  requireCapability('shop:products:manage'),
   validateBody(productCreateBodySchema),
   asyncRoute('products.create', async (req: AuthRequest, res: Response) => {
     const clinicId = resolveTenantClinicId(req);
@@ -95,6 +98,7 @@ router.post(
 router.get(
   '/:id',
   requireFeature('products.read'),
+  requireCapability('shop:products:read'),
   asyncRoute('products.get', async (req: AuthRequest, res: Response) => {
     const clinicId = resolveTenantClinicId(req);
     const row = await prisma.product.findFirst({
@@ -112,6 +116,7 @@ router.get(
 router.put(
   '/:id',
   requireFeature('products.write'),
+  requireCapability('shop:products:manage'),
   validateBody(productUpdateBodySchema),
   asyncRoute('products.update', async (req: AuthRequest, res: Response) => {
     const clinicId = resolveTenantClinicId(req);
@@ -175,6 +180,7 @@ router.put(
 router.delete(
   '/:id',
   requireFeature('products.write'),
+  requireCapability('shop:products:manage'),
   asyncRoute('products.delete', async (req: AuthRequest, res: Response) => {
     const clinicId = resolveTenantClinicId(req);
     const existing = await prisma.product.findFirst({

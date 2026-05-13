@@ -20,6 +20,7 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "config"],
+  "exclude": ["node_modules", "src/**/*.extract.tsx"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

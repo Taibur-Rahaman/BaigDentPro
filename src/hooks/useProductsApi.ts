@@ -2,27 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { userMessageFromUnknown } from '@/lib/apiErrors';
 import { productService, type SaasProduct } from '@/services/productService';
 
-export function isProductListPayload(v: unknown): v is { success: boolean; data: SaasProduct[] } {
-  if (!v || typeof v !== 'object') return false;
-  const o = v as Record<string, unknown>;
-  return o.success === true && Array.isArray(o.data);
-}
-
-export function isProductRowPayload(v: unknown): v is { success: boolean; data: SaasProduct } {
-  if (!v || typeof v !== 'object') return false;
-  const o = v as Record<string, unknown>;
-  const d = o.data;
-  return (
-    o.success === true &&
-    d !== null &&
-    typeof d === 'object' &&
-    typeof (d as SaasProduct).id === 'string' &&
-    typeof (d as SaasProduct).name === 'string' &&
-    typeof (d as SaasProduct).price === 'number' &&
-    typeof (d as SaasProduct).costPrice === 'number'
-  );
-}
-
 export function useProducts() {
   const [rows, setRows] = useState<SaasProduct[]>([]);
   const [loading, setLoading] = useState(false);
@@ -32,11 +11,7 @@ export function useProducts() {
     setError(null);
     setLoading(true);
     try {
-      const res = await productService.list();
-      if (!isProductListPayload(res)) {
-        throw new Error('Unexpected response from server.');
-      }
-      setRows(res.data);
+      setRows(await productService.list());
     } catch (e) {
       setError(userMessageFromUnknown(e));
     } finally {
@@ -58,14 +33,12 @@ export function useCreateProduct() {
     async (
       name: string,
       price: number,
-      costPrice = 0
+      costPrice = 0,
+      imageUrl?: string | null
     ): Promise<{ ok: true } | { ok: false; error: string }> => {
       setPending(true);
       try {
-        const res = await productService.create(name, price, costPrice);
-        if (!isProductRowPayload(res)) {
-          return { ok: false, error: 'Unexpected response from server.' };
-        }
+        await productService.create(name, price, costPrice, imageUrl);
         return { ok: true };
       } catch (e) {
         return { ok: false, error: userMessageFromUnknown(e) };

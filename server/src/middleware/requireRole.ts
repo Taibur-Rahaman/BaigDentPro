@@ -3,15 +3,15 @@ import type { Request, Response, NextFunction } from 'express';
 /**
  * Logical role groups (stored `User.role` uses Prisma strings).
  * - `ADMIN` → platform / clinic admins (`SUPER_ADMIN`, `CLINIC_ADMIN`, `CLINIC_OWNER`)
- * - `TENANT` → SaaS catalog-only tenants
- * - `SAAS_TENANT` → roles allowed to use tenant-scoped catalog & orders (scoped by `clinicId`)
+ * - `TENANT` → legacy catalog-only tenants (prefer `STORE_MANAGER` for new users)
+ * - `SAAS_TENANT` → tenant-scoped **retail** (`/api/products`, `/api/orders`) — **not** clinicians (DOCTOR uses DPMS only)
  */
 export type RoleKeyword = 'ADMIN' | 'TENANT' | 'SAAS_TENANT';
 
 const KEYWORD_MEMBERS: Record<RoleKeyword, readonly string[]> = {
   ADMIN: ['SUPER_ADMIN', 'CLINIC_ADMIN', 'CLINIC_OWNER'],
   TENANT: ['TENANT'],
-  SAAS_TENANT: ['TENANT', 'DOCTOR', 'CLINIC_ADMIN', 'CLINIC_OWNER', 'SUPER_ADMIN'],
+  SAAS_TENANT: ['TENANT', 'STORE_MANAGER', 'SELLER', 'CLINIC_ADMIN', 'CLINIC_OWNER', 'SUPER_ADMIN'],
 };
 
 function expandRoleArg(arg: RoleKeyword | string): string[] {
@@ -28,7 +28,7 @@ function readRole(req: Request): string | undefined {
 
 /**
  * Require an authenticated user whose `role` matches one of the allowed entries.
- * Pass keywords `ADMIN`, `TENANT`, or `SAAS_TENANT`, and/or concrete DB role strings (e.g. `SUPER_ADMIN`).
+ * Pass keywords `ADMIN`, `TENANT`, or `SAAS_TENANT`, and/or concrete DB role strings (e.g. `DOCTOR`, `STORE_MANAGER`).
  */
 export function requireRole(...allowed: Array<RoleKeyword | string>) {
   const allowedSet = new Set<string>();

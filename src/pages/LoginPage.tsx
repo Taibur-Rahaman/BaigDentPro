@@ -1,35 +1,43 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth, type AuthLoginMode } from '@/hooks/useAuth';
-import { isApiHttpError } from '@/lib/apiErrors';
+import { Link, useNavigate } from 'react-router-dom';
+import { useLoginLocationState } from '@/hooks/useLoginLocationState';
+import { useAuth } from '@/hooks/useAuth';
+import { loginErrorMessageForUser } from '@/lib/apiErrors';
+import { resolveLoginDestination } from '@/lib/postAuthDashboardPath';
+import { IdleSessionReturnedModal } from '@/components/IdleSessionReturnedModal';
+import { consumeIdleLogoutMarker } from '@/lib/idleSessionLogout';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const from = (location.state as { from?: string; message?: string } | null)?.from || '/dashboard';
-  const flash = (location.state as { message?: string } | null)?.message;
-  const { login, isAuthenticated, loading, isSupabaseConfigured } = useAuth();
+  const { from, flash } = useLoginLocationState();
+  const { login, isAuthenticated, loading, user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [loginMode, setLoginMode] = useState<AuthLoginMode>(() => (isSupabaseConfigured ? 'supabase' : 'api'));
+  const [showIdleReturnModal, setShowIdleReturnModal] = useState(false);
+
+  useEffect(() => {
+    if (consumeIdleLogoutMarker()) {
+      setShowIdleReturnModal(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (!loading && isAuthenticated) {
-      navigate(from, { replace: true });
+      navigate(resolveLoginDestination(user, from), { replace: true });
     }
-  }, [loading, isAuthenticated, navigate, from]);
+  }, [loading, isAuthenticated, navigate, from, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSubmitting(true);
     try {
-      await login(email, password, { mode: loginMode });
-      navigate(from, { replace: true });
+      const signedIn = await login(email, password);
+      navigate(resolveLoginDestination(signedIn, from), { replace: true });
     } catch (err: unknown) {
-      setError(isApiHttpError(err) ? err.message : err instanceof Error ? err.message : 'Sign-in failed');
+      setError(loginErrorMessageForUser(err));
     } finally {
       setSubmitting(false);
     }
@@ -37,10 +45,11 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="neo-auth" style={{ minHeight: '100vh' }}>
+      <IdleSessionReturnedModal open={showIdleReturnModal} onDismiss={() => setShowIdleReturnModal(false)} />
       <div className="neo-bg-grid" />
       <div className="neo-bg-glow neo-bg-glow-1" />
       <div className="neo-bg-glow neo-bg-glow-2" />
-      <div className="neo-auth-container" style={{ maxWidth: 440, margin: '0 auto', padding: '2rem 1rem' }}>
+      <div className="neo-auth-container neo-auth-container--solo">
         <div className="neo-auth-card">
           {flash ? (
             <div
@@ -58,38 +67,9 @@ export const LoginPage: React.FC = () => {
             </div>
           ) : null}
           <div className="neo-auth-card-header">
-            <h2>Sign in</h2>
-            <p>
-              {loginMode === 'supabase'
-                ? 'Use your Supabase account email and password.'
-                : 'Use your BaigDentPro email and password (API issues a JWT for the dashboard).'}
-            </p>
+            <h2>Staff sign in</h2>
+            <p>Enter the email and password for your BaigDentPro account.</p>
           </div>
-          {isSupabaseConfigured ? (
-            <div
-              style={{
-                display: 'flex',
-                gap: 8,
-                marginBottom: 16,
-                flexWrap: 'wrap',
-              }}
-            >
-              <button
-                type="button"
-                className={loginMode === 'supabase' ? 'neo-btn neo-btn-primary' : 'neo-btn neo-btn-secondary'}
-                onClick={() => setLoginMode('supabase')}
-              >
-                Supabase
-              </button>
-              <button
-                type="button"
-                className={loginMode === 'api' ? 'neo-btn neo-btn-primary' : 'neo-btn neo-btn-secondary'}
-                onClick={() => setLoginMode('api')}
-              >
-                API / JWT
-              </button>
-            </div>
-          ) : null}
           {error ? (
             <div className="neo-auth-error" role="alert">
               <i className="fa-solid fa-circle-exclamation" />
@@ -133,17 +113,23 @@ export const LoginPage: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <i className="fa-solid fa-arrow-right-to-bracket" />
+                  <i className="fa-solid fa-arrow-right-to-bracket" aria-hidden />
                   <span>Sign in</span>
                 </>
               )}
             </button>
-            <p className="neo-auth-switch">
-              No account? <Link to="/signup">Create one</Link>
-            </p>
-            <p className="neo-auth-switch">
-              <Link to="/portal">Clinic portal</Link> · <Link to="/">Home</Link>
-            </p>
+            <div className="neo-auth-subfooter">
+              <p className="neo-auth-switch" style={{ marginTop: 0 }}>
+                Need an account? <Link to="/signup">Create an account</Link>
+              </p>
+              <nav className="neo-auth-foot-nav" aria-label="Other pages">
+                <Link to="/staff-portal">Clinic portal login</Link>
+                <span className="neo-auth-foot-dot" aria-hidden>
+                  ·
+                </span>
+                <Link to="/">Home</Link>
+              </nav>
+            </div>
           </form>
         </div>
       </div>

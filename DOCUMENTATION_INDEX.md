@@ -11,9 +11,10 @@ Welcome to BaigDentPro Professional Dental Management System! This index will gu
 4. **What's New**: [ENHANCEMENT_SUMMARY.md](ENHANCEMENT_SUMMARY.md)
 
 ### For Developers
-1. **API Integration**: [BACKEND_INTEGRATION_GUIDE.md](BACKEND_INTEGRATION_GUIDE.md)
-2. **Development Plan**: [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md)
-3. **Complete Summary**: [TRANSFORMATION_SUMMARY.md](TRANSFORMATION_SUMMARY.md)
+1. **Master system spec (unified)**: [docs/MASTER_SYSTEM_SPEC.md](docs/MASTER_SYSTEM_SPEC.md)
+2. **API Integration**: [BACKEND_INTEGRATION_GUIDE.md](BACKEND_INTEGRATION_GUIDE.md)
+3. **Development Plan**: [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md)
+4. **Complete Summary**: [TRANSFORMATION_SUMMARY.md](TRANSFORMATION_SUMMARY.md)
 
 ---
 

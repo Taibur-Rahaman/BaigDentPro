@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { authenticate, type AuthRequest } from './auth.js';
 import { requireClinicScope } from './requireClinicScope.js';
+import { requireTenantIsolation } from './requireTenantIsolation.js';
 import { requireActiveSubscription } from './clinicSubscription.js';
 import { businessClinicContext } from '../context/businessClinicContext.js';
 import { attachEmrResponseAudit } from './emrComprehensiveAudit.js';
@@ -18,6 +19,7 @@ function matchesPrefix(path: string, prefix: string): boolean {
 const EXEMPT_AUTH_CLINIC_PREFIXES: readonly string[] = [
   '/api/auth',
   '/api/health',
+  '/api/branding',
   '/api/admin',
   '/api/super-admin',
   '/api/shop',
@@ -25,12 +27,14 @@ const EXEMPT_AUTH_CLINIC_PREFIXES: readonly string[] = [
   '/api/invite/accept',
   '/api/billing/webhook',
   '/api/payment/webhook',
+  /** Patient-facing portal (JWT is `kind: patient_portal`, not staff User). */
+  '/api/patient-portal',
 ];
 
 const EXEMPT_SUBSCRIPTION_PREFIXES: readonly string[] = [
   ...EXEMPT_AUTH_CLINIC_PREFIXES,
   '/api/billing',
-  '/api/payment/initiate',
+  '/api/payment/manual',
   '/api/subscription',
   '/api/invite',
   '/api/db',
@@ -57,13 +61,16 @@ export function businessApiAuthAndClinic(req: Request, res: Response, next: Next
     if (res.headersSent) return;
     requireClinicScope(req as AuthRequest, res, () => {
       if (res.headersSent) return;
-      const cid = (req as AuthRequest).businessClinicId?.trim();
-      if (cid) {
-        attachEmrResponseAudit(req, res);
-        businessClinicContext.run({ clinicId: cid }, () => next());
-        return;
-      }
-      next();
+      requireTenantIsolation(req as AuthRequest, res, () => {
+        if (res.headersSent) return;
+        const cid = (req as AuthRequest).businessClinicId?.trim();
+        if (cid) {
+          attachEmrResponseAudit(req, res);
+          businessClinicContext.run({ clinicId: cid }, () => next());
+          return;
+        }
+        next();
+      });
     });
   });
 }

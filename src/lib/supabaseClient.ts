@@ -5,11 +5,29 @@ const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.
 
 let browserClient: SupabaseClient | null = null;
 
+/** In-memory auth storage — avoids `localStorage` outside `coreApiClient` policy (session clears on full reload). */
+function createMemoryAuthStorage(): {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+  removeItem: (key: string) => void;
+} {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+  };
+}
+
 export function isSupabaseAuthConfigured(): boolean {
   return Boolean(url && anonKey);
 }
 
-/** Browser Supabase client (auth). Session persisted in `localStorage` by default. */
+/** Browser Supabase client (auth). Uses in-memory session storage (architecture lock). */
 export function getSupabase(): SupabaseClient | null {
   if (!isSupabaseAuthConfigured() || !url || !anonKey) return null;
   if (!browserClient) {
@@ -18,7 +36,7 @@ export function getSupabase(): SupabaseClient | null {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+        storage: typeof window !== 'undefined' ? createMemoryAuthStorage() : undefined,
       },
     });
   }

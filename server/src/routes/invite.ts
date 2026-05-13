@@ -32,6 +32,7 @@ function publicAppOrigin(): string {
 
 function mapInviteRoleToUserRole(inviteRole: string): string {
   if (inviteRole === 'ADMIN') return 'CLINIC_ADMIN';
+  if (inviteRole === 'STORE_MANAGER') return 'STORE_MANAGER';
   return inviteRole;
 }
 
@@ -126,6 +127,7 @@ router.post(
           clinicId: invite.clinicId,
           branchId: invite.branchId,
           isApproved: true,
+          accountStatus: 'ACTIVE',
           isActive: true,
           clinicName: invite.clinic.name,
         },
@@ -136,6 +138,7 @@ router.post(
           role: true,
           clinicId: true,
           isApproved: true,
+          accountStatus: true,
           sessionVersion: true,
         },
       });

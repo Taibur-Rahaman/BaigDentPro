@@ -10,14 +10,15 @@ export function normalizeClinicRegion(raw: string | null | undefined): ClinicReg
   return 'BD';
 }
 
-/** INTERNATIONAL clinics: CASH + STRIPE only (no bKash/Nagad ledger). */
+/** Clinic invoices: **CASH only** (offline). SaaS plans use WhatsApp (`config/payment.ts`). */
 export function assertPaymentSourceAllowedForRegion(
   source: InvoicePaymentSource,
-  region: ClinicRegion
+  _region: ClinicRegion
 ): { ok: true } | { ok: false; error: string } {
-  if (region !== 'INTERNATIONAL') return { ok: true };
-  if (source === 'BKASH' || source === 'NAGAD') {
-    return { ok: false, error: 'This clinic region does not support bKash or Nagad payments' };
-  }
-  return { ok: true };
+  if (source === 'CASH') return { ok: true };
+  return {
+    ok: false,
+    error:
+      'Only CASH invoice payments are supported. Subscription upgrades use WhatsApp — see Clinic Subscription.',
+  };
 }

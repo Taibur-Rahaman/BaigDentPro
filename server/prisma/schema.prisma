@@ -6,8 +6,10 @@ datasource db {
   // For production, ALWAYS point this to a managed PostgreSQL instance
   // via the DATABASE_URL environment variable, e.g.:
   // DATABASE_URL="postgresql://user:password@host:5432/baigdentpro?connection_limit=10&pool_timeout=30"
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Session/direct path for Prisma Migrate (avoid transaction pooler 6543 for migrations).
+  directUrl = env("DIRECT_URL")
 }
 
 // ============== USER & AUTH ==============
@@ -18,8 +20,8 @@ model User {
   password      String
   name          String
   // SQLite connector doesn't support Prisma enums; use string role instead.
-  // Allowed values (by convention): SUPER_ADMIN, CLINIC_ADMIN, CLINIC_OWNER (admin + billing), DOCTOR,
-  // RECEPTIONIST, LAB_TECH, DENTAL_ASSISTANT (optional), TENANT (SaaS catalog-only tenants)
+  // Canonical: SUPER_ADMIN | CLINIC_ADMIN | DOCTOR | STORE_MANAGER (+ legacy CLINIC_OWNER, RECEPTIONIST,
+  // LAB_TECH, DENTAL_ASSISTANT, TENANT=PaaS-shop-only alias, PENDING_APPROVAL onboarding).
   role          String    @default("DOCTOR")
   phone         String?
   clinicName    String?
@@ -27,13 +29,20 @@ model User {
   clinicPhone   String?
   clinicEmail   String?
   clinicLogo    String?
+  /// Honorific / prefix only (e.g. "Dr.", "Prof.") — not duplicated in `name`.
+  title         String?
   degree        String?
   specialization String?
   licenseNo     String?
+  /// Super Admin–verified professional credentials (title/degree/specialization locked for self-service edits).
+  professionalVerified   Boolean   @default(false)
+  professionalVerifiedAt DateTime?
   /// When false, login and API access are blocked (clinic admin / super admin controlled).
   isActive      Boolean   @default(true)
   /// Self-service signups start false until SUPER_ADMIN approves. Staff created by admins are true.
   isApproved    Boolean   @default(true)
+  /// Access lifecycle: PENDING (awaiting SuperAdmin assignment), ACTIVE (full access), SUSPENDED (blocked).
+  accountStatus String    @default("PENDING")
   /// Bumped to invalidate issued JWTs (password change, logout-all, role change, etc.).
   sessionVersion Int      @default(0)
   createdAt     DateTime  @default(now())
@@ -67,6 +76,7 @@ model User {
   fraudAlerts FraudAlert[]
   impersonationSessionsAsActor ImpersonationSession[] @relation("ImpersonationActor")
   verifiedInvoicePayments Payment[] @relation("InvoicePaymentVerifiedBy")
+  subscriptionPaymentsCreated SubscriptionPayment[] @relation("SubscriptionPaymentRequester")
 }
 
 /// Security / compliance audit trail (structured metadata).
@@ -97,12 +107,19 @@ model Clinic {
   id        String   @id @default(cuid())
   name      String
   plan      String   @default("FREE")
+  /// Commercial tier for DPMS feature matrix: STARTER | GROWTH | ENTERPRISE
+  planTier  String   @default("STARTER")
+  /// Demo/sandbox clinics — isolated datasets; SuperAdmin may reset without touching production tenants.
+  isDemo    Boolean  @default(false)
   isActive  Boolean  @default(true)
   ownerId   String?
   address   String?
   phone     String?
   email     String?
   logo      String?
+  settings  Json     @default("{}")
+  /// IANA zone name (e.g. Asia/Dhaka); optional display/scheduling hint.
+  timezone  String?
   /// BD = CASH + bKash + Nagad + Stripe. INTERNATIONAL = CASH + Stripe only.
   region    String   @default("BD")
   createdAt DateTime @default(now())
@@ -125,6 +142,41 @@ model Clinic {
   fraudAlerts   FraudAlert[]
   appointments  Appointment[]
   invoices      Invoice[]
+  patientPortalOtps PatientPortalOtp[]
+  appointmentWaitlistEntries AppointmentWaitlistEntry[]
+  featureFlagRows           ClinicFeatureFlag[]
+  capabilityOverrides       ClinicCapabilityOverride[]
+}
+
+/// Per-clinic feature overrides (enterprise toggles). Server merges with plan tier defaults + subscription JSON.
+model ClinicFeatureFlag {
+  id         String   @id @default(cuid())
+  clinicId   String
+  clinic     Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  featureKey String
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([clinicId, featureKey])
+  @@index([clinicId])
+  @@map("clinic_feature_flags")
+}
+
+/// SuperAdmin-controlled overlay on effective capabilities (`grant`=true adds; `grant`=false revokes).
+model ClinicCapabilityOverride {
+  id             String   @id @default(cuid())
+  clinicId       String
+  clinic         Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  capabilityKey  String
+  /// When true: force-include capability (within taxonomy). When false: force-remove even if role+plan allow.
+  grant          Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([clinicId, capabilityKey])
+  @@index([clinicId])
+  @@map("clinic_capability_overrides")
 }
 
 model Plan {
@@ -191,22 +243,30 @@ model Subscription {
   @@map("subscriptions")
 }
 
-/// SaaS subscription checkout rows (bKash / Nagad / Stripe placeholders). Not the same as invoice `Payment`.
+/// SaaS subscription checkout — **manual WhatsApp settlement only** (see `/config/payment.ts` policy).
 model SubscriptionPayment {
   id          String   @id @default(uuid())
   clinicId    String
+  /// User who initiated the payment request (clinic admin).
+  userId      String?
+  user        User?    @relation("SubscriptionPaymentRequester", fields: [userId], references: [id], onDelete: SetNull)
   amount      Int
   method      String
+  /// PENDING | CONTACTED | PAID | REJECTED (legacy rows may still read SUCCESS from older Stripe flow).
   status      String
   externalRef String?
-  /// Target plan code when this payment is meant to unlock a subscription upgrade (Stripe metadata).
   planCode    String?
+  /// Human-readable plan title for WhatsApp template (e.g. "PREMIUM").
+  planName    String?
   metadata    Json?
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
 
   @@index([clinicId])
+  @@index([status])
+  @@index([userId])
   @@map("subscription_payments")
 }
 
@@ -330,12 +390,45 @@ model Patient {
   invoices         Invoice[]
   labOrders        LabOrder[]
   consents         PatientConsent[]
+  portalOtps       PatientPortalOtp[]
+  portalRefreshTokens PatientPortalRefreshToken[]
+  appointmentWaitlistEntries AppointmentWaitlistEntry[]
 
   @@index([userId])
   @@index([clinicId])
   @@index([phone])
   @@index([name])
   @@unique([id, clinicId], name: "patient_id_clinic_unique")
+}
+
+model PatientPortalOtp {
+  id        String   @id @default(cuid())
+  patientId String
+  clinicId  String
+  codeHash  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  clinic  Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, clinicId])
+  @@index([expiresAt])
+  @@map("patient_portal_otps")
+}
+
+model PatientPortalRefreshToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  patientId String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("patient_portal_refresh_tokens")
 }
 
 model MedicalHistory {
@@ -390,6 +483,8 @@ model DentalChart {
   
   toothNumber   Int
   condition     String
+  /// Per-surface state keyed by M | D | O | B | L (JSON object).
+  surfaces      Json      @default("{}")
   notes         String?
   treatment     String?
   treatmentDate DateTime?
@@ -474,6 +569,22 @@ model Appointment {
   @@index([clinicId, chairId, date])
 }
 
+/// Simple queue when no slot is available — staff-managed waitlist (Scheduling domain).
+model AppointmentWaitlistEntry {
+  id            String    @id @default(cuid())
+  clinicId      String
+  clinic        Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patientId     String
+  patient       Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  preferredDate DateTime?
+  duration      Int       @default(30)
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  @@index([clinicId])
+  @@index([patientId])
+}
+
 // ============== PRESCRIPTIONS ==============
 
 model Prescription {
@@ -516,6 +627,9 @@ model PrescriptionItem {
   dosage          String
   frequency       String
   duration        String
+  maxDailyDose    String?
+  doctorNotes     String?
+  allowDoseOverride Boolean @default(false)
   beforeFood      Boolean  @default(false)
   afterFood       Boolean  @default(true)
   instructions    String?

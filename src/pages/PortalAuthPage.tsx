@@ -1,202 +1,40 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import api from '@/api';
-import { useAuth } from '@/hooks/useAuth';
-import { getSupabase, isSupabaseAuthConfigured } from '@/lib/supabaseClient';
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { usePortalAuthView } from '@/hooks/view/usePortalAuthView';
+import { isSupabaseAuthConfigured } from '@/lib/supabaseClient';
+import { useSiteLogo } from '@/hooks/useSiteLogo';
 
 /** Legacy clinic registration, Prisma login, password reset (Supabase email link). */
 export const PortalAuthPage: React.FC = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { refreshSession } = useAuth();
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [registerInfo, setRegisterInfo] = useState('');
-  const [isRegister, setIsRegister] = useState(false);
-  const [registerData, setRegisterData] = useState({
-    email: '',
-    password: '',
-    name: '',
-    clinicName: '',
-    phone: '',
-  });
-  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
-  const [recoveryMode, setRecoveryMode] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSentMessage, setForgotSentMessage] = useState('');
-  const [recoveryPassword, setRecoveryPassword] = useState('');
-  const [recoveryPasswordConfirm, setRecoveryPasswordConfirm] = useState('');
-
-  const recoveryHandled = React.useRef(false);
-  useEffect(() => {
-    const st = location.state as { recovery?: boolean } | null;
-    if (!st?.recovery || recoveryHandled.current) return;
-    recoveryHandled.current = true;
-    setIsRegister(false);
-    setForgotPasswordMode(false);
-    setForgotSentMessage('');
-    setRecoveryMode(true);
-    navigate(location.pathname, { replace: true, state: {} });
-  }, [location.pathname, location.state, navigate]);
-
-  useEffect(() => {
-    const token = localStorage.getItem('baigdentpro:token');
-    const savedUser = localStorage.getItem('baigdentpro:user');
-    if (!token) return;
-
-    if (savedUser) {
-      try {
-        JSON.parse(savedUser);
-        void refreshSession().then(() => navigate('/dashboard', { replace: true }));
-      } catch {
-        localStorage.removeItem('baigdentpro:user');
-      }
-      return;
-    }
-
-    api.auth
-      .me()
-      .then((u) => {
-        localStorage.setItem('baigdentpro:user', JSON.stringify(u));
-        void refreshSession().then(() => navigate('/dashboard', { replace: true }));
-      })
-      .catch(() => {
-        api.auth.logout();
-      });
-  }, [navigate, refreshSession]);
-
-  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError('');
-    setRegisterInfo('');
-    setIsLoading(true);
-
-    const form = e.currentTarget;
-    const email = (form.querySelector('input[name="email"]') as HTMLInputElement)?.value?.trim();
-    const password = (form.querySelector('input[name="password"]') as HTMLInputElement)?.value;
-
-    try {
-      const sb = getSupabase();
-      if (sb && email && password) {
-        const { data: sbData, error: sbError } = await sb.auth.signInWithPassword({ email, password });
-        if (!sbError && sbData.session?.access_token) {
-          try {
-            const result = await api.auth.exchangeSupabaseSession(sbData.session.access_token);
-            await sb.auth.signOut();
-            localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
-            await refreshSession();
-            navigate('/dashboard', { replace: true });
-            return;
-          } catch (exchangeErr: any) {
-            await sb.auth.signOut();
-            setError(exchangeErr.message || 'Could not complete sign-in for this account');
-            return;
-          }
-        }
-      }
-
-      const result = await api.auth.login(email, password);
-      localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
-      await refreshSession();
-      navigate('/dashboard', { replace: true });
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError('');
-    setForgotSentMessage('');
-    const sb = getSupabase();
-    if (!sb) {
-      setError('Password reset requires Supabase. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const redirectTo = `${window.location.origin}${window.location.pathname || '/'}`;
-      const { error: sbErr } = await sb.auth.resetPasswordForEmail(forgotEmail.trim(), { redirectTo });
-      if (sbErr) throw new Error(sbErr.message);
-      setForgotSentMessage('If an account exists for that email, you will receive a reset link shortly.');
-    } catch (err: any) {
-      setError(err.message || 'Could not send reset email');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRecoveryPassword = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError('');
-    if (recoveryPassword !== recoveryPasswordConfirm) {
-      setError('Passwords do not match');
-      return;
-    }
-    const sb = getSupabase();
-    if (!sb) {
-      setError('Session lost. Open the reset link from your email again.');
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const { error: upErr } = await sb.auth.updateUser({ password: recoveryPassword });
-      if (upErr) throw new Error(upErr.message);
-      const {
-        data: { session },
-      } = await sb.auth.getSession();
-      if (!session?.access_token) throw new Error('Session expired. Open the reset link again.');
-      await api.auth.syncPrismaPassword(session.access_token, recoveryPassword);
-      const result = await api.auth.exchangeSupabaseSession(session.access_token);
-      await sb.auth.signOut();
-      localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
-      setRecoveryMode(false);
-      setRecoveryPassword('');
-      setRecoveryPasswordConfirm('');
-      await refreshSession();
-      navigate('/dashboard', { replace: true });
-    } catch (err: any) {
-      setError(err.message || 'Could not update password');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    try {
-      const result = await api.auth.register(registerData);
-      if (result.pendingApproval || !result.token) {
-        setRegisterInfo(
-          result.message ||
-            'Your account was created and is pending approval by a platform administrator. You cannot sign in until it is approved.'
-        );
-        setError('');
-        setIsRegister(false);
-        setRegisterData({
-          email: '',
-          password: '',
-          name: '',
-          clinicName: '',
-          phone: '',
-        });
-        return;
-      }
-      localStorage.setItem('baigdentpro:user', JSON.stringify(result.user));
-      setRegisterInfo('');
-      await refreshSession();
-      navigate('/dashboard', { replace: true });
-    } catch (err: any) {
-      setError(err.message || 'Registration failed');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const siteLogo = useSiteLogo();
+  const {
+    navigate,
+    isLoading,
+    error,
+    setError,
+    registerInfo,
+    setRegisterInfo,
+    isRegister,
+    setIsRegister,
+    registerData,
+    setRegisterData,
+    forgotPasswordMode,
+    setForgotPasswordMode,
+    recoveryMode,
+    setRecoveryMode,
+    forgotEmail,
+    setForgotEmail,
+    forgotSentMessage,
+    setForgotSentMessage,
+    recoveryPassword,
+    setRecoveryPassword,
+    recoveryPasswordConfirm,
+    setRecoveryPasswordConfirm,
+    handleLogin,
+    handleForgotPassword,
+    handleRecoveryPassword,
+    handleRegister,
+  } = usePortalAuthView();
 
   return (
     <div className="neo-auth">
@@ -204,23 +42,23 @@ export const PortalAuthPage: React.FC = () => {
       <div className="neo-bg-grid"></div>
       <div className="neo-bg-glow neo-bg-glow-1"></div>
       <div className="neo-bg-glow neo-bg-glow-2"></div>
-      
+
       <div className="neo-auth-container">
         {/* Left Panel - Branding */}
         <div className="neo-auth-brand">
           <div className="neo-auth-brand-content">
             <div className="neo-logo neo-logo-lg" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-              <img src="/logo.png" alt="BaigDentPro" className="neo-logo-img neo-logo-img-lg" />
+              <img src={siteLogo} alt="BaigDentPro" className="neo-logo-img neo-logo-img-lg" />
             </div>
-            
+
             <h1 className="neo-auth-title">
               <span className="neo-gradient-text">Next-Gen</span> Dental
-              <br />Practice Management
+              <br />
+              Practice Management
             </h1>
-            
+
             <p className="neo-auth-subtitle">
-              One powerful dashboard for everything. Prescriptions, patient records, 
-              appointments, billing, and lab orders — all in one place.
+              One powerful dashboard for everything. Prescriptions, patient records, appointments, billing, and lab orders — all in one place.
             </p>
 
             <div className="neo-auth-features">
@@ -274,13 +112,7 @@ export const PortalAuthPage: React.FC = () => {
           <div className="neo-auth-card">
             <div className="neo-auth-card-header">
               <h2>
-                {isRegister
-                  ? 'Create Account'
-                  : recoveryMode
-                    ? 'Set new password'
-                    : forgotPasswordMode
-                      ? 'Reset password'
-                      : 'Welcome Back'}
+                {isRegister ? 'Create Account' : recoveryMode ? 'Set new password' : forgotPasswordMode ? 'Reset password' : 'Welcome Back'}
               </h2>
               <p>
                 {isRegister
@@ -325,7 +157,7 @@ export const PortalAuthPage: React.FC = () => {
             )}
 
             {isRegister ? (
-              <form onSubmit={handleRegister} className="neo-auth-form">
+              <form onSubmit={(e) => void handleRegister(e)} className="neo-auth-form">
                 <p style={{ margin: '0 0 16px', fontSize: 14, color: '#64748b', lineHeight: 1.5 }}>
                   After you submit this form, a platform super admin must approve your clinic before you can sign in.
                 </p>
@@ -366,6 +198,40 @@ export const PortalAuthPage: React.FC = () => {
                       placeholder="Create a password"
                       required
                     />
+                  </div>
+                </div>
+                <div className="neo-form-row">
+                  <div className="neo-form-group">
+                    <label>Professional title</label>
+                    <div className="neo-input-wrapper">
+                      <i className="fa-solid fa-user-doctor"></i>
+                      <input
+                        type="text"
+                        value={registerData.title}
+                        onChange={(e) => setRegisterData({ ...registerData, title: e.target.value })}
+                        placeholder="Optional — Dr., Prof…"
+                        maxLength={80}
+                      />
+                    </div>
+                  </div>
+                  <div className="neo-form-group">
+                    <label>Degree / qualification</label>
+                    <div className="neo-input-wrapper">
+                      <i className="fa-solid fa-graduation-cap"></i>
+                      <input
+                        type="text"
+                        value={registerData.degree}
+                        onChange={(e) => setRegisterData({ ...registerData, degree: e.target.value })}
+                        placeholder="Optional — BDS, DDS…"
+                        maxLength={200}
+                        list="register-degree-options"
+                      />
+                    </div>
+                    <datalist id="register-degree-options">
+                      {['BDS', 'DDS', 'FCPS', 'MS', 'MDS'].map((x) => (
+                        <option key={x} value={x} />
+                      ))}
+                    </datalist>
                   </div>
                 </div>
                 <div className="neo-form-row">
@@ -422,7 +288,7 @@ export const PortalAuthPage: React.FC = () => {
                 </p>
               </form>
             ) : forgotPasswordMode && !recoveryMode ? (
-              <form onSubmit={handleForgotPassword} className="neo-auth-form">
+              <form onSubmit={(e) => void handleForgotPassword(e)} className="neo-auth-form">
                 <div className="neo-form-group">
                   <label>Email</label>
                   <div className="neo-input-wrapper">
@@ -477,7 +343,7 @@ export const PortalAuthPage: React.FC = () => {
                 </p>
               </form>
             ) : recoveryMode ? (
-              <form onSubmit={handleRecoveryPassword} className="neo-auth-form">
+              <form onSubmit={(e) => void handleRecoveryPassword(e)} className="neo-auth-form">
                 <div className="neo-form-group">
                   <label>New password</label>
                   <div className="neo-input-wrapper">
@@ -521,7 +387,7 @@ export const PortalAuthPage: React.FC = () => {
                 </button>
               </form>
             ) : (
-              <form onSubmit={handleLogin} className="neo-auth-form">
+              <form onSubmit={(e) => void handleLogin(e)} className="neo-auth-form">
                 <div className="neo-form-group">
                   <label>Email</label>
                   <div className="neo-input-wrapper">
@@ -570,18 +436,18 @@ export const PortalAuthPage: React.FC = () => {
                 <button type="submit" className="neo-btn neo-btn-primary neo-btn-block neo-btn-lg" disabled={isLoading}>
                   {isLoading ? (
                     <>
-                      <i className="fa-solid fa-spinner fa-spin"></i>
-                      <span>Signing In...</span>
+                      <i className="fa-solid fa-spinner fa-spin" aria-hidden></i>
+                      <span>Signing in…</span>
                     </>
                   ) : (
                     <>
-                      <i className="fa-solid fa-arrow-right-to-bracket"></i>
-                      <span>Sign In to Dashboard</span>
+                      <i className="fa-solid fa-arrow-right-to-bracket" aria-hidden></i>
+                      <span>Sign in</span>
                     </>
                   )}
                 </button>
                 <p className="neo-auth-switch">
-                  New to BaigDentPro?{' '}
+                  New here?{' '}
                   <button
                     type="button"
                     onClick={() => {
@@ -592,19 +458,21 @@ export const PortalAuthPage: React.FC = () => {
                       setRecoveryMode(false);
                     }}
                   >
-                    Create Account
+                    Register your clinic
                   </button>
                 </p>
               </form>
             )}
 
             <div className="neo-auth-footer">
-              <p className="neo-auth-switch" style={{ marginBottom: 12 }}>
-                <Link to="/login">Supabase sign-in</Link>
-                {' · '}
-                <Link to="/signup">Supabase sign-up</Link>
-              </p>
-              <p className="neo-auth-demo">Demo: demo@baigdentpro.com / password123</p>
+              <nav className="neo-auth-foot-nav" aria-label="Other sign-in options" style={{ marginBottom: 12 }}>
+                <Link to="/login">Staff database login</Link>
+                <span className="neo-auth-foot-dot" aria-hidden>
+                  ·
+                </span>
+                <Link to="/">Home</Link>
+              </nav>
+              <p className="neo-auth-demo">Use the credentials your clinic administrator gave you.</p>
               <p className="neo-auth-copyright">© 2026 BaigDentPro • Omix Solutions</p>
             </div>
           </div>

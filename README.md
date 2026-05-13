@@ -46,9 +46,9 @@ Open the URL from Vite (e.g. `http://localhost:5173`). Data is stored in the bro
    npm run dev
    ```
    App runs at `http://localhost:5173`. After `npm run db:seed`, use **Sign In** with:
-   - **Clinic admin** (manages doctor access under **Clinic admin** in the sidebar): `demo@baigdentpro.com` / `password123`
-   - **Doctor** (same clinic, no admin panel): `doctor@baigdentpro.com` / `password123`
-   - **Platform super admin** (all clinics, separate **Super Admin** panel): `superadmin@baigdentpro.com` / `super123`
+   - **Clinic admin**: use your provisioned credentials
+   - **Doctor**: use your provisioned credentials
+   - **Platform super admin**: provision via secure seed environment variables only
 
    After login, the dashboard loads and saves patients, appointments, prescriptions, invoices, and lab orders via the API.
 

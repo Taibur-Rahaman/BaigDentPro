@@ -12,6 +12,8 @@ export type AccessTokenUser = {
 export type SignAccessTokenOptions = {
   /** Cached subscription tier for UX only; server always re-checks DB. */
   planSnapshot?: string;
+  /** Effective capability vocabulary for fast route checks (`*` for SUPER_ADMIN). */
+  capabilities?: string[];
   expiresIn?: SignOptions['expiresIn'];
   impersonating?: boolean;
   /** Server-issued impersonation session id (must match `ImpersonationSession.jti`). */
@@ -35,6 +37,7 @@ export function signAccessToken(user: AccessTokenUser, options?: SignAccessToken
       clinicId,
       sessionVersion: user.sessionVersion,
       ...(options?.planSnapshot ? { plan: options.planSnapshot } : {}),
+      ...(options?.capabilities?.length ? { capabilities: options.capabilities } : {}),
       ...(options?.impersonating
         ? {
             impersonating: true,

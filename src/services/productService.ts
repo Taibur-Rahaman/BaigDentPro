@@ -1,43 +1,15 @@
-import { apiRequest } from '@/lib/apiClient';
-import { apiRoutes } from '@/services/entityService';
+import api from '@/api';
+import type { SaasProduct } from '@/types/tenantSaas';
 
-export type SaasProduct = {
-  id: string;
-  name: string;
-  price: number;
-  costPrice: number;
-  imageUrl?: string | null;
-  clinicId: string;
-  createdAt?: string;
-  updatedAt?: string;
-};
+export type { SaasProduct } from '@/types/tenantSaas';
 
 export const productService = {
-  list: () => apiRequest(`${apiRoutes.products}`),
-  get: (id: string) => apiRequest(`${apiRoutes.products}/${encodeURIComponent(id)}`),
+  list: (): Promise<SaasProduct[]> => api.tenantProducts.list(),
+  get: (id: string): Promise<SaasProduct> => api.tenantProducts.get(id),
+  uploadImage: (file: File): Promise<string> => api.tenantProducts.uploadImage(file),
   create: (name: string, price: number, costPrice = 0, imageUrl?: string | null) =>
-    apiRequest(`${apiRoutes.products}`, {
-      method: 'POST',
-      body: JSON.stringify({
-        name,
-        price,
-        costPrice,
-        ...(imageUrl !== undefined && imageUrl !== null && imageUrl !== ''
-          ? { imageUrl }
-          : {}),
-      }),
-    }),
+    api.tenantProducts.create(name, price, costPrice, imageUrl),
   update: (id: string, name: string, price: number, costPrice?: number) =>
-    apiRequest(`${apiRoutes.products}/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        name,
-        price,
-        ...(costPrice !== undefined ? { costPrice } : {}),
-      }),
-    }),
-  remove: (id: string) =>
-    apiRequest(`${apiRoutes.products}/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }),
+    api.tenantProducts.update(id, name, price, costPrice),
+  remove: (id: string): Promise<void> => api.tenantProducts.remove(id),
 };

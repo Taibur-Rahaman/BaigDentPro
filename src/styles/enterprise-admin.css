@@ -1,0 +1,185 @@
+/* Scoped enterprise control center — complements existing dashboard primitives. */
+
+.enterprise-admin-shell {
+  --eas-sidebar-w: 280px;
+  --eas-sidebar-collapsed-w: 72px;
+  --eas-border: 1px solid rgba(148, 163, 184, 0.28);
+  --eas-muted: var(--neo-text-muted, #64748b);
+  background: radial-gradient(1200px 600px at 10% -10%, rgba(59, 130, 246, 0.06), transparent 55%),
+    var(--neo-bg-surface-0, #f8fafc);
+  min-height: 100vh;
+  display: flex;
+}
+
+.enterprise-admin-sidebar {
+  flex: 0 0 var(--eas-sidebar-w);
+  border-right: var(--eas-border);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  transition: flex-basis 0.2s ease, width 0.2s ease;
+}
+
+.enterprise-admin-sidebar.collapsed {
+  flex-basis: var(--eas-sidebar-collapsed-w);
+}
+
+.enterprise-admin-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  border-bottom: var(--eas-border);
+}
+
+.enterprise-admin-brand-title {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-size: 13px;
+  text-transform: uppercase;
+  color: #0f172a;
+}
+
+.enterprise-admin-brand-sub {
+  font-size: 11px;
+  color: var(--eas-muted);
+  margin-top: 2px;
+}
+
+.enterprise-admin-collapse-btn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--eas-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+}
+.enterprise-admin-collapse-btn:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+}
+
+.enterprise-admin-sidebar-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 0 80px;
+}
+
+.enterprise-admin-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--eas-muted);
+  padding: 12px 16px 6px;
+  font-weight: 600;
+}
+
+.enterprise-admin-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 0 8px 2px;
+  border-radius: 10px;
+  color: #334155;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.enterprise-admin-nav-link i {
+  width: 18px;
+  text-align: center;
+  opacity: 0.85;
+}
+
+.enterprise-admin-nav-link:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.enterprise-admin-nav-link.active {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+
+.enterprise-admin-sidebar.collapsed .enterprise-admin-brand-title,
+.enterprise-admin-sidebar.collapsed .enterprise-admin-brand-sub,
+.enterprise-admin-sidebar.collapsed .enterprise-admin-section-label,
+.enterprise-admin-sidebar.collapsed .enterprise-admin-nav-link span:not(.eas-sr-hide) {
+  display: none;
+}
+
+.enterprise-admin-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.enterprise-admin-topbar {
+  height: 56px;
+  border-bottom: var(--eas-border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.enterprise-admin-bc {
+  font-size: 13px;
+  color: var(--eas-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enterprise-admin-cmdkbd {
+  font-size: 11px;
+  border: var(--eas-border);
+  border-radius: 6px;
+  padding: 3px 7px;
+  color: var(--eas-muted);
+  background: #fff;
+}
+
+.enterprise-admin-frame {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px 32px;
+}
+
+@media (max-width: 920px) {
+  .enterprise-admin-shell {
+    flex-direction: column;
+  }
+  .enterprise-admin-sidebar {
+    flex: 0 0 auto;
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    align-items: center;
+    border-right: none;
+    border-bottom: var(--eas-border);
+  }
+  .enterprise-admin-sidebar-scroll {
+    display: flex;
+    overflow-x: auto;
+    gap: 4px;
+    padding: 8px;
+  }
+  .enterprise-admin-section-label {
+    display: none;
+  }
+  .enterprise-admin-nav-link {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .enterprise-admin-collapse-btn {
+    display: none;
+  }
+}

@@ -5,6 +5,7 @@ import { resolveBusinessClinicId } from '../utils/requestClinic.js';
 import { sendSMS } from '../services/sms.js';
 import { sendEmail } from '../services/email.js';
 import { sendWhatsAppMessage } from '../services/whatsapp.js';
+import { workflowMarkReminderSent } from '../domains/workflow/appointmentWorkflowService.js';
 
 const router = Router();
 
@@ -72,9 +73,9 @@ router.post('/sms/appointment-reminder', async (req: AuthRequest, res) => {
     });
 
     if (result.success) {
-      await prisma.appointment.update({
-        where: { id: appointmentId },
-        data: { reminderSent: true, reminderSentAt: new Date() },
+      await workflowMarkReminderSent({
+        clinicId: resolveBusinessClinicId(req),
+        appointmentId,
       });
       res.json({ message: 'Reminder sent successfully' });
     } else {
@@ -125,9 +126,9 @@ router.post('/sms/bulk-reminder', async (req: AuthRequest, res) => {
 
       if (result.success) {
         sent++;
-        await prisma.appointment.update({
-          where: { id: appointment.id },
-          data: { reminderSent: true, reminderSentAt: new Date() },
+        await workflowMarkReminderSent({
+          clinicId: resolveBusinessClinicId(req),
+          appointmentId: appointment.id,
         });
       } else {
         failed++;

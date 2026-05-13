@@ -16,7 +16,6 @@ export function isDatabaseUnreachableError(err: unknown): boolean {
 
 export function sendDatabaseUnavailable(res: Response): void {
   res.status(503).json({
-    error:
-      'Database is not reachable. Start PostgreSQL (from repo root: `docker compose up -d`), then run `npm run db:setup:doctor` (migrations + seed for practice panel) or `cd server && npx prisma db push && npm run db:seed`. Or set DATABASE_URL to your hosted Postgres.',
+    error: 'Database not connected',
   });
 }

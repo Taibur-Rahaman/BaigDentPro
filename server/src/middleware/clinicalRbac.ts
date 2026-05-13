@@ -3,6 +3,7 @@ import type { AuthRequest } from './auth.js';
 import { writeAuditLog } from '../services/auditLogService.js';
 import { recordRbacDenialSpike } from '../services/fraudAlertService.js';
 import { resolveBusinessClinicId } from '../utils/requestClinic.js';
+import { isStoreOnlyRole as isRetailOnlyRole, isSuperAdminRole } from '../security/rbac.js';
 
 /** Canonical clinical roles (stored on `User.role`). */
 export const CLINICAL_ROLES = {
@@ -10,6 +11,7 @@ export const CLINICAL_ROLES = {
   CLINIC_ADMIN: 'CLINIC_ADMIN',
   CLINIC_OWNER: 'CLINIC_OWNER',
   DOCTOR: 'DOCTOR',
+  STORE_MANAGER: 'STORE_MANAGER',
   RECEPTIONIST: 'RECEPTIONIST',
   LAB_TECH: 'LAB_TECH',
   TENANT: 'TENANT',
@@ -20,7 +22,7 @@ function rawRole(req: AuthRequest): string {
 }
 
 function isPlatformAdmin(role: string): boolean {
-  return role === CLINICAL_ROLES.SUPER_ADMIN;
+  return isSuperAdminRole(role);
 }
 
 /** Full clinic administration (not SaaS super-admin). */
@@ -69,10 +71,10 @@ function forbidden(req: Request, res: Response, message: string, reason: string)
   res.status(403).json({ error: message });
 }
 
-/** SaaS catalog tenants must not access clinic EMR APIs. */
+/** Shop-only roles must not access clinic EMR routers (TENANT legacy + STORE_MANAGER). */
 export function blockTenantFromEmr(req: Request, res: Response, next: NextFunction): void {
   const r = rawRole(req as AuthRequest);
-  if (r === CLINICAL_ROLES.TENANT) {
+  if (isRetailOnlyRole(r)) {
     forbidden(req, res, 'This account cannot access clinic EMR modules', 'tenant_emr_block');
     return;
   }
@@ -259,7 +261,7 @@ export function requireInvoicesEmrAccess(req: Request, res: Response, next: Next
   forbidden(req, res, 'Insufficient permissions', 'invoices_other');
 }
 
-/** bKash / Nagad / Stripe async verification — clinic admin or owner only (not receptionist). */
+/** Legacy async payment verification (mostly retired) — clinic admin or owner only (not receptionist). */
 export function requireInvoicePaymentVerificationAccess(req: Request, res: Response, next: NextFunction): void {
   const a = req as AuthRequest;
   const r = rawRole(a);

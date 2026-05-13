@@ -10,6 +10,10 @@ dist/
 server/dist/
 *.local
 
+# Hostinger deploy staging tree (developer-local; never tracked again).
+# Restored by `scripts/find-live-frontend-root.example.sh` workflows on demand.
+.tmp-hostinger-server/
+
 # Database
 *.db
 server/prisma/*.db
@@ -22,6 +26,25 @@ server/backups/
 server/.env
 .env.alpha
 server/.env.alpha
+.env.development
+.env.production
+
+# Build/release artifacts that must never be committed.
+# Build them with the proper script and upload directly to the host.
+*.zip
+dist_*
+
+# QA / probe output dumps (regenerable via scripts in /scripts/qa-*.mjs).
+qa-*.json
+
+# Compiled Prisma seed/helper outputs (TypeScript source is the SSOT).
+server/prisma/seedDemoUsers.js
+server/prisma/seedDemoUsers.js.map
+server/prisma/seedDemoUsers.d.ts
+server/prisma/seedDemoUsers.d.ts.map
+
+# External reference checkout — embedded git repo; manage separately.
+cursor-cookbook/
 
 # Editor
 .vscode/
@@ -34,6 +57,7 @@ server/.env.alpha
 Thumbs.db
 
 # Logs
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

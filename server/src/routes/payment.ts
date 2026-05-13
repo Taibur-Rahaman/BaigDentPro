@@ -1,17 +1,23 @@
 import { Router } from 'express';
 import type { Response } from 'express';
-import Stripe from 'stripe';
 import { prisma } from '../index.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireRole } from '../middleware/requireRole.js';
 import { validateBody } from '../middleware/validateBody.js';
 import { asyncRoute } from '../utils/routeErrors.js';
-import { paymentInitiateBodySchema, type PaymentInitiateBody } from '../validation/schemas.js';
+import { manualPaymentInitiateBodySchema, type ManualPaymentInitiateBody } from '../validation/schemas.js';
 import { blockImpersonationBilling } from '../middleware/blockImpersonationBilling.js';
+import {
+  adminWhatsAppDigits,
+  buildManualWhatsAppUrl,
+  fillPaymentTemplate,
+  PAYMENT_METHOD,
+  WHATSAPP_MESSAGE_TEMPLATE,
+} from '../config/paymentPolicy.js';
 
 const router = Router();
 
-router.use(requireRole('CLINIC_ADMIN', 'SUPER_ADMIN'));
+router.use(requireRole('CLINIC_ADMIN', 'CLINIC_OWNER', 'SUPER_ADMIN'));
 router.use(blockImpersonationBilling);
 
 function resolveClinicId(req: AuthRequest, bodyClinicId?: string): string | null {
@@ -21,11 +27,15 @@ function resolveClinicId(req: AuthRequest, bodyClinicId?: string): string | null
   return req.businessClinicId ?? req.effectiveClinicId ?? req.user!.clinicId ?? null;
 }
 
+/**
+ * Create a pending subscription payment + WhatsApp deep link (no online gateway).
+ * POST /api/payment/manual/initiate
+ */
 router.post(
-  '/initiate',
-  validateBody(paymentInitiateBodySchema),
-  asyncRoute('payment.initiate', async (req: AuthRequest, res: Response) => {
-    const body = req.body as PaymentInitiateBody;
+  '/manual/initiate',
+  validateBody(manualPaymentInitiateBodySchema),
+  asyncRoute('payment.manual.initiate', async (req: AuthRequest, res: Response) => {
+    const body = req.body as ManualPaymentInitiateBody;
     const clinicId = resolveClinicId(req, body.clinicId);
     if (!clinicId) {
       res.status(400).json({ success: false, error: 'clinicId is required for platform administrators' });
@@ -37,74 +47,69 @@ router.post(
       return;
     }
 
-    if (body.method !== 'STRIPE') {
-      res.status(501).json({
-        success: false,
-        error: 'Only STRIPE is supported for subscription checkout. bKash/Nagad integration is not enabled.',
-      });
+    const planCode = body.planCode.trim().toUpperCase();
+    const plan = await prisma.plan.findFirst({
+      where: { name: { equals: planCode, mode: 'insensitive' } },
+    });
+    if (!plan) {
+      res.status(404).json({ success: false, error: 'Plan not found' });
       return;
     }
 
-    const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
-    if (!stripeKey) {
-      res.status(503).json({
-        success: false,
-        error: 'Stripe is not configured (set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET).',
-      });
-      return;
-    }
+    const amountMinor =
+      typeof body.amountMinor === 'number' && Number.isFinite(body.amountMinor) && body.amountMinor > 0
+        ? Math.round(body.amountMinor)
+        : Math.round(plan.price * 100);
 
-    const planCode = body.planCode?.trim().toUpperCase() ?? null;
-    if (!planCode) {
-      res.status(400).json({ success: false, error: 'planCode is required for subscription payments' });
-      return;
-    }
+    const clinic = await prisma.clinic.findUnique({
+      where: { id: clinicId },
+      select: { name: true },
+    });
+    const clinicName = clinic?.name ?? '';
 
     const row = await prisma.subscriptionPayment.create({
       data: {
         clinicId,
-        amount: body.amount,
-        method: 'STRIPE',
+        userId: req.user!.id,
+        amount: amountMinor,
+        method: PAYMENT_METHOD,
         status: 'PENDING',
         planCode,
-        metadata: { source: 'payment_initiate' },
+        planName: plan.name,
+        metadata: { source: 'manual_whatsapp_initiate', policy: PAYMENT_METHOD },
       },
-      select: { id: true, clinicId: true, amount: true, method: true, status: true, planCode: true, createdAt: true },
+      select: {
+        id: true,
+        clinicId: true,
+        amount: true,
+        method: true,
+        status: true,
+        planCode: true,
+        planName: true,
+        createdAt: true,
+      },
     });
 
-    const stripe = new Stripe(stripeKey);
-    let clientSecret: string | undefined;
-    try {
-      const intent = await stripe.paymentIntents.create({
-        amount: body.amount,
-        currency: 'bdt',
-        automatic_payment_methods: { enabled: true },
-        metadata: {
-          baigdentpro_payment_id: row.id,
-          clinic_id: clinicId,
-          plan_code: planCode,
-        },
-      });
-      clientSecret = intent.client_secret ?? undefined;
-      await prisma.subscriptionPayment.update({
-        where: { id: row.id },
-        data: { externalRef: intent.id },
-      });
-    } catch (e) {
-      console.error('[payment.initiate]', e);
-      await prisma.subscriptionPayment.update({
-        where: { id: row.id },
-        data: { status: 'FAILED', metadata: { error: e instanceof Error ? e.message : String(e) } },
-      });
-      res.status(502).json({ success: false, error: 'Could not create Stripe payment intent' });
-      return;
-    }
+    const amountDisplay = (amountMinor / 100).toFixed(2);
+    const userName = (req.user!.name && req.user!.name.trim()) || req.user!.email || 'User';
+    const message = fillPaymentTemplate(WHATSAPP_MESSAGE_TEMPLATE, {
+      planName: plan.name,
+      amount: amountDisplay,
+      userName,
+      userEmail: req.user!.email,
+      clinicName,
+      invoiceId: row.id,
+      date: new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }),
+    });
+
+    const whatsappUrl = buildManualWhatsAppUrl(adminWhatsAppDigits(), message);
 
     res.status(201).json({
       success: true,
       data: {
         payment: row,
-        stripeClientSecret: clientSecret,
+        whatsappUrl,
+        paymentMethod: PAYMENT_METHOD,
       },
     });
   })

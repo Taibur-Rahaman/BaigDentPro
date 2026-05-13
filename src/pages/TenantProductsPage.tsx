@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import api from '@/api';
 import { ApiError } from '@/components/ApiError';
 import { useCreateProduct, useProducts } from '@/hooks/useProductsApi';
 import { useToast } from '@/hooks/useToast';
@@ -14,6 +15,7 @@ export const TenantProductsPage: React.FC = () => {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [cost, setCost] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +35,16 @@ export const TenantProductsPage: React.FC = () => {
       showError('Enter a valid cost (or leave blank for 0).');
       return;
     }
-    const result = await create(n, p, c);
+    let uploadedImageUrl: string | null = null;
+    if (imageFile) {
+      try {
+        uploadedImageUrl = await api.tenantProducts.uploadImage(imageFile);
+      } catch (e) {
+        showError(e instanceof Error ? e.message : 'Image upload failed');
+        return;
+      }
+    }
+    const result = await create(n, p, c, uploadedImageUrl);
     if (!result.ok) {
       showError(result.error);
       return;
@@ -41,6 +52,7 @@ export const TenantProductsPage: React.FC = () => {
     setName('');
     setPrice('');
     setCost('');
+    setImageFile(null);
     showSuccess('Product created');
     await reload();
   };
@@ -96,6 +108,15 @@ export const TenantProductsPage: React.FC = () => {
               placeholder="0"
             />
           </div>
+          <div className="tenant-form-field">
+            <label htmlFor="tenant-product-image">Image</label>
+            <input
+              id="tenant-product-image"
+              type="file"
+              accept="image/*"
+              onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
           <button type="submit" className="neo-btn neo-btn-primary tenant-form-submit" disabled={creating || loading}>
             {creating ? (
               <>
@@ -123,7 +144,7 @@ export const TenantProductsPage: React.FC = () => {
         ) : rows.length === 0 ? (
           <div className="tenant-empty">
             <i className="fa-solid fa-box-open" aria-hidden />
-            <p>No products yet</p>
+            <p>No products found</p>
             <p className="tenant-empty-hint">Create your first product using the form above.</p>
           </div>
         ) : (

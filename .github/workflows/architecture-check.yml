@@ -1,0 +1,434 @@
+# Frontend transport + layering guardrails: coreApiClient layering, deep @/lib/core/ lock, fetch/storage guards.
+# (use @/api or @/lib/apiClient). Omitting naive "\.success|.data|.user" in UI: it false-positives on domain
+# fields (e.g. session.user, me.user); response-shape guards live on src/api.ts in this workflow.
+
+name: Architecture Enforcement CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - '.github/workflows/architecture-check.yml'
+
+jobs:
+  architecture-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub-hosted Ubuntu images include `rg`; keep install as fallback for forks/self-hosted.
+      - name: Ensure ripgrep
+        run: |
+          command -v rg >/dev/null 2>&1 || (sudo apt-get update -qq && sudo apt-get install -y ripgrep)
+
+      - name: Restrict @/lib/coreApiClient imports (layering)
+        run: |
+          set -euo pipefail
+          mapfile -t hits < <(rg -l "from ['\"]@/lib/coreApiClient['\"]" src -g '*.ts' -g '*.tsx' 2>/dev/null || true)
+          bad=0
+          for f in "${hits[@]}"; do
+            [[ -z "$f" ]] && continue
+            case "$f" in
+              src/api.ts|src/lib/apiClient.ts) ;;
+              *)
+                echo "❌ Import @/lib/coreApiClient only from src/api.ts or src/lib/apiClient.ts — use @/api or @/lib/apiClient elsewhere: $f"
+                bad=1
+                ;;
+            esac
+          done
+          if [[ "$bad" -ne 0 ]]; then exit 1; fi
+          echo 'OK: coreApiClient import layering'
+
+      - name: Lock core module imports (no deep or barrel bypass of façade)
+        run: |
+          set -euo pipefail
+          # Deep form: @/lib/core/<file> — only src/lib/core/** may use it (internal wiring).
+          if rg -n "from ['\"]@/lib/core/" src -g '*.ts' -g '*.tsx' --glob '!src/lib/core/**' -q; then
+            echo '❌ Import @/lib/core/... only from src/lib/core/ — use @/api or @/lib/apiClient'
+            rg -n "from ['\"]@/lib/core/" src -g '*.ts' -g '*.tsx' --glob '!src/lib/core/**'
+            exit 1
+          fi
+          # Barrel form: from "@/lib/core" — only the compatibility re-export file.
+          mapfile -t hits < <(rg -l "from ['\"]@/lib/core['\"]" src -g '*.ts' -g '*.tsx' 2>/dev/null || true)
+          bad=0
+          for f in "${hits[@]}"; do
+            [[ -z "$f" ]] && continue
+            case "$f" in
+              src/lib/coreApiClient.ts) ;;
+              *)
+                echo "❌ Import from '@/lib/core' barrel only from src/lib/coreApiClient.ts — use @/api or @/lib/apiClient: $f"
+                bad=1
+                ;;
+            esac
+          done
+          if [[ "$bad" -ne 0 ]]; then exit 1; fi
+          echo 'OK: core import graph (façade only outside src/lib/core/)'
+
+      - name: Block fetch() outside coreHttpClient
+        run: |
+          set -euo pipefail
+          if rg '\bfetch\s*\(' src -g '*.ts' -g '*.tsx' --glob '!**/coreHttpClient.ts' -q; then
+            echo '❌ fetch() must only appear in src/lib/core/coreHttpClient.ts'
+            rg '\bfetch\s*\(' src -g '*.ts' -g '*.tsx' --glob '!**/coreHttpClient.ts'
+            exit 1
+          fi
+          echo 'OK: no stray fetch() under src/'
+
+      - name: Block indirect fetch alias (= fetch | window.fetch | globalThis.fetch)
+        run: |
+          set -euo pipefail
+          if rg -n '=\s*(fetch|window\.fetch|globalThis\.fetch)\b' src -g '*.ts' -g '*.tsx' --glob '!**/coreHttpClient.ts' -q; then
+            echo '❌ Do not alias fetch (e.g. const f = fetch or const f = window.fetch); use core HTTP client'
+            rg -n '=\s*(fetch|window\.fetch|globalThis\.fetch)\b' src -g '*.ts' -g '*.tsx' --glob '!**/coreHttpClient.ts'
+            exit 1
+          fi
+          echo 'OK: no indirect fetch alias under src/'
+
+      - name: Block window.fetch / globalThis.fetch outside core
+        run: |
+          set -euo pipefail
+          if rg '\b(window|globalThis)\.fetch\s*\(' src -g '*.ts' -g '*.tsx' --glob '!**/coreHttpClient.ts' -q; then
+            echo '❌ window.fetch / globalThis.fetch bypass outside coreHttpClient.ts'
+            rg '\b(window|globalThis)\.fetch\s*\(' src -g '*.ts' -g '*.tsx' --glob '!**/coreHttpClient.ts'
+            exit 1
+          fi
+          echo 'OK: no fetch host bypass under src/'
+
+      - name: Block axios / XMLHttpRequest under src
+        run: |
+          set -euo pipefail
+          if rg '\baxios\b|XMLHttpRequest' src -g '*.ts' -g '*.tsx' -q; then
+            echo '❌ axios or XMLHttpRequest found under src/'
+            rg '\baxios\b|XMLHttpRequest' src -g '*.ts' -g '*.tsx'
+            exit 1
+          fi
+          echo 'OK: no axios / XMLHttpRequest under src/'
+
+      - name: Block clinical localStorage patterns
+        run: |
+          set -euo pipefail
+          # Intentionally narrow clinical domains in storage keys/strings (avoid auth token paths).
+          if rg -ni 'localStorage\.[^;]*(patient|prescription|invoice|appointment|treatment|lab)' \
+              src/components src/pages src/hooks src/contexts src/types -q 2>/dev/null; then
+            echo '❌ Clinical payloads must not use localStorage in app layers'
+            rg -ni 'localStorage\.[^;]*(patient|prescription|invoice|appointment|treatment|lab)' \
+              src/components src/pages src/hooks src/contexts src/types
+            exit 1
+          fi
+          echo 'OK: no clinical-pattern localStorage in UI layers'
+
+      - name: Block canonical auth storage key literals outside core
+        run: |
+          set -euo pipefail
+          if rg 'baigdentpro:(accessToken|refreshToken|sessionId|user)\b' src \
+              -g '*.ts' -g '*.tsx' \
+              -g '!**/*.md' -g '!**/*.txt' \
+              --glob '!**/coreAuthStorage.ts' -q; then
+            echo '❌ Canonical auth localStorage key literals must only appear in coreAuthStorage.ts'
+            rg 'baigdentpro:(accessToken|refreshToken|sessionId|user)\b' src \
+              -g '*.ts' -g '*.tsx' \
+              -g '!**/*.md' -g '!**/*.txt' \
+              --glob '!**/coreAuthStorage.ts'
+            exit 1
+          fi
+          echo 'OK: canonical auth keys only in core'
+
+      - name: Block forbidden patterns in api.ts façade
+        run: |
+          set -euo pipefail
+          if rg -n '\btry\s*\{|persistAuthTokensFromResponse|localStorage|sessionStorage' src/api.ts -q; then
+            echo '❌ api.ts must stay a thin façade (no try/catch, storage, or persistAuth* here)'
+            rg -n '\btry\s*\{|persistAuthTokensFromResponse|localStorage|sessionStorage' src/api.ts
+            exit 1
+          fi
+          echo 'OK: api.ts façade patterns'
+
+      - name: Block request\<any\> in api.ts façade
+        run: |
+          set -euo pipefail
+          if rg -n 'request\s*<\s*any\s*>' src/api.ts -q; then
+            echo '❌ api.ts must not use request<any>; delegate to coreApi* with typed parsers'
+            rg -n 'request\s*<\s*any\s*>' src/api.ts
+            exit 1
+          fi
+          echo 'OK: no request<any> in api.ts'
+
+      - name: Block @/lib/apiClient imports in presentation layers
+        run: |
+          set -euo pipefail
+          # Only src/api.ts may pull the core barrel; pages/components/DashboardPage use @/api or ./api
+          extra=()
+          [[ -f src/DashboardPage.tsx ]] && extra+=(src/DashboardPage.tsx)
+          if rg -q "from ['\"]@/lib/apiClient['\"]" src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts' 2>/dev/null; then
+            echo '❌ Import @/lib/apiClient only from src/api.ts — use @/api or ./api from UI'
+            rg -n "from ['\"]@/lib/apiClient['\"]" src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: no barrel bypass in UI presentation layers'
+
+      - name: Block optimistic factory symbols in presentation layers
+        run: |
+          set -euo pipefail
+          extra=()
+          [[ -f src/DashboardPage.tsx ]] && extra+=(src/DashboardPage.tsx)
+          if rg -n 'optimistic(Patient|Appointment|Prescription)FromForm' src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts' -q 2>/dev/null; then
+            echo '❌ Use api.optimistic.* — do not import or reference optimistic*FromForm in UI'
+            rg -n 'optimistic(Patient|Appointment|Prescription)FromForm' src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: no direct optimistic factory usage in UI'
+
+      - name: Block @/types/practice* imports in presentation layers (domain shield)
+        run: |
+          set -euo pipefail
+          extra=()
+          [[ -f src/DashboardPage.tsx ]] && extra+=(src/DashboardPage.tsx)
+          [[ -f src/PrescriptionPage.tsx ]] && extra+=(src/PrescriptionPage.tsx)
+          if rg -q "from ['\"]@/types/practice" src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts' 2>/dev/null; then
+            echo '❌ UI must not import practice domain modules — use src/hooks/view/viewModels + view hooks or call api.* only'
+            rg -n "from ['\"]@/types/practice" src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: no practice DTO imports in presentation layers'
+
+      - name: Block Practice-prefixed domain identifiers in presentation layers (excluding PracticeWorkspace route)
+        run: |
+          set -euo pipefail
+          extra=()
+          [[ -f src/DashboardPage.tsx ]] && extra+=(src/DashboardPage.tsx)
+          [[ -f src/PrescriptionPage.tsx ]] && extra+=(src/PrescriptionPage.tsx)
+          if rg -n --pcre2 '\bPractice(?!(WorkspacePage|Workspace)\b)[A-Z]\w*' \
+              src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts' -q 2>/dev/null; then
+            echo '❌ Presentation layers must not reference Practice* domain identifiers — use viewModels + view hooks'
+            rg -n --pcre2 '\bPractice(?!(WorkspacePage|Workspace)\b)[A-Z]\w*' \
+              src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: no stray Practice* domain identifiers in presentation layers'
+
+      - name: Block literal DTO marker in presentation layers
+        run: |
+          set -euo pipefail
+          extra=()
+          [[ -f src/DashboardPage.tsx ]] && extra+=(src/DashboardPage.tsx)
+          [[ -f src/PrescriptionPage.tsx ]] && extra+=(src/PrescriptionPage.tsx)
+          if rg -n '\bDTO\b' src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts' -q 2>/dev/null; then
+            echo '❌ Presentation code must not mention DTO — use view model naming in UI'
+            rg -n '\bDTO\b' src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: no DTO marker in presentation layers'
+
+      - name: Block map*FromApi in UI
+        run: |
+          set -euo pipefail
+          extra=()
+          [[ -f src/DashboardPage.tsx ]] && extra+=(src/DashboardPage.tsx)
+          [[ -f src/PrescriptionPage.tsx ]] && extra+=(src/PrescriptionPage.tsx)
+          if rg -n 'mapPatientFromApi|mapAppointmentFromApi|mapPrescriptionFromApi' src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts' -q 2>/dev/null; then
+            echo '❌ UI must not define map*FromApi — use core parsers'
+            rg -n 'mapPatientFromApi|mapAppointmentFromApi|mapPrescriptionFromApi' src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: no map*FromApi in pages/components'
+
+      - name: Block map*Optimistic symbols in presentation layers
+        run: |
+          set -euo pipefail
+          extra=()
+          [[ -f src/DashboardPage.tsx ]] && extra+=(src/DashboardPage.tsx)
+          [[ -f src/PrescriptionPage.tsx ]] && extra+=(src/PrescriptionPage.tsx)
+          if rg -n 'map\w*Optimistic' src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts' -q 2>/dev/null; then
+            echo '❌ Presentation code must not reference map*Optimistic builders — use api.optimistic.* only'
+            rg -n 'map\w*Optimistic' src/pages src/components "${extra[@]}" -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: no map*Optimistic in pages/components'
+
+      - name: Block unsafe casts that bypass view models in hooks
+        run: |
+          set -euo pipefail
+          if rg -n --pcre2 '\bas any\b|as unknown as|\bas Practice\b' src/hooks -g '*.ts' -g '*.tsx' -q 2>/dev/null; then
+            echo '❌ Hooks must not use as any, as unknown as, or as Practice (keep DTO→VM mapping in viewModels/core)'
+            rg -n --pcre2 '\bas any\b|as unknown as|\bas Practice\b' src/hooks -g '*.ts' -g '*.tsx'
+            exit 1
+          fi
+          echo 'OK: no unsafe VM-bypass casts in hooks'
+
+      - name: Block domain constructor patterns in UI (heuristic)
+        run: |
+          set -euo pipefail
+          if rg -n '\bnew\s+Patient\b|\bnew\s+Appointment\b|\bnew\s+Prescription\b' src/pages src/components -g '*.tsx' -g '*.ts' -q 2>/dev/null; then
+            echo '❌ UI must not construct domain-shaped entities with new Patient/Appointment/Prescription'
+            rg -n '\bnew\s+Patient\b|\bnew\s+Appointment\b|\bnew\s+Prescription\b' src/pages src/components -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: no domain new Patient/Appointment/Prescription in UI'
+
+      - name: Block raw API envelope access in UI (narrow)
+        run: |
+          set -euo pipefail
+          # Only names that usually hold fetch/HTTP bodies — excludes `res` (handlers), `json` (vars), `payload` (forms).
+          if rg -n '\b(response|apiResponse|httpResponse|rawBody|fetchJson)\s*\.\s*(success|data|payload|result)\b' src/pages src/components -g '*.tsx' -g '*.ts' -q 2>/dev/null; then
+            echo '❌ Avoid reading .success/.data/.payload/.result on HTTP-style objects in UI; parse in core'
+            rg -n '\b(response|apiResponse|httpResponse|rawBody|fetchJson)\s*\.\s*(success|data|payload|result)\b' src/pages src/components -g '*.tsx' -g '*.ts'
+            exit 1
+          fi
+          echo 'OK: narrow API envelope heuristic in UI'
+
+      - name: Block response-body branching in api.ts (heuristic)
+        run: |
+          set -euo pipefail
+          if rg -n 'if\s*\([^)]*\.(success|user|data)\b' src/api.ts -q; then
+            echo '❌ api.ts must not branch on API response shapes (move to coreApiClient.ts)'
+            rg -n 'if\s*\([^)]*\.(success|user|data)\b' src/api.ts
+            exit 1
+          fi
+          echo 'OK: no response-shape if() in api.ts'
+
+      - name: Block response destructuring in api.ts (heuristic)
+        run: |
+          set -euo pipefail
+          if rg -n '(?:const|let|var)\s*\{[^}]*\b(success|user|data)\b[^}]*}\s*=' src/api.ts -q; then
+            echo '❌ api.ts must not destructure API response fields (success/user/data); move to coreApiClient.ts'
+            rg -n '(?:const|let|var)\s*\{[^}]*\b(success|user|data)\b[^}]*}\s*=' src/api.ts
+            exit 1
+          fi
+          echo 'OK: no response-field destructuring in api.ts'
+
+      - name: Block optional chaining on response fields in api.ts (heuristic)
+        run: |
+          set -euo pipefail
+          if rg -n '\?\.\s*(success|user|data)\b' src/api.ts -q; then
+            echo '❌ api.ts must not use ?.success / ?.user / ?.data on responses; move to coreApiClient.ts'
+            rg -n '\?\.\s*(success|user|data)\b' src/api.ts
+            exit 1
+          fi
+          echo 'OK: no response optional-chaining in api.ts'
+
+      - name: Require dashboard shell routes in App.tsx
+        run: |
+          set -euo pipefail
+          f=src/App.tsx
+          for needle in 'path="settings"' 'path="admin"' 'path="practice"' 'PracticeWorkspacePage' 'DashboardIndexRedirect'; do
+            rg -qF "$needle" "$f" || { echo "❌ Missing required route marker: $needle"; exit 1; }
+          done
+          echo 'OK: App.tsx dashboard markers present'
+
+      - name: Require clinical workspace sub-routes (flat /dashboard/*)
+        run: |
+          set -euo pipefail
+          f=src/App.tsx
+          for seg in overview patients appointments prescriptions billing reports lab prescription workspace-settings; do
+            rg -qF "path=\"$seg\"" "$f" || { echo "❌ Missing clinical workspace route segment: $seg"; exit 1; }
+          done
+          echo 'OK: clinical workspace flat segments registered'
+
+      - name: Hook-first guard (route pages — no direct @/api)
+        run: |
+          set -euo pipefail
+          dash=src/DashboardPage.tsx
+          mapfile -t files < <(git ls-files 'src/pages/**/*.tsx' 2>/dev/null || true)
+          bad=0
+          for f in "${files[@]}"; do
+            [[ -z "$f" ]] && continue
+            if rg -n "from ['\"]@/api['\"]|\\bapi\\." "$f"; then
+              echo "❌ Route pages must not import @/api or call api.* — use src/hooks/view/* or facades outside pages: $f"
+              bad=1
+            fi
+          done
+          if [[ -f "$dash" ]] && rg -n "from ['\"]@/api['\"]|\\bapi\\." "$dash"; then
+            echo "❌ DashboardPage.tsx must remain a dumb shell — no @/api: $dash"
+            bad=1
+          fi
+          if [[ "$bad" -ne 0 ]]; then exit 1; fi
+          echo 'OK: hook-first guard (route pages)'
+
+      - name: Practice workspace controller is shell-only (no transport / parsers)
+        run: |
+          set -euo pipefail
+          f=src/hooks/view/PracticeWorkspaceController.tsx
+          [[ -f "$f" ]] || { echo 'OK: no PracticeWorkspaceController file'; exit 0; }
+          if rg -n "from ['\"]@/api['\"]|\\bapi\\.|\bfetch\s*\(|mapPatientFromApi|mapAppointmentFromApi|mapPrescriptionFromApi" "$f"; then
+            echo "❌ $f must not import api, call fetch/map*FromApi — use usePractice*Domain hooks"
+            exit 1
+          fi
+          echo 'OK: practice workspace controller shell purity'
+
+      - name: Phase 3 enterprise core artefacts present
+        run: |
+          set -euo pipefail
+          for f in \
+            src/lib/core/coreCalendarEngine.ts \
+            src/lib/core/coreAppointmentRules.ts \
+            src/lib/core/coreFeatureGate.ts \
+            src/lib/core/coreTenantPlan.ts \
+            src/lib/core/coreBillingEngine.ts \
+            server/src/services/stripeService.ts \
+            ; do
+            [[ -f "$f" ]] || { echo "❌ Missing enterprise module: $f"; exit 1; }
+          done
+          echo 'OK: Phase 3 core modules exist'
+
+      - name: Calendar engine not imported directly from calendar UI/pages
+        run: |
+          set -euo pipefail
+          if rg -n "from ['\"]@/lib/core/core(CalendarEngine|AppointmentRules)['\"]" \
+            src/pages/dashboard/OperationsCalendarPage.tsx \
+            src/components/calendar -q 2>/dev/null; then
+            echo '❌ Calendar UI must orchestrate via hooks — do not import core calendar engines directly'
+            rg -n "from ['\"]@/lib/core/core(CalendarEngine|AppointmentRules)['\"]" \
+              src/pages/dashboard/OperationsCalendarPage.tsx \
+              src/components/calendar || true
+            exit 1
+          fi
+          echo 'OK: calendar layering (engines not pulled into presentation)'
+
+      - name: Stripe Node SDK confined to server (no server stripe imports in SPA)
+        run: |
+          set -euo pipefail
+          if rg -n "from ['\"]stripe['\"]|require\(['\"]stripe['\"]" src -g '*.ts' -g '*.tsx' -q 2>/dev/null; then
+            echo '❌ Importing the Stripe Node SDK from src/ is forbidden — use server services + Elements on client'
+            rg -n "from ['\"]stripe['\"]|require\(['\"]stripe['\"]" src -g '*.ts' -g '*.tsx' || true
+            exit 1
+          fi
+          echo 'OK: Stripe server SDK isolation'
+
+      - name: Require SaaS dashboard routes registered
+        run: |
+          set -euo pipefail
+          f=src/App.tsx
+          for needle in 'path="plans"' 'path="billing-console"' 'PlanComparisonPage' 'BillingDashboardPage'; do
+            rg -qF "$needle" "$f" || { echo "❌ Missing SaaS shell route marker: $needle"; exit 1; }
+          done
+          echo 'OK: SaaS UI routes wired'
+
+      - name: Patient portal pages do not reference clinic staff façade
+        run: |
+          set -euo pipefail
+          if rg 'api\.clinic|/clinic/' src/pages/portal -g '*.tsx' -q 2>/dev/null; then
+            echo '❌ Patient portal route pages must not call clinic staff APIs'
+            rg 'api\.clinic|/clinic/' src/pages/portal -g '*.tsx' || true
+            exit 1
+          fi
+          echo 'OK: patient portal staff-api isolation'
+
+      - name: AI core engines stay pure (no HTTP / Prisma)
+        run: |
+          set -euo pipefail
+          if rg '\bprisma\b|patientPortalApiRequest|coreApiRequest' src/lib/core/ai -g '*.ts' -q 2>/dev/null; then
+            echo '❌ AI engines must not reference transports or Prisma'
+            rg '\bprisma\b|patientPortalApiRequest|coreApiRequest' src/lib/core/ai -g '*.ts' || true
+            exit 1
+          fi
+          echo 'OK: AI engine purity'
+
+      - name: Network core engines stay transport-free
+        run: |
+          set -euo pipefail
+          if rg '\bfetch\s*\(|patientPortalApiRequest|coreApiRequest' src/lib/core/network -g '*.ts' -q 2>/dev/null; then
+            echo '❌ Network engines must not open transports from src/lib/core/network'
+            rg '\bfetch\s*\(|patientPortalApiRequest|coreApiRequest' src/lib/core/network -g '*.ts' || true
+            exit 1
+          fi
+          echo 'OK: network engine transport isolation'

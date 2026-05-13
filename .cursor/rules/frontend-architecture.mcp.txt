@@ -1,0 +1,137 @@
+FRONTEND API & AUTH ARCHITECTURE
+================================
+
+LAYOUT (SOURCE OF TRUTH)
+------------------------
+
+Implementations live under **src/lib/core/**:
+
+- **coreHttpClient.ts** — sole `fetch()`, timeouts, auth headers, 401 refresh + single retry
+- **coreAuthStorage.ts** — canonical JWT/session/user `localStorage` keys for this app
+- **coreAuthApi.ts** — login, register, `/auth/me` normalization, refresh/logout orchestration
+- **corePatientsApi.ts**, **corePrescriptionsApi.ts**, **corePatientFinanceApi.ts**, **coreAdminApi.ts**,
+  **coreShopApi.ts**, **coreDashboardClinicApi.ts**, **coreDiagnosticsApi.ts**, **coreUiPrefsApi.ts** —
+  domain HTTP via `coreApiRequest` + response shaping for that domain
+- **index.ts** — aggregates public exports
+
+**src/lib/coreApiClient.ts** re-exports `@/lib/core` for a stable import path (`@/lib/coreApiClient`).
+App code MUST NOT import `@/lib/core/*` modules directly — use `@/api` or `@/lib/apiClient`.
+
+CANONICAL AUTHORITY
+-------------------
+
+| Concern              | Module |
+|---------------------|--------|
+| fetch + API transport | **coreHttpClient.ts** only |
+| Canonical auth keys   | **coreAuthStorage.ts** only |
+| Auth flows + envelopes | **coreAuthApi.ts** (calls `coreApiRequest` / transport) |
+| Domain endpoints      | **core*Api.ts** (call `coreApiRequest` only) |
+
+FACADE RULE (api.ts)
+--------------------
+
+api.ts must be a THIN DELEGATION LAYER.
+
+ALLOWED in api.ts:
+
+✔ Calling: coreApiRequest, coreApiLogin, coreApiAuth*, other exported core helpers
+✔ Parameter forwarding
+✔ Option mapping (e.g. façade options → CoreApiOptions)
+✔ Query building (URLSearchParams, safe string interpolation for paths/query)
+✔ Namespacing (api.auth.*, api.patients.*, etc.)
+✔ Direct assignment: me: coreApiAuthMe
+✔ One-line delegation to token accessors: getToken → getAccessToken, setToken → setAccessToken
+
+STRICTLY FORBIDDEN in api.ts
+----------------------------
+
+❌ ANY runtime inspection of API responses:
+   if (res.success), member access, optional chaining on response bodies, destructuring { success, user, data },
+   switch on response data
+❌ ANY business logic or decisions based on API results
+❌ ANY token persistence logic: setItem/removeItem, conditional token updates from responses
+❌ ANY refresh logic, retry logic, or logout orchestration
+❌ ANY try/catch for business purposes
+
+IMPORTANT: TypeScript types/generics are NOT runtime logic.
+Example (ALLOWED): this.request<{ success: boolean; user: User }>(...)
+Only runtime branching on response values is forbidden.
+
+STORAGE RULE
+------------
+
+Forbidden outside **coreAuthStorage.ts** (except as noted):
+
+- baigdentpro:accessToken
+- baigdentpro:refreshToken
+- baigdentpro:sessionId
+- baigdentpro:user
+
+EXCEPTION:
+
+✔ src/lib/supabaseClient.ts may use window.localStorage for Supabase-managed session persistence.
+✔ Non-auth storage (UI cache, drafts, e.g. baigdentpro:prescriptions) is allowed outside core.
+
+TRANSPORT RULE
+--------------
+
+❌ fetch() outside **src/lib/core/coreHttpClient.ts** (under src/)
+❌ axios / XMLHttpRequest anywhere under src/
+❌ custom HTTP wrappers that bypass coreHttpClient / coreApiRequest
+
+IMPORT LAYERING
+---------------
+
+Only these may import the module path `@/lib/coreApiClient`:
+
+- src/api.ts (facade)
+- src/lib/apiClient.ts (barrel re-export)
+
+Services, hooks, pages, contexts, and other app modules MUST import API access only from:
+
+  → '@/api' or '@/lib/apiClient'
+
+They MUST NOT import from:
+
+  → '@/lib/coreApiClient'
+  → '@/lib/core/...' (domain modules — use façade or approved barrel)
+
+Everywhere else: use `import api from '@/api'` or import symbols from `@/lib/apiClient` (same implementations, stable boundary). CI enforces layering for `@/lib/coreApiClient`, blocks `@/lib/core/…` outside `src/lib/core/`, and blocks the `@/lib/core` barrel except in `src/lib/coreApiClient.ts`.
+
+BARREL POLICY (apiClient.ts)
+----------------------------
+
+`apiClient.ts` is a **narrow re-export** for app/bootstrap/auth-shell integration. Prefer **not**
+widening it with new low-level token or storage helpers—add them in **coreAuthStorage** / **coreHttpClient** / domain **`core*Api.ts`**, export through **`src/lib/core/index.ts`**, and surface app behavior through `@/api` or existing approved exports.
+
+Any new helper that **inspects or normalizes API response bodies** MUST live in the appropriate
+**src/lib/core/core*Api.ts** (or extend **coreAuthApi**), not in hooks, services, `api.ts`, or ad-hoc wrappers.
+
+ANTI-BYPASS
+-----------
+
+Developers MUST NOT bypass this architecture via utility wrappers, hooks, or indirect imports
+that reintroduce fetch, token storage, refresh, or response shaping outside the core layer.
+
+CI NOTE (api.ts and `if`)
+-------------------------
+
+Automated checks do **not** forbid every `if (` in `api.ts`, because allowed query wiring uses
+`if (params?.foo) query.set(...)`. Forbidden: runtime branching on **HTTP response** values in the façade.
+
+ENFORCEMENT
+-----------
+
+If ANY violation exists → REJECT PR.
+If unsure → REJECT.
+
+CI: .github/workflows/architecture-check.yml runs on pull_request.
+
+SUCCESS CRITERIA
+----------------
+
+✔ Single HTTP pipeline (coreHttpClient)
+✔ Auth storage centralized (coreAuthStorage)
+✔ No token leaks via duplicate storage paths
+✔ No duplicate refresh logic outside coreHttpClient
+✔ api.ts is pure delegation + allowed wiring only

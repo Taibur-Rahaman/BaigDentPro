@@ -113,6 +113,47 @@ async function subscriptionTenantPayload(clinicId: string | null): Promise<Subsc
   };
 }
 
+/** Single subscription/clinic fetch for login — avoids duplicate `$transaction`/`findUnique` work on the hot path. */
+async function loadLoginSubscriptionContext(clinicId: string | null): Promise<{
+  subscription: SubscriptionWithPlan | null;
+  planSnapshot: string | undefined;
+  tenant: SubscriptionTenantPayload | null;
+}> {
+  if (!clinicId) {
+    return { subscription: null, planSnapshot: undefined, tenant: null };
+  }
+  const [sub, clinic] = await Promise.all([
+    prisma.subscription.findUnique({
+      where: { clinicId },
+      include: { planRef: true },
+    }),
+    prisma.clinic.findUnique({ where: { id: clinicId }, select: { plan: true, planTier: true } }),
+  ]);
+  const row = sub as SubscriptionWithPlan | null;
+  const planSnapshot = effectivePlanName(row, clinic?.plan ?? 'FREE');
+  const merged = mergePlanFeatures(row?.planRef?.features, row?.features);
+  const deviceLimit = await resolveDeviceLimit(row);
+  const productFeaturesObj = await resolveProductFeaturesForClinic(clinicId);
+  const productFeatures: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(productFeaturesObj)) {
+    productFeatures[k] = v;
+  }
+  const tenant: SubscriptionTenantPayload = {
+    clinicId,
+    plan: planSnapshot,
+    planId: row?.planId ?? null,
+    status: row?.status ?? 'ACTIVE',
+    features: row?.features ?? {},
+    planFeatures: merged,
+    deviceLimit,
+    expiresAt: row?.expiresAt ?? null,
+    endDate: row?.endDate ?? null,
+    planTier: clinic?.planTier ?? 'STARTER',
+    productFeatures,
+  };
+  return { subscription: row, planSnapshot, tenant };
+}
+
 function parseBearerAccessToken(req: { headers: { authorization?: string }; body?: { accessToken?: string } }): string | null {
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
@@ -134,6 +175,13 @@ type LoginUserRow = {
   isApproved: boolean;
   isActive: boolean;
   accountStatus?: string | null;
+  sessionVersion?: number;
+  clinicAddress?: string | null;
+  clinicPhone?: string | null;
+  title?: string | null;
+  degree?: string | null;
+  specialization?: string | null;
+  professionalVerified?: boolean;
 };
 
 function hasPrismaErrorCode(error: unknown): boolean {
@@ -177,16 +225,22 @@ async function findUserByEmailInsensitive(email: string): Promise<LoginUserRow |
         isActive: true,
         clinicName: true,
         accountStatus: true,
+        sessionVersion: true,
+        clinicAddress: true,
+        clinicPhone: true,
+        title: true,
+        degree: true,
+        specialization: true,
+        professionalVerified: true,
       },
     });
     if (!row) return null;
     return row as LoginUserRow;
   } catch (e) {
-    if (hasPrismaErrorCode(e)) {
-      throw e;
-    }
     if (isPrismaSchemaDriftError(e)) {
       console.warn('[auth] login user-query fallback due to schema drift');
+    } else if (hasPrismaErrorCode(e)) {
+      throw e;
     } else {
       console.warn(
         '[auth] login full user select failed — retrying minimal/compatibility path',
@@ -205,12 +259,20 @@ async function findUserByEmailInsensitive(email: string): Promise<LoginUserRow |
       isApproved: true,
       isActive: true,
       accountStatus: 'ACTIVE',
+      sessionVersion: 0,
+      clinicAddress: null,
+      clinicPhone: null,
+      title: null,
+      degree: null,
+      specialization: null,
+      professionalVerified: false,
     };
   } catch (e) {
-    if (hasPrismaErrorCode(e)) {
+    if (isPrismaSchemaDriftError(e)) {
+      // fall through to exact-email attempt
+    } else if (hasPrismaErrorCode(e)) {
       throw e;
-    }
-    if (!isPrismaSchemaDriftError(e)) {
+    } else {
       console.warn(
         '[auth] login insensitive minimal select failed — exact-email fallback',
         e instanceof Error ? e.message : String(e),
@@ -226,6 +288,13 @@ async function findUserByEmailInsensitive(email: string): Promise<LoginUserRow |
       isApproved: true,
       isActive: true,
       accountStatus: 'ACTIVE',
+      sessionVersion: 0,
+      clinicAddress: null,
+      clinicPhone: null,
+      title: null,
+      degree: null,
+      specialization: null,
+      professionalVerified: false,
     };
   } catch (e2) {
     console.error('[auth] login user lookup failed (all fallbacks exhausted)', e2 instanceof Error ? e2.message : e2);
@@ -479,6 +548,7 @@ router.post(
 );
 
 async function handleLogin(req: Request, res: Response): Promise<void> {
+  const loginWallMs = Date.now();
   try {
     if (!process.env.DATABASE_URL?.trim()) {
       throw new Error('AUTH_SYSTEM_DATABASE_URL_MISSING');
@@ -553,14 +623,16 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
     }
 
     let subscription: SubscriptionWithPlan | null = null;
+    let tenantBundled: SubscriptionTenantPayload | null = null;
+    let planSnapshotBundled: string | undefined;
     try {
-      subscription = (await prisma.subscription.findUnique({
-        where: { clinicId: user.clinicId },
-        include: { planRef: true },
-      })) as SubscriptionWithPlan | null;
+      const b = await loadLoginSubscriptionContext(user.clinicId);
+      subscription = b.subscription;
+      planSnapshotBundled = b.planSnapshot;
+      tenantBundled = b.tenant;
     } catch (e) {
       if (isPrismaSchemaDriftError(e)) {
-        console.warn('[auth] login subscription fallback due to schema drift', e);
+        console.warn('[auth] login subscription bundle fallback due to schema drift', e);
       } else {
         throw e;
       }
@@ -597,8 +669,8 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
       }
     }
 
-    let planSnapshot = await subscriptionPlanSnapshot(user.clinicId);
-    let capabilities: string[] = user.role === 'SUPER_ADMIN' ? ['*'] : [];
+    let planSnapshot = planSnapshotBundled;
+    let capabilities: string[] = [];
     try {
       capabilities = await resolveJwtCapabilitiesForUser({ role: user.role, clinicId: user.clinicId });
     } catch (e) {
@@ -611,55 +683,27 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
     if (!planSnapshot && subscription?.plan) {
       planSnapshot = subscription.plan;
     }
-    let tokenSessionVersion = 0;
-    let profileExtras: {
-      clinicAddress: string | null;
-      clinicPhone: string | null;
-      title: string | null;
-      degree: string | null;
-      specialization: string | null;
-      professionalVerified: boolean;
-    } = {
-      clinicAddress: null,
-      clinicPhone: null,
-      title: null,
-      degree: null,
-      specialization: null,
-      professionalVerified: false,
+    const tokenSessionVersion = typeof user.sessionVersion === 'number' ? user.sessionVersion : 0;
+    const profileExtras = {
+      clinicAddress: user.clinicAddress ?? null,
+      clinicPhone: user.clinicPhone ?? null,
+      title: user.title ?? null,
+      degree: user.degree ?? null,
+      specialization: user.specialization ?? null,
+      professionalVerified: Boolean(user.professionalVerified),
     };
-    try {
-      const profile = await prismaBase.user.findUnique({
-        where: { id: user.id },
-        select: {
-          sessionVersion: true,
-          clinicAddress: true,
-          clinicPhone: true,
-          title: true,
-          degree: true,
-          specialization: true,
-          professionalVerified: true,
-        },
-      });
-      if (profile) {
-        tokenSessionVersion = typeof profile.sessionVersion === 'number' ? profile.sessionVersion : 0;
-        profileExtras = {
-          clinicAddress: profile.clinicAddress ?? null,
-          clinicPhone: profile.clinicPhone ?? null,
-          title: profile.title ?? null,
-          degree: profile.degree ?? null,
-          specialization: profile.specialization ?? null,
-          professionalVerified: Boolean(profile.professionalVerified),
-        };
-      }
-    } catch (e) {
-      if (isPrismaSchemaDriftError(e)) {
-        console.warn('[auth] login profile/sessionVersion fallback due to schema drift', e);
-      } else {
-        throw e;
-      }
-    }
 
-    const token = signAccessToken({ ...user, sessionVersion: tokenSessionVersion }, { planSnapshot, capabilities });
+    const token = signAccessToken(
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        clinicId: user.clinicId,
+        sessionVersion: tokenSessionVersion,
+      },
+      { planSnapshot, capabilities },
+    );
+
     let refreshToken: string | undefined;
     try {
       refreshToken = await issueRefreshToken(user.id);
@@ -692,17 +736,20 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
       metadata: { method: 'password' },
     });
 
-    let tenant: SubscriptionTenantPayload | null = null;
-    try {
-      tenant = await subscriptionTenantPayload(user.clinicId);
-    } catch (e) {
-      if (isPrismaSchemaDriftError(e)) {
-        console.warn('[auth] login tenant fallback due to schema drift', e);
-      } else {
-        throw e;
+    let tenant: SubscriptionTenantPayload | null = tenantBundled;
+    if (!tenant && user.clinicId) {
+      try {
+        tenant = await subscriptionTenantPayload(user.clinicId);
+      } catch (e) {
+        if (isPrismaSchemaDriftError(e)) {
+          console.warn('[auth] login tenant fallback due to schema drift', e);
+        } else {
+          throw e;
+        }
       }
     }
-    console.info(`[auth] login success userId=${user.id} clinicId=${user.clinicId}`);
+    const loginElapsedMs = Date.now() - loginWallMs;
+    console.info(`[auth] login success userId=${user.id} clinicId=${user.clinicId} durationMs=${loginElapsedMs}`);
     res.json({
       user: {
         id: user.id,

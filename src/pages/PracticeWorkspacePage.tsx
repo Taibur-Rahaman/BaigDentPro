@@ -1,44 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { DashboardPage } from '@/DashboardPage';
-import api from '@/api';
+import React, { useCallback } from 'react';
+import { Outlet, useNavigate } from 'react-router-dom';
+import { PracticeWorkspaceProvider } from '@/contexts/practiceWorkspace/PracticeWorkspaceContext';
+import { PracticeWorkspaceShell } from '@/pages/practice/workspace/PracticeWorkspaceShell';
 import { useAuth } from '@/hooks/useAuth';
-
-type UserState = { id?: string; name: string; role?: string; clinicId?: string | null } | null;
+import { formatShellUserLabel } from '@/lib/professionalDisplay';
 
 /**
- * Full legacy clinic dashboard (patients, appointments, etc.) without the new tenant shell nav.
+ * Clinical workspace layout: shared PracticeWorkspace context + shell + child route outlets.
  */
 export const PracticeWorkspacePage: React.FC = () => {
   const navigate = useNavigate();
-  const { logout, refreshSession } = useAuth();
-  const [user, setUser] = useState<UserState>(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('baigdentpro:user');
-    if (saved) {
-      try {
-        const u = JSON.parse(saved) as UserState;
-        setUser(u);
-        return;
-      } catch {
-        localStorage.removeItem('baigdentpro:user');
-      }
-    }
-    const token = api.getToken();
-    if (!token) return;
-    api.auth
-      .me()
-      .then((u) => {
-        localStorage.setItem('baigdentpro:user', JSON.stringify(u));
-        setUser({ id: u.id, name: u.name || '', role: u.role, clinicId: u.clinicId });
-      })
-      .catch(() => {
-        api.auth.logout();
-        void refreshSession();
-        navigate('/login', { replace: true });
-      });
-  }, [navigate, refreshSession]);
+  const { logout, user } = useAuth();
 
   const handleLogout = useCallback(async () => {
     await logout();
@@ -46,12 +18,15 @@ export const PracticeWorkspacePage: React.FC = () => {
   }, [logout, navigate]);
 
   return (
-    <DashboardPage
-      onLogout={handleLogout}
-      userName={user?.name}
-      userRole={user?.role}
-      userClinicId={user?.clinicId ?? undefined}
-      currentUserId={user?.id}
-    />
+    <PracticeWorkspaceProvider>
+      <PracticeWorkspaceShell
+        onLogout={handleLogout}
+        userName={user ? formatShellUserLabel(user) : undefined}
+        userRole={user?.role}
+        userClinicId={user?.clinicId ?? undefined}
+        currentUserId={user?.id}
+      />
+      <Outlet />
+    </PracticeWorkspaceProvider>
   );
 };

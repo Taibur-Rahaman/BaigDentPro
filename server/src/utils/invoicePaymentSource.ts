@@ -1,10 +1,7 @@
 /** Stored on `Payment.paymentSource` — server-normalized; amounts trust only after verification rules. */
 export type InvoicePaymentSource = 'CASH' | 'STRIPE' | 'BKASH' | 'NAGAD';
 
-/**
- * Map request body / legacy values to canonical sources.
- * STRIPE path still requires Stripe verification (server retrieve and/or webhook) before VERIFIED.
- */
+/** Map request body / legacy values to canonical sources. Invoice recording accepts **CASH** only. */
 export function normalizeInvoicePaymentSource(raw: unknown): InvoicePaymentSource {
   const u = String(raw ?? 'CASH')
     .trim()

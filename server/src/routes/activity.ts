@@ -5,13 +5,16 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { requireRole } from '../middleware/requireRole.js';
 import { asyncRoute } from '../utils/routeErrors.js';
 import { activityTimelineQuerySchema } from '../validation/schemas.js';
+import { requireCapability } from '../middleware/requireCapability.js';
 
 const router = Router();
 
 router.use(requireRole('CLINIC_ADMIN', 'SUPER_ADMIN', 'DOCTOR', 'RECEPTIONIST'));
+router.use(requireCapability('dpms:access'));
 
 router.get(
   '/timeline',
+  requireCapability('dpms:analytics:advanced'),
   asyncRoute('activity.timeline', async (req: AuthRequest, res: Response) => {
     const parsed = activityTimelineQuerySchema.safeParse(req.query);
     if (!parsed.success) {

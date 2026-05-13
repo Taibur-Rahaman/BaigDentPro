@@ -1,3 +1,7 @@
+/**
+ * @domain CLINICAL
+ * Patient EMR only — invoice rows are loaded via `/api/invoices?patientId=` (finance domain).
+ */
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../index.js';
@@ -9,7 +13,12 @@ import {
   blockReceptionistTreatmentPlanMutations,
   requirePatientsEmrAccess,
 } from '../middleware/clinicalRbac.js';
+import { queryPatientTimeline } from '../services/patientTimelineQuery.js';
 import { assertUniversalToothNumber, FdiValidationError, parseUniversalToothNumber } from '../utils/fdiTooth.js';
+import {
+  workflowApplyTreatmentPlanPut,
+  InvalidStateTransitionError,
+} from '../domains/workflow/appointmentWorkflowService.js';
 
 const router = Router();
 
@@ -27,19 +36,6 @@ type PatientListParams = {
   limit?: string;
 };
 
-type CreatePatientInput = {
-  name: string;
-  phone: string;
-  age?: number;
-  gender?: string;
-  email?: string;
-  address?: string;
-  bloodGroup?: string;
-  occupation?: string;
-  referredBy?: string;
-  phoneType?: string;
-  notes?: string;
-};
 router.get('/', async (req: AuthRequest, res) => {
   try {
     const params: PatientListParams = {
@@ -74,7 +70,7 @@ router.get('/', async (req: AuthRequest, res) => {
         include: {
           medicalHistory: true,
           _count: {
-            select: { appointments: true, prescriptions: true, invoices: true },
+            select: { appointments: true, prescriptions: true },
           },
         },
       }),
@@ -84,7 +80,26 @@ router.get('/', async (req: AuthRequest, res) => {
     res.json({ patients, total, page: pageNum, limit: take });
   } catch (error) {
     console.error('Patients list error:', error);
-    res.status(500).json({ error: 'Failed to fetch patients' });
+    res.status(500).json({ error: 'Could not load patients' });
+  }
+});
+
+/** Unified read projection (clinical + scheduling + finance facts) — no writes. */
+router.get('/:id/timeline', async (req: AuthRequest, res) => {
+  try {
+    const clinicId = resolveBusinessClinicId(req);
+    const p = await prisma.patient.findFirst({
+      where: patientWhere(req, { id: req.params.id }),
+      select: { id: true },
+    });
+    if (!p) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+    const events = await queryPatientTimeline(req.params.id, clinicId);
+    res.json({ events });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Could not load timeline';
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -99,7 +114,6 @@ router.get('/:id', async (req: AuthRequest, res) => {
         treatmentRecords: { orderBy: { date: 'desc' } },
         appointments: { orderBy: { date: 'desc' }, take: 10 },
         prescriptions: { orderBy: { date: 'desc' }, take: 10 },
-        invoices: { orderBy: { date: 'desc' }, take: 10, include: { items: true } },
         labOrders: { orderBy: { orderDate: 'desc' }, take: 10 },
         consents: true,
       },
@@ -228,7 +242,10 @@ router.put('/:id/medical-history', async (req: AuthRequest, res) => {
 
 router.put('/:id/dental-chart', async (req: AuthRequest, res) => {
   try {
-    const { toothNumber, condition, notes, treatment, treatmentDate } = req.body;
+    const { toothNumber, condition, notes, treatment, treatmentDate, surfaces } = req.body as Record<
+      string,
+      unknown
+    >;
 
     let tooth: number;
     try {
@@ -249,6 +266,19 @@ router.put('/:id/dental-chart', async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Patient not found' });
     }
 
+    let surfacesJson: Prisma.InputJsonValue = {};
+    if (surfaces !== undefined && surfaces !== null) {
+      if (typeof surfaces === 'object' && !Array.isArray(surfaces)) {
+        surfacesJson = surfaces as Prisma.InputJsonValue;
+      }
+    }
+
+    const conditionStr = typeof condition === 'string' ? condition : String(condition ?? '');
+    const notesVal = notes === undefined || notes === null ? null : String(notes);
+    const treatmentVal = treatment === undefined || treatment === null ? null : String(treatment);
+    const treatmentDateVal =
+      treatmentDate === undefined || treatmentDate === null ? null : new Date(String(treatmentDate));
+
     const chart = await prisma.dentalChart.upsert({
       where: {
         patientId_toothNumber: { patientId: req.params.id, toothNumber: tooth },
@@ -256,12 +286,19 @@ router.put('/:id/dental-chart', async (req: AuthRequest, res) => {
       create: {
         patientId: req.params.id,
         toothNumber: tooth,
-        condition,
-        notes,
-        treatment,
-        treatmentDate: treatmentDate ? new Date(treatmentDate) : null,
+        condition: conditionStr,
+        surfaces: surfacesJson,
+        notes: notesVal,
+        treatment: treatmentVal,
+        treatmentDate: treatmentDateVal,
       },
-      update: { condition, notes, treatment, treatmentDate: treatmentDate ? new Date(treatmentDate) : null },
+      update: {
+        condition: conditionStr,
+        ...(surfaces !== undefined ? { surfaces: surfacesJson } : {}),
+        notes: notesVal,
+        treatment: treatmentVal,
+        treatmentDate: treatmentDateVal,
+      },
     });
 
     res.json(chart);
@@ -314,24 +351,27 @@ router.post('/:id/treatment-plans', async (req: AuthRequest, res) => {
 
 router.put('/:id/treatment-plans/:planId', async (req: AuthRequest, res) => {
   try {
-    const existing = await prisma.treatmentPlan.findFirst({
-      where: {
-        id: req.params.planId,
-        patientId: req.params.id,
-        patient: patientWhere(req),
-      },
-    });
-    if (!existing) {
-      return res.status(404).json({ error: 'Treatment plan not found' });
-    }
-    const plan = await prisma.treatmentPlan.update({
-      where: { id: existing.id },
-      data: req.body,
+    const clinicId = resolveBusinessClinicId(req);
+    const plan = await workflowApplyTreatmentPlanPut({
+      clinicId,
+      patientId: req.params.id,
+      planId: req.params.planId,
+      patch: req.body as Record<string, unknown>,
     });
 
     res.json(plan);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    if (error instanceof InvalidStateTransitionError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    const err = error as { code?: number; message?: string };
+    if (err?.code === 404) {
+      res.status(404).json({ error: 'Treatment plan not found' });
+      return;
+    }
+    const msg = error instanceof Error ? error.message : 'Update failed';
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -388,6 +428,79 @@ router.post('/:id/treatment-records', async (req: AuthRequest, res) => {
     });
 
     res.status(201).json(record);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.put('/:id/treatment-records/:recordId', async (req: AuthRequest, res) => {
+  try {
+    const existing = await prisma.treatmentRecord.findFirst({
+      where: {
+        id: req.params.recordId,
+        patientId: req.params.id,
+        patient: patientWhere(req),
+      },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Treatment record not found' });
+    }
+
+    const { treatmentDone, toothNumber, cost, paid, due, notes, doctorSignature, date } = req.body;
+
+    if (typeof treatmentDone !== 'string' || !treatmentDone.trim()) {
+      res.status(400).json({ error: 'treatmentDone is required' });
+      return;
+    }
+
+    let toothStr: string | null = existing.toothNumber;
+    if (toothNumber !== undefined) {
+      if (toothNumber === null || String(toothNumber).trim() === '') {
+        toothStr = null;
+      } else {
+        const n = parseUniversalToothNumber(toothNumber);
+        if (n === null) {
+          res.status(400).json({ error: 'toothNumber must be between 1 and 32 when provided' });
+          return;
+        }
+        toothStr = String(n);
+      }
+    }
+
+    const record = await prisma.treatmentRecord.update({
+      where: { id: existing.id },
+      data: {
+        treatmentDone,
+        date: date ? new Date(date) : undefined,
+        cost: cost !== undefined ? parseFloat(String(cost)) || 0 : undefined,
+        paid: paid !== undefined ? parseFloat(String(paid)) || 0 : undefined,
+        due: due !== undefined ? parseFloat(String(due)) || 0 : undefined,
+        notes: notes === undefined ? undefined : notes,
+        doctorSignature: doctorSignature === undefined ? undefined : doctorSignature,
+        toothNumber: toothNumber === undefined ? undefined : toothStr,
+      },
+    });
+
+    res.json(record);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/:id/treatment-records/:recordId', async (req: AuthRequest, res) => {
+  try {
+    const existing = await prisma.treatmentRecord.findFirst({
+      where: {
+        id: req.params.recordId,
+        patientId: req.params.id,
+        patient: patientWhere(req),
+      },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Treatment record not found' });
+    }
+    await prisma.treatmentRecord.delete({ where: { id: existing.id } });
+    res.json({ message: 'Treatment record deleted' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

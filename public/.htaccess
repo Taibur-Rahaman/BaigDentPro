@@ -5,6 +5,10 @@
   RewriteEngine On
   RewriteBase /
 
+  # One canonical SPA host: avoids www serving an older bundle while apex was updated (login → wrong JSON/HTML).
+  RewriteCond %{HTTP_HOST} ^www\.baigdentpro\.com$ [NC]
+  RewriteRule ^(.*)$ https://baigdentpro.com/$1 [L,R=301]
+
   # If you deploy in a subfolder (e.g. public_html/app), set RewriteBase /app/ above
   # and run: vite build --base=/app/
 
@@ -16,3 +20,16 @@
 
 # Optional: block directory listing
 Options -Indexes
+
+# Prefer fresh HTML shell after deploy; hashed assets stay long-cache via immutable filenames.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+  </FilesMatch>
+  # Never cache logo so branding updates appear immediately.
+  <Files "logo.png">
+    Header set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </Files>
+</IfModule>

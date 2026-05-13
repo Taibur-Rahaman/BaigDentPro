@@ -1,40 +1,43 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
+import { Link } from 'react-router-dom';
 import { ApiError } from '@/components/ApiError';
-import api from '@/api';
-import { userMessageFromUnknown } from '@/lib/apiErrors';
+import { useAdminUsersDashboardView } from '@/hooks/view/useAdminUsersDashboardView';
+import type { AdminUserRow } from '@/types/adminPanel';
 
-type Row = { id: string; email: string; name: string; role: string };
+const ROLE_OPTIONS = ['ADMIN', 'CLINIC_ADMIN', 'CLINIC_OWNER', 'DOCTOR', 'RECEPTIONIST', 'TENANT', 'SUPER_ADMIN'] as const;
 
 export const UsersPage: React.FC = () => {
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    rows,
+    loading,
+    error,
+    page,
+    setPage,
+    totalPages,
+    updatingId,
+    reload,
+    updateUserRole,
+    clearError,
+    limit,
+  } = useAdminUsersDashboardView({ defaultLimit: 25 });
 
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await api.admin.users({ limit: 50 });
-      setRows((res.users as Row[]) || []);
-    } catch (e) {
-      setRows([]);
-      setError(userMessageFromUnknown(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const handleRoleChange = (userId: string, nextRole: string) => {
+    clearError();
+    void updateUserRole(userId, nextRole);
+  };
 
   return (
     <div className="tenant-page">
       <div className="tenant-page-header">
         <h1>Users &amp; roles</h1>
-        <p className="tenant-page-lead">Clinic directory (admins). Uses <code>/api/admin/users</code>.</p>
+        <p className="tenant-page-lead">Clinic directory and role management for administrators.</p>
+        <div style={{ marginTop: 12 }}>
+          <Link to="/dashboard/invites" className="neo-btn neo-btn-primary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <i className="fa-solid fa-user-plus" aria-hidden /> Invite user
+          </Link>
+        </div>
       </div>
-      {error ? <ApiError message={error} title="Could not load users" onRetry={() => void load()} /> : null}
+      {error ? <ApiError message={error} title="Could not load users" onRetry={() => void reload()} /> : null}
       {loading ? (
         <div className="tenant-loading" role="status">
           <div className="neo-loading-spinner tenant-spinner" />
@@ -48,19 +51,58 @@ export const UsersPage: React.FC = () => {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Clinic</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((u) => (
+              {rows.map((u: AdminUserRow) => (
                 <tr key={u.id}>
-                  <td>{u.name}</td>
+                  <td>{u.name ?? '—'}</td>
                   <td>{u.email}</td>
-                  <td>{u.role}</td>
+                  <td>
+                    <select
+                      className="neo-input"
+                      value={u.role}
+                      disabled={updatingId === u.id}
+                      onChange={(ev) => handleRoleChange(u.id, ev.target.value)}
+                      aria-label={`Role for ${u.email}`}
+                    >
+                      {ROLE_OPTIONS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>{u.clinicName ?? u.clinicId ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!rows.length && !error ? <p style={{ padding: '1rem', margin: 0, color: '#64748b' }}>No users found.</p> : null}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+            <button
+              type="button"
+              className="neo-btn neo-btn-secondary"
+              disabled={page <= 1}
+              onClick={() => setPage(Math.max(1, page - 1))}
+            >
+              Prev
+            </button>
+            <span style={{ fontSize: 14 }}>
+              Page {page} / {totalPages}
+            </span>
+            <button
+              type="button"
+              className="neo-btn neo-btn-secondary"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Next
+            </button>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--neo-text-muted, #64748b)', marginBottom: 0 }}>
+            Showing up to {limit} users per page.
+          </p>
         </div>
       )}
     </div>

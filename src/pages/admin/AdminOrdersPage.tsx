@@ -1,33 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import { ApiError } from '@/components/ApiError';
-import { userMessageFromUnknown } from '@/lib/apiErrors';
-import { fetchAdminOrders, type AdminOrderRow } from '@/services/adminPanelService';
+import { useAdminOrdersView } from '@/hooks/view/useAdminOrdersView';
 
 export const AdminOrdersPage: React.FC = () => {
-  const [rows, setRows] = useState<AdminOrderRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await fetchAdminOrders({ page: 1, limit: 100 });
-      setRows(res.orders);
-      setTotal(res.total);
-    } catch (e) {
-      setRows([]);
-      setTotal(0);
-      setError(userMessageFromUnknown(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { rows, total, loading, error, reload } = useAdminOrdersView(1, 100);
 
   return (
     <div className="tenant-page">
@@ -38,7 +14,7 @@ export const AdminOrdersPage: React.FC = () => {
         </p>
         {!loading && !error ? <p style={{ margin: 0, color: 'var(--neo-text-muted)' }}>Total: {total}</p> : null}
       </div>
-      {error ? <ApiError message={error} title="Could not load orders" onRetry={() => void load()} /> : null}
+      {error ? <ApiError message={error} title="Could not load orders" onRetry={() => void reload()} /> : null}
       {loading ? (
         <div className="tenant-loading" role="status">
           <div className="neo-loading-spinner tenant-spinner" />

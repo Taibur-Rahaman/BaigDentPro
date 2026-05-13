@@ -1,26 +1,33 @@
-import React, { useEffect, useState } from 'react';
-import { apiRequest } from '@/lib/apiClient';
+import React, { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { useSafeHealthProbe } from '@/hooks/useSafeHealthProbe';
 
 /**
- * Optional probe: if `/api/health` fails, show a support banner (wrong host, API down, etc.).
+ * In-app `/api/health` probe (via {@link useSafeHealthProbe}).
+ * Renders only under `AuthenticatedLayout`; unmount clears probe state.
  */
 export const ApiHealthBanner: React.FC = () => {
-  const [failed, setFailed] = useState(false);
+  const location = useLocation();
+  const { isAuthenticated } = useAuth();
+
+  const { failed, isLoading } = useSafeHealthProbe({
+    enabled: isAuthenticated,
+    pathname: location.pathname,
+    debounceMs: 175,
+    deferUntilPaint: true,
+  });
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        await apiRequest('/api/health');
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    console.log('[HEALTH BANNER RENDER]', {
+      pathname: location.pathname,
+      failed,
+      isLoading,
+      isAuthenticated,
+    });
+  }, [failed, isLoading, isAuthenticated, location.pathname]);
 
+  if (!isAuthenticated) return null;
   if (!failed) return null;
 
   return (
@@ -35,7 +42,7 @@ export const ApiHealthBanner: React.FC = () => {
         borderBottom: '1px solid rgba(248, 113, 113, 0.35)',
       }}
     >
-      API connection failed. Please contact support.
+      API unreachable (health check). Contact support if problems continue.
     </div>
   );
 };

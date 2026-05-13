@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-echo "== Git: no committed env files (excluding *.example) =="
-bad="$(git ls-files | grep -E '\.env' | grep -v '\.example' || true)"
+echo "== Git: no secret env files (allow .env.production = public Vite build keys) =="
+bad="$(git ls-files | grep -E '\.env($|\.)' | grep -v '\.example' | grep -vE '(^|/)\.env\.production$' || true)"
 if [[ -n "$bad" ]]; then
   echo "FAIL — tracked files that look like env secrets:"
   echo "$bad"

@@ -16,7 +16,7 @@ CREATE INDEX "invites_clinicId_idx" ON "invites"("clinicId");
 CREATE INDEX "invites_email_idx" ON "invites"("email");
 
 ALTER TABLE "invites" ADD CONSTRAINT "invites_clinicId_fkey" FOREIGN KEY ("clinicId") REFERENCES "Clinic"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "invites" ADD CONSTRAINT "invites_branchId_fkey" FOREIGN KEY ("branchId") REFERENCES "Branch"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "invites" ADD CONSTRAINT "invites_branchId_fkey" FOREIGN KEY ("branchId") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- Clinic subscription payments (separate from invoice `Payment` rows)
 CREATE TABLE "subscription_payments" (

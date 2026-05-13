@@ -1,55 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import api from '@/api';
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { useAcceptInviteView } from '@/hooks/view/useAcceptInviteView';
 
 export const AcceptInvitePage: React.FC = () => {
-  const [params] = useSearchParams();
-  const navigate = useNavigate();
-  const token = params.get('token')?.trim() ?? '';
-
-  const [name, setName] = useState('');
-  const [password, setPassword] = useState('');
-  const [preview, setPreview] = useState<{ clinicName: string; emailMasked: string; role: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!token) {
-      setError('Missing invite token.');
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await api.invite.preview(token);
-        if (!cancelled) setPreview(res);
-      } catch (e: unknown) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Invite could not be loaded.');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (!token) return;
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    setBusy(true);
-    try {
-      await api.invite.accept({ token, name: name.trim(), password });
-      navigate('/login', { replace: true, state: { message: 'Account created. Sign in with your email and password.' } });
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not accept invite');
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { token, name, setName, password, setPassword, preview, error, busy, submit } = useAcceptInviteView();
 
   return (
     <div className="tenant-page" style={{ maxWidth: 480, margin: '3rem auto', padding: '0 1rem' }}>

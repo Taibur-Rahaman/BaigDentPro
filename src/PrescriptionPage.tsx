@@ -1,12 +1,20 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import api from './api';
+import { useAuth } from '@/hooks/useAuth';
+import { usePrescriptionListView } from '@/hooks/view/usePrescriptionListView';
+import type { PrescriptionHeaderSettingsState } from '@/types/uiPrefs';
 
 export interface DrugRow {
   id: string;
   brand: string;
   dose: string;
+  frequency: string;
   duration: string;
   durationUnit: 'D' | 'M';
+  instruction: string;
+  maxDailyDose: string;
+  doctorNotes: string;
+  allowDoseOverride: boolean;
   beforeFood: boolean;
   afterFood: boolean;
 }
@@ -45,11 +53,36 @@ const createDrugRow = (): DrugRow => ({
   id: crypto.randomUUID(),
   brand: '',
   dose: '',
+  frequency: '',
   duration: '',
   durationUnit: 'D',
+  instruction: '',
+  maxDailyDose: '',
+  doctorNotes: '',
+  allowDoseOverride: false,
   beforeFood: false,
   afterFood: false,
 });
+
+/** Device-local prescription productivity helpers (draft copy only — clinician responsibility). */
+const RX_LS_LAST = 'baigdentpro:rx:lastDraft:v1';
+const RX_LS_FAV_BRANDS = 'baigdentpro:rx:favoriteBrands:v1';
+const RX_LS_TEMPLATES = 'baigdentpro:rx:namedTemplates:v1';
+
+function readLsJson(raw: string | null): unknown {
+  if (!raw?.trim()) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function cloneDrugRows(rows: DrugRow[]): DrugRow[] {
+  return rows.map((d) => ({ ...d, id: crypto.randomUUID() }));
+}
+
+type RxNamedTemplate = { name: string; dx: string; drugs: DrugRow[] };
 
 // Comprehensive Drug Database
 const DRUG_DATABASE = [
@@ -158,6 +191,7 @@ export const PrescriptionPage: React.FC<Props> = ({
   patientsDirectory,
   onPrescriptionSaved,
 }) => {
+  const { token } = useAuth();
   const [activeNav, setActiveNav] = useState<PrescriptionSubView>('prescription');
   const [notice, setNotice] = useState<string | null>(null);
   const [showPatientSearch, setShowPatientSearch] = useState(false);
@@ -179,6 +213,11 @@ export const PrescriptionPage: React.FC<Props> = ({
   /** Linked clinic patient id for API `prescriptions.create` (Dashboard / patient picker). */
   const [linkedPatientId, setLinkedPatientId] = useState<string | null>(() => preselectedPatient?.patientId ?? null);
   const [savingPrescription, setSavingPrescription] = useState(false);
+  const {
+    prescriptions: serverPrescriptions,
+    loading: serverRxLoading,
+    refresh: refreshServerPrescriptions,
+  } = usePrescriptionListView(token, activeNav === 'viewall');
 
   // Auto-fill patient fields when Dashboard opens this page from a patient profile.
   useEffect(() => {
@@ -195,34 +234,9 @@ export const PrescriptionPage: React.FC<Props> = ({
         date: preselectedPatient.date ?? p.date,
       }));
       setShowPatientSearch(false);
-
-      // Load the last saved Prescription "History" for this patient (localStorage demo feature).
-      // This powers the "Past History / Present History / Notes" textareas.
-      try {
-        const raw = localStorage.getItem('baigdentpro:prescriptions');
-        const list: Array<any> = raw ? JSON.parse(raw) : [];
-
-        const regNo = preselectedPatient.regNo?.toString().trim() ?? '';
-        const name = preselectedPatient.name?.toString().trim().toLowerCase() ?? '';
-
-        const candidates = list.filter((item) => {
-          const itemPatient = item?.patient ?? {};
-          const itemRegNo = itemPatient?.regNo?.toString().trim() ?? '';
-          const itemName = itemPatient?.name?.toString().trim().toLowerCase() ?? '';
-          if (regNo) return itemRegNo === regNo;
-          if (name) return itemName === name;
-          return false;
-        });
-
-        const latest = candidates.sort((a, b) => (b?.createdAt ?? 0) - (a?.createdAt ?? 0))[0];
-        if (latest) {
-          setPastHistory(typeof latest.pastHistory === 'string' ? (latest.pastHistory || 'Past medical history') : 'Past medical history');
-          setPresentHistory(typeof latest.presentHistory === 'string' ? latest.presentHistory : '');
-          setNotesHistory(typeof latest.notesHistory === 'string' ? latest.notesHistory : '');
-        }
-      } catch {
-        // ignore localStorage parsing errors
-      }
+      setPastHistory('Past medical history');
+      setPresentHistory('');
+      setNotesHistory('');
       return;
     }
 
@@ -242,7 +256,7 @@ export const PrescriptionPage: React.FC<Props> = ({
     setPresentHistory('');
     setNotesHistory('');
   }, [preselectedPatient]);
-  
+
   // Clinical data
   const [dx, setDx] = useState('');
   const [cc, setCc] = useState('');
@@ -295,10 +309,15 @@ export const PrescriptionPage: React.FC<Props> = ({
   const [drugs, setDrugs] = useState<DrugRow[]>([createDrugRow()]);
   const [rxBrand, setRxBrand] = useState('');
   const [rxDose, setRxDose] = useState('');
+  const [rxFrequency, setRxFrequency] = useState('');
   const [rxDuration, setRxDuration] = useState('');
-  const [rxDurationUnit, setRxDurationUnit] = useState<'D' | 'M'>('D');
+  const [rxInstruction, setRxInstruction] = useState('');
+  const [rxMaxDailyDose, setRxMaxDailyDose] = useState('');
+  const [rxDoctorNotes, setRxDoctorNotes] = useState('');
+  const [rxDurationUnit, _setRxDurationUnit] = useState<'D' | 'M'>('D');
   const [rxBeforeFood, setRxBeforeFood] = useState(false);
   const [rxAfterFood, setRxAfterFood] = useState(false);
+  const [rxShortcutsTick, setRxShortcutsTick] = useState(0);
   
   // Visit info
   const [visit, setVisit] = useState({
@@ -327,7 +346,7 @@ export const PrescriptionPage: React.FC<Props> = ({
   const [drugDbResults, setDrugDbResults] = useState<typeof DRUG_DATABASE>([]);
   
   // Header Edit
-  const [headerSettings, setHeaderSettings] = useState({
+  const [headerSettings, setHeaderSettings] = useState<PrescriptionHeaderSettingsState>({
     doctorName: 'Dr. Muhammad Ali',
     qualification: 'BDS, MDS',
     specialization: '',
@@ -337,27 +356,15 @@ export const PrescriptionPage: React.FC<Props> = ({
     clinicName: 'BaigDentPro Dental Care',
     clinicLogo: '',
     address: '123 Medical Center, Main Road',
-    phone: '+880 1617-180711',
+    phone: '+880 1601-677122',
     email: 'contact@baigdentpro.com',
     visitTime: '',
     dayOff: '',
     doctorLogo: '',
   });
 
-  const HEADER_SETTINGS_STORAGE_KEY = 'baigdentpro:headerSettings';
-  const PRINT_SETUP_OVERRIDES_STORAGE_KEY = 'baigdentpro:printSetupOverrides';
-
   useEffect(() => {
-    // Load persisted clinic/doctor header settings (so Settings page affects all pages).
-    try {
-      const raw = localStorage.getItem(HEADER_SETTINGS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<typeof headerSettings>;
-      setHeaderSettings((prev) => ({ ...prev, ...parsed }));
-    } catch {
-      // ignore
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setHeaderSettings((prev) => api.ui.hydratePrescriptionHeader(prev));
   }, []);
 
   type PrintBarcodePosition = 'leftBottom' | 'rightTop';
@@ -387,6 +394,7 @@ export const PrescriptionPage: React.FC<Props> = ({
     showOE: boolean;
     showAdvice: boolean;
     showDx: boolean;
+    showHeader: boolean;
     showFooter: boolean;
     defaultPastPrint: boolean;
     defaultPresentPrint: boolean;
@@ -405,9 +413,24 @@ export const PrescriptionPage: React.FC<Props> = ({
     footerWidthCm: number;
     pageHeightCm: number;
     pageWidthCm: number;
+    marginTopMm: number;
+    marginBottomMm: number;
+    marginLeftMm: number;
+    marginRightMm: number;
+    useCustomPad: boolean;
+    watermarkText: string;
+    watermarkOpacity: number;
+    watermarkPosition: 'center' | 'top' | 'bottom';
+    watermarkFontSize: number;
+    watermarkRotation: number;
+    printPageBorderEnabled: boolean;
+    printBorderWidthPt: number;
+    printBorderMeasureFrom: 'page_edge' | 'text_margin';
+    printBorderOffsetMm: number;
+    printCenterHorizontal: boolean;
+    printCenterVertical: boolean;
   };
 
-  const PRINT_SETUP_STORAGE_KEY = 'baigdentpro:printSetup';
   const defaultPrintSetup: PrintSetupState = {
     footerText: 'নিয়ম মাফিক ঔষধ খাবেন। ডাক্তারের পরামর্শ ব্যতীত ঔষধ পরিবর্তন নিষেধ।',
     fontSizePt: 12,
@@ -434,6 +457,7 @@ export const PrescriptionPage: React.FC<Props> = ({
     showOE: true,
     showAdvice: true,
     showDx: true,
+    showHeader: true,
     showFooter: true,
     defaultPastPrint: false,
     defaultPresentPrint: false,
@@ -451,51 +475,83 @@ export const PrescriptionPage: React.FC<Props> = ({
     footerWidthCm: 21.1,
     pageHeightCm: 29.6,
     pageWidthCm: 21.3,
+    marginTopMm: 10,
+    marginBottomMm: 10,
+    marginLeftMm: 10,
+    marginRightMm: 10,
+    useCustomPad: false,
+    watermarkText: '',
+    watermarkOpacity: 0.1,
+    watermarkPosition: 'center',
+    watermarkFontSize: 40,
+    watermarkRotation: -25,
+    printPageBorderEnabled: false,
+    printBorderWidthPt: 1.5,
+    printBorderMeasureFrom: 'page_edge',
+    printBorderOffsetMm: 3,
+    printCenterHorizontal: false,
+    printCenterVertical: false,
   };
 
   const [printSetupTab, setPrintSetupTab] = useState<'pageSetup' | 'pageOption' | 'settings'>('pageSetup');
   const [printSetup, setPrintSetup] = useState<PrintSetupState>(defaultPrintSetup);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(PRINT_SETUP_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<PrintSetupState>;
-      setPrintSetup((prev) => ({ ...prev, ...parsed }));
-    } catch {
-      // ignore
-    }
+    setPrintSetup((prev) => api.ui.hydratePrescriptionPrintSetup(prev));
   }, []);
 
   useEffect(() => {
-    // Apply dashboard overrides (paper size / optional header height) on top of saved print setup.
-    try {
-      const raw = localStorage.getItem(PRINT_SETUP_OVERRIDES_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<{ paperSize: 'A4' | 'A5' | 'Letter'; headerHeight: number }>;
-
-      const paper = parsed.paperSize;
-      const size = paper === 'A5'
-        ? { widthCm: 14.8, heightCm: 21.0 }
-        : paper === 'Letter'
-          ? { widthCm: 21.59, heightCm: 27.94 }
-          : { widthCm: 21.0, heightCm: 29.7 }; // A4 default
-
-      const next: Partial<PrintSetupState> = {
-        pageWidthCm: size.widthCm,
-        pageHeightCm: size.heightCm,
-      };
-
-      if (typeof parsed.headerHeight === 'number' && isFinite(parsed.headerHeight)) {
-        // Interpret values > 20 as mm; otherwise treat as cm.
-        const maybeCm = parsed.headerHeight > 20 ? parsed.headerHeight / 10 : parsed.headerHeight;
-        if (maybeCm > 0.5 && maybeCm < 20) next.headerHeightCm = maybeCm;
+    void (async () => {
+      try {
+        const s = await api.settings.get();
+        setHeaderSettings((prev) => ({
+          ...prev,
+          clinicName: s.clinicName || prev.clinicName,
+          clinicLogo: s.logo || prev.clinicLogo,
+          address: s.address || prev.address,
+          phone: s.phone || prev.phone,
+          email: s.email || prev.email,
+        }));
+        setPrintSetup((prev) => ({
+          ...prev,
+          useCustomPad: Boolean(s.useCustomPad),
+          showHeader: s.useCustomPad ? false : s.printShowHeader !== false,
+          showFooter: s.useCustomPad ? false : s.printShowFooter !== false,
+          marginTopMm: Number.isFinite(s.printMarginTopMm) ? s.printMarginTopMm : prev.marginTopMm,
+          marginBottomMm: Number.isFinite(s.printMarginBottomMm) ? s.printMarginBottomMm : prev.marginBottomMm,
+          marginLeftMm: Number.isFinite(s.printMarginLeftMm) ? s.printMarginLeftMm : prev.marginLeftMm,
+          marginRightMm: Number.isFinite(s.printMarginRightMm) ? s.printMarginRightMm : prev.marginRightMm,
+          pageWidthCm: 21,
+          pageHeightCm: 29.7,
+          watermarkText: s.watermarkText || '',
+          watermarkOpacity: Number.isFinite(s.watermarkOpacity) ? s.watermarkOpacity : prev.watermarkOpacity,
+          watermarkPosition: s.watermarkPosition || prev.watermarkPosition,
+          watermarkFontSize: Number.isFinite(s.watermarkFontSize) ? s.watermarkFontSize : prev.watermarkFontSize,
+          watermarkRotation: Number.isFinite(s.watermarkRotation) ? s.watermarkRotation : prev.watermarkRotation,
+          printPageBorderEnabled:
+            typeof s.printPageBorderEnabled === 'boolean' ? s.printPageBorderEnabled : prev.printPageBorderEnabled,
+          printBorderWidthPt:
+            typeof s.printBorderWidthPt === 'number' && Number.isFinite(s.printBorderWidthPt)
+              ? s.printBorderWidthPt
+              : prev.printBorderWidthPt,
+          printBorderMeasureFrom:
+            s.printBorderMeasureFrom === 'text_margin'
+              ? 'text_margin'
+              : s.printBorderMeasureFrom === 'page_edge'
+                ? 'page_edge'
+                : prev.printBorderMeasureFrom,
+          printBorderOffsetMm:
+            typeof s.printBorderOffsetMm === 'number' && Number.isFinite(s.printBorderOffsetMm)
+              ? s.printBorderOffsetMm
+              : prev.printBorderOffsetMm,
+          printCenterHorizontal: s.printCenterHorizontal === true ? true : prev.printCenterHorizontal,
+          printCenterVertical: s.printCenterVertical === true ? true : prev.printCenterVertical,
+        }));
+        setHeaderSettings((prev) => ({ ...prev, doctorLogo: s.doctorLogo || prev.doctorLogo }));
+      } catch {
+        // Keep local defaults if settings API is unavailable.
       }
-
-      setPrintSetup((prev) => ({ ...prev, ...next }));
-    } catch {
-      // ignore
-    }
+    })();
   }, []);
 
   useEffect(() => {
@@ -560,6 +616,13 @@ export const PrescriptionPage: React.FC<Props> = ({
 
   const handleAddDrugFromRx = () => {
     if (!rxBrand.trim() && !rxDose.trim() && !rxDuration.trim()) return;
+    const doseNum = Number.parseFloat(rxDose);
+    const maxDoseNum = Number.parseFloat(rxMaxDailyDose);
+    const exceeds = Number.isFinite(doseNum) && Number.isFinite(maxDoseNum) && maxDoseNum > 0 && doseNum > maxDoseNum;
+    if (exceeds) {
+      const ok = window.confirm('Entered dose exceeds max daily dose limit. Do you want to override?');
+      if (!ok) return;
+    }
     const hasMonth = /মাস/.test(rxDuration);
     const unit: 'D' | 'M' = hasMonth ? 'M' : rxDurationUnit;
     setDrugs((d) => [
@@ -568,15 +631,24 @@ export const PrescriptionPage: React.FC<Props> = ({
         id: crypto.randomUUID(),
         brand: rxBrand,
         dose: rxDose,
+        frequency: rxFrequency,
         duration: rxDuration,
         durationUnit: unit,
+        instruction: rxInstruction,
+        maxDailyDose: rxMaxDailyDose,
+        doctorNotes: rxDoctorNotes,
+        allowDoseOverride: exceeds,
         beforeFood: rxBeforeFood,
         afterFood: rxAfterFood,
       },
     ]);
     setRxBrand('');
     setRxDose('');
+    setRxFrequency('');
     setRxDuration('');
+    setRxInstruction('');
+    setRxMaxDailyDose('');
+    setRxDoctorNotes('');
   };
 
   const handleSave = async (): Promise<boolean> => {
@@ -590,68 +662,50 @@ export const PrescriptionPage: React.FC<Props> = ({
       return false;
     }
 
-    const revisitStr = [followUpDay.trim(), revisitUnit].filter(Boolean).join(' ');
-    const payload = {
-      patient,
-      dx,
-      cc,
-      oe: getOeDisplayString(),
-      oeBox: oe,
-      ix,
-      drugHistory,
-      pastHistory,
-      presentHistory,
-      notesHistory,
-      drugs,
-      visit,
-      revisit: revisitStr,
-      richText: richTextRef.current?.innerHTML ?? '',
-      createdAt: Date.now(),
-    };
-    const existingRaw = localStorage.getItem('baigdentpro:prescriptions');
-    const list = existingRaw ? JSON.parse(existingRaw) : [];
-    list.push(payload);
-    localStorage.setItem('baigdentpro:prescriptions', JSON.stringify(list));
+    if (!token) {
+      showNotice('Sign in to save prescriptions to the server.');
+      return false;
+    }
+
+    const pid = linkedPatientId || preselectedPatient?.patientId;
+    if (!pid) {
+      showNotice('Select a clinic patient (search icon) so the prescription is stored on the server.');
+      return false;
+    }
 
     setSavingPrescription(true);
     try {
-      let extra = '';
-      const pid = linkedPatientId || preselectedPatient?.patientId;
-      if (api.getToken() && pid) {
-        try {
-          const richHtml = richTextRef.current?.innerHTML ?? '';
-          await api.prescriptions.create({
-            patientId: pid,
-            diagnosis: dx || '',
-            chiefComplaint: cc || '',
-            examination: getOeDisplayString() || '',
-            investigation: ix || '',
-            advice: richHtml || undefined,
-            vitals: JSON.stringify(oe),
-            items: validDrugs.map((d) => ({
-              drugName: d.brand,
-              genericName: '',
-              dosage: d.dose,
-              frequency: d.durationUnit === 'M' ? `${d.duration} M` : `${d.duration} D`,
-              duration: d.durationUnit === 'M' ? `${d.duration} months` : `${d.duration} days`,
-              beforeFood: d.beforeFood,
-              afterFood: d.afterFood,
-            })),
-          });
-          extra = ' Synced to server.';
-          onPrescriptionSaved?.();
-        } catch (e: any) {
-          showNotice(e?.message ?? 'Server save failed — saved locally only.');
-          setStatus('Saved locally');
-          return true;
-        }
-      } else if (api.getToken() && !pid) {
-        extra = ' Saved locally — select a clinic patient to sync to the server.';
-      }
-
+      const richHtml = richTextRef.current?.innerHTML ?? '';
+      await api.prescriptions.create({
+        patientId: pid,
+        diagnosis: dx || '',
+        chiefComplaint: cc || '',
+        examination: getOeDisplayString() || '',
+        investigation: ix || '',
+        advice: richHtml || undefined,
+        vitals: JSON.stringify(oe),
+        items: validDrugs.map((d) => ({
+          drugName: d.brand,
+          genericName: '',
+          dosage: d.dose,
+          frequency: d.frequency || (d.durationUnit === 'M' ? `${d.duration} M` : `${d.duration} D`),
+          duration: d.durationUnit === 'M' ? `${d.duration} months` : `${d.duration} days`,
+          beforeFood: d.beforeFood,
+          afterFood: d.afterFood,
+          instructions: d.instruction,
+          maxDailyDose: d.maxDailyDose,
+          doctorNotes: d.doctorNotes,
+          allowDoseOverride: d.allowDoseOverride,
+        })),
+      });
+      onPrescriptionSaved?.();
       setStatus('Saved');
-      showNotice(`Prescription saved successfully!${extra}`);
+      showNotice('Prescription saved successfully.');
+      persistDeviceDraftSnapshot();
       return true;
+    } catch (e: unknown) {
+      showNotice(e instanceof Error ? e.message : 'Failed to save prescription.');
+      return false;
     } finally {
       setSavingPrescription(false);
     }
@@ -679,10 +733,20 @@ export const PrescriptionPage: React.FC<Props> = ({
     const regNo = (patient.regNo || visit.visitNo || '').toString().replace(/\s/g, '');
     const barcodeData = encodeURIComponent(regNo || '0');
     const barcodeDigits = (regNo || '—').split('').join(' ');
-    const withoutHeader = Boolean(opts.withoutHeader);
+    const withoutHeader = Boolean(opts.withoutHeader) || printSetup.useCustomPad || !printSetup.showHeader;
     const fontSizePt = printSetup.fontSizePt || 12;
     const footerText = printSetup.footerText || defaultPrintSetup.footerText;
-    const showFooter = printSetup.showFooter;
+    const showFooter = printSetup.showFooter && !printSetup.useCustomPad;
+    const watermarkText = (printSetup.watermarkText || '').replace(/</g, '&lt;');
+    const watermarkOpacity = Math.max(0.05, Math.min(0.3, printSetup.watermarkOpacity || 0.1));
+    const watermarkRotation = Math.max(-180, Math.min(180, printSetup.watermarkRotation || -25));
+    const watermarkFontSize = Math.max(20, Math.min(80, printSetup.watermarkFontSize || 40));
+    const watermarkTop =
+      printSetup.watermarkPosition === 'top'
+        ? '18%'
+        : printSetup.watermarkPosition === 'bottom'
+          ? '72%'
+          : '40%';
 
     const escapeHtmlAttr = (value: string) =>
       String(value)
@@ -698,8 +762,10 @@ export const PrescriptionPage: React.FC<Props> = ({
       .map((r) => {
         const foodBn = r.beforeFood ? '(আহারের ১ ঘন্টা আগে)' : r.afterFood ? '(খাবার পর)' : '';
         const durBn = r.durationUnit === 'M' ? `${r.duration} মাস` : `${r.duration} দিন`;
-        const line2 = [foodBn, durBn].filter(Boolean).join(' - ');
-        return `<div class="rx-item"><span class="rx-line1">${(r.brand || '').replace(/</g, '&lt;')} ${(r.dose || '').replace(/</g, '&lt;')}</span><br><span class="rx-line2">${line2.replace(/</g, '&lt;')}</span></div>`;
+        const line2 = [r.frequency || '', foodBn, durBn].filter(Boolean).join(' - ');
+        const notes = (r.doctorNotes || '').replace(/</g, '&lt;');
+        const instruction = (r.instruction || '').replace(/</g, '&lt;');
+        return `<div class="rx-item"><span class="rx-line1">${(r.brand || '').replace(/</g, '&lt;')} ${(r.dose || '').replace(/</g, '&lt;')}</span><br><span class="rx-line2">${line2.replace(/</g, '&lt;')}</span>${instruction ? `<br><span class="rx-line3">${instruction}</span>` : ''}${notes ? `<br><span class="rx-line4">Dr. note: ${notes}</span>` : ''}</div>`;
       })
       .join('');
     const patientFields: string[] = [];
@@ -720,6 +786,19 @@ export const PrescriptionPage: React.FC<Props> = ({
     const showBarcode = printSetup.printBarcode;
     const barcodeRightTop = printSetup.barcodePosition === 'rightTop';
 
+    const pageBorderOn = Boolean(printSetup.printPageBorderEnabled);
+    const borderW = Math.max(0.25, Math.min(6, Number(printSetup.printBorderWidthPt) || 1.5));
+    const borderFromText = printSetup.printBorderMeasureFrom === 'text_margin';
+    const borderGap = Math.max(0, Math.min(14, Number(printSetup.printBorderOffsetMm) || 3));
+    const centerH = printSetup.printCenterHorizontal === true;
+    const centerV = printSetup.printCenterVertical === true;
+    const bodyLayoutStyle = `${centerV ? 'display:flex;flex-direction:column;justify-content:center;min-height:100vh;' : ''}${centerH ? 'align-items:center;' : ''}`;
+    const shellBoxStyle = pageBorderOn
+      ? borderFromText
+        ? `box-sizing:border-box;margin:${borderGap}mm;border:${borderW}pt solid #111;padding:2mm;max-width:calc(100% - ${2 * borderGap}mm);`
+        : `box-sizing:border-box;border:${borderW}pt solid #111;padding:${borderGap}mm;width:100%;`
+      : `box-sizing:border-box;width:100%;`;
+
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Prescription</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -727,9 +806,10 @@ export const PrescriptionPage: React.FC<Props> = ({
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   *{box-sizing:border-box;}
-  @page{size: ${printSetup.pageWidthCm}cm ${printSetup.pageHeightCm}cm; margin: 0;}
+  @page{size: A4; margin: ${printSetup.marginTopMm}mm ${printSetup.marginRightMm}mm ${printSetup.marginBottomMm}mm ${printSetup.marginLeftMm}mm;}
   body{font-family:'Noto Sans Bengali', Arial, sans-serif;font-size:${fontSizePt}pt;line-height:1.45;color:#000;background:#fff;margin:0;padding:0;}
-  .page{width:${printSetup.pageWidthCm}cm;min-height:${printSetup.pageHeightCm}cm;margin:0 auto;padding:0.4cm;display:flex;flex-direction:column;}
+  .page{width:100%;height:auto;margin:0 auto;padding:0;display:flex;flex-direction:column;position:relative;page-break-inside:avoid;}
+  .prescription-container{page-break-inside:avoid;overflow:hidden;}
   .print-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:8px;min-height:${printSetup.headerHeightCm}cm;${withoutHeader ? 'display:none;' : ''}}
   .print-header-left{text-align:left;font-size:13px;}
   .print-header-right{text-align:right;font-size:13px;}
@@ -738,27 +818,43 @@ export const PrescriptionPage: React.FC<Props> = ({
   .print-header-left .doc-name,.print-header-right .chamber-label{font-weight:bold;font-size:14px;display:block;margin-bottom:2px;}
   .patient-line{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 20px;margin-bottom:10px;padding:6px 0;border-bottom:1px solid #000;font-size:12px;min-height:${printSetup.patientInfoHeightCm}cm;${printSetup.printPatientInfo ? '' : 'display:none;'}}
   .patient-line span{white-space:nowrap;}
-  .print-body{display:flex;gap:0.4cm;margin-top:10px;flex:1;}
-  .print-left{min-width:0;width:${printSetup.leftWidthCm}cm;min-height:${printSetup.leftHeightCm}cm;}
-  .print-right{min-width:0;width:${printSetup.rightWidthCm}cm;min-height:${printSetup.rightHeightCm}cm;border-left:2px solid #000;padding-left:0.35cm;position:relative;}
-  .print-left .section{margin-bottom:10px;}
+  .print-body{display:flex;gap:0.25cm;margin-top:6px;flex:1;min-height:0;overflow:hidden;}
+  .print-left{min-width:0;width:${printSetup.leftWidthCm}cm;min-height:${printSetup.leftHeightCm}cm;overflow:hidden;}
+  .print-right{min-width:0;width:${printSetup.rightWidthCm}cm;min-height:${printSetup.rightHeightCm}cm;border-left:2px solid #000;padding-left:0.35cm;position:relative;overflow:hidden;}
+  .print-left .section{margin-bottom:6px;}
   .section-title{font-weight:bold;margin-bottom:2px;}
   .section-title-ul{font-weight:bold;text-decoration:underline;margin-bottom:2px;}
   .barcode-block{margin-bottom:8px;}
   .barcode-block img{height:36px;display:block;margin-bottom:2px;}
   .barcode-digits{font-size:11px;letter-spacing:2px;}
   .rx-title{font-weight:bold;font-size:18px;margin-bottom:10px;}
-  .rx-item{margin-bottom:12px;}
+  .rx-item{margin-bottom:8px;}
   .rx-line1{font-weight:bold;}
   .rx-line2{color:#000;}
+  .rx-line3{font-size:11px;color:#111;}
+  .rx-line4{font-size:11px;color:#334155;}
   .diagnosis{margin-top:12px;font-weight:bold;}
-  .print-footer{margin-top:auto;padding-top:0.2cm;border-top:1px solid #000;font-size:12px;text-align:center;min-height:${printSetup.footerHeightCm}cm;letter-spacing:0;word-spacing:0;font-family:'Noto Sans Bengali', Arial, sans-serif;${showFooter ? '' : 'display:none;'}}
+  .print-footer{margin-top:auto;padding-top:0.1cm;border-top:1px solid #000;background:#fff;font-size:11px;text-align:center;min-height:${printSetup.footerHeightCm}cm;letter-spacing:0;word-spacing:0;font-family:'Noto Sans Bengali', Arial, sans-serif;flex:0 0 auto;${showFooter ? '' : 'display:none;'}}
+  .watermark{position:absolute;opacity:${watermarkOpacity};transform:translate(-50%,-50%) rotate(${watermarkRotation}deg);font-size:${watermarkFontSize}px;top:${watermarkTop};left:50%;width:auto;text-align:center;pointer-events:none;z-index:0;white-space:nowrap;}
+  .print-body,.print-header,.patient-line,.print-footer{position:relative;z-index:1;}
+  .scalable-root{transform-origin: top center;}
+  .content{position:relative;z-index:1;}
   .barcode-rt{position:absolute;top:0;right:0;text-align:right;}
   .barcode-rt img{height:36px;display:block;}
-  @media print{body{padding:10px;} .print-header,.patient-line{break-inside:avoid;}}
+  .print-shell{position:relative;}
+  @media print{
+    body{margin:0;padding:0;${centerV ? 'min-height:100%;' : ''}}
+    .page{width:100%;height:auto;page-break-inside:avoid;}
+    .print-header,.patient-line,.prescription-container{break-inside:avoid;page-break-inside:avoid;}
+    .prescription-container{overflow:hidden;}
+    .print-shell{break-inside:avoid;page-break-inside:avoid;}
+  }
 </style></head>
-<body>
-  <div class="page">
+<body style="margin:0;padding:0;${bodyLayoutStyle}">
+  <div class="print-shell" style="${shellBoxStyle}">
+  <div class="page prescription-container">
+  ${watermarkText ? `<div class="watermark">${watermarkText}</div>` : ''}
+  <div class="scalable-root content" id="scalable-root">
   <div class="print-header">
     <div class="print-header-left">
       ${doctorLogoAttr ? `<img class="print-logo" src="${doctorLogoAttr}" alt="Doctor logo" />` : ''}
@@ -806,7 +902,29 @@ export const PrescriptionPage: React.FC<Props> = ({
       ${revisitStr ? `<div class="section" style="margin-top:10px;"><strong>** ${revisitStr} ${(printSetup.defaultRevisitText || 'পর আসবেন।').replace(/</g, '&lt;')}</strong></div>` : ''}
     </div>
   </div>
-  <div class="print-footer">${footerText.replace(/</g, '&lt;')}</div>
+  <div class="print-footer prescription-footer">${footerText.replace(/</g, '&lt;')}</div>
+  </div>
+  </div>
+<script>
+  (function() {
+    try {
+      var page = document.querySelector('.page');
+      var root = document.getElementById('scalable-root');
+      var footer = document.querySelector('.print-footer');
+      if (!page || !root || !footer) return;
+      var pageHeight = page.getBoundingClientRect().height || page.clientHeight || 1122;
+      var footerHeight = footer.getBoundingClientRect().height || footer.clientHeight || 40;
+      var maxHeight = pageHeight - footerHeight - 8;
+      var contentHeight = root.scrollHeight;
+      var stressScale = ${drugs.length >= 15 ? '0.9' : '1'};
+      if (contentHeight > maxHeight || stressScale < 1) {
+        var ratio = Math.max(0.72, Math.min(stressScale, maxHeight / Math.max(1, contentHeight)));
+        root.style.transform = 'scale(' + ratio + ')';
+        page.style.minHeight = Math.ceil(contentHeight * ratio + footerHeight + 8) + 'px';
+      }
+    } catch (_e) {}
+  })();
+</script>
   </div>
 </body></html>`;
   }, [patient, visit, dx, cc, getOeDisplayString, drugHistory, presentHistory, pastHistory, notesHistory, edd, drugs, followUpDay, revisitUnit, weight, bmiValue, headerSettings, printEdd, printNotes, printPast, printPresent, printSetup, defaultPrintSetup.footerText]);
@@ -841,11 +959,6 @@ export const PrescriptionPage: React.FC<Props> = ({
     }
   };
 
-  const handlePrint = async (withoutHeader: boolean) => {
-    const ok = await handleSave();
-    if (ok) printViaIframe(withoutHeader);
-  };
-
   const handleSaveAndPrint = async (withoutHeader: boolean) => {
     const ok = await handleSave();
     if (ok) printViaIframe(withoutHeader);
@@ -860,12 +973,157 @@ export const PrescriptionPage: React.FC<Props> = ({
     setTimeout(() => setNotice(null), 3000);
   };
 
+  const favoritesList = useMemo((): string[] => {
+    void rxShortcutsTick;
+    if (typeof window === 'undefined') return [];
+    const raw = readLsJson(window.localStorage.getItem(RX_LS_FAV_BRANDS));
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, 36);
+  }, [rxShortcutsTick]);
+
+  const namedTemplatesList = useMemo((): RxNamedTemplate[] => {
+    void rxShortcutsTick;
+    if (typeof window === 'undefined') return [];
+    const raw = readLsJson(window.localStorage.getItem(RX_LS_TEMPLATES));
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter(
+        (x): x is RxNamedTemplate =>
+          x !== null && typeof x === 'object' && typeof (x as RxNamedTemplate).name === 'string'
+      )
+      .map((x) => ({
+        name: x.name.trim(),
+        dx: typeof x.dx === 'string' ? x.dx : '',
+        drugs: Array.isArray(x.drugs) ? (x.drugs as DrugRow[]) : [],
+      }))
+      .filter((x) => x.name.length > 0)
+      .slice(0, 24);
+  }, [rxShortcutsTick]);
+
+  const persistDeviceDraftSnapshot = () => {
+    try {
+      const snapshot = JSON.stringify({
+        dx,
+        cc,
+        oeText,
+        oe,
+        ix,
+        drugs: drugs.filter((d) => d.brand.trim()),
+      });
+      window.localStorage.setItem(RX_LS_LAST, snapshot);
+      setRxShortcutsTick((x) => x + 1);
+    } catch {
+      /* quota */
+    }
+  };
+
+  const applyDeviceLastDraft = () => {
+    const raw =
+      typeof window !== 'undefined'
+        ? readLsJson(window.localStorage.getItem(RX_LS_LAST))
+        : null;
+    if (!raw || typeof raw !== 'object') {
+      showNotice('No saved draft on this device yet — save a prescription once first.');
+      return;
+    }
+    const o = raw as Record<string, unknown>;
+    if (typeof o.dx === 'string') setDx(o.dx);
+    if (typeof o.cc === 'string') setCc(o.cc);
+    if (typeof o.oeText === 'string') setOeText(o.oeText);
+    if (typeof o.ix === 'string') setIx(o.ix);
+    if (o.oe && typeof o.oe === 'object') {
+      setOe((prev) => ({ ...prev, ...(o.oe as typeof prev) }));
+    }
+    const drows = o.drugs;
+    if (Array.isArray(drows) && drows.length) {
+      const mapped = (drows as DrugRow[]).filter((d) => d?.brand?.trim());
+      setDrugs(mapped.length ? cloneDrugRows(mapped) : [createDrugRow()]);
+    }
+    showNotice('Loaded last prescription draft from this device.');
+  };
+
+  const loadServerLastRxForPatient = async () => {
+    if (!token) {
+      showNotice('Sign in to load prescriptions from the server.');
+      return;
+    }
+    if (!linkedPatientId) {
+      showNotice('Pick a clinic patient first.');
+      return;
+    }
+    try {
+      const { prescriptions } = await api.prescriptions.list({ patientId: linkedPatientId, limit: 1, page: 1 });
+      const last = prescriptions[0];
+      if (!last || !last.drugs.length) {
+        showNotice('No previous prescriptions stored for this patient.');
+        return;
+      }
+      setDx(last.diagnosis ?? '');
+      const mappedRows: DrugRow[] = last.drugs.map((d) => ({
+        id: crypto.randomUUID(),
+        brand: d.brand,
+        dose: d.dose,
+        frequency: d.frequency || '',
+        duration: d.duration,
+        durationUnit: /মাস|\bmonths?\b|M\b/i.test(String(d.duration)) ? 'M' : 'D',
+        instruction: '',
+        maxDailyDose: '',
+        doctorNotes: '',
+        allowDoseOverride: false,
+        beforeFood: d.beforeFood,
+        afterFood: d.afterFood,
+      }));
+      setDrugs(mappedRows);
+      showNotice(`Loaded latest prescription (${last.date})`);
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : 'Could not load prior prescription.');
+    }
+  };
+
+  const addFavoriteBrandLine = () => {
+    const b = rxBrand.trim();
+    if (!b) return;
+    try {
+      const next = [...new Set([b, ...favoritesList])].slice(0, 36);
+      window.localStorage.setItem(RX_LS_FAV_BRANDS, JSON.stringify(next));
+      setRxShortcutsTick((x) => x + 1);
+      showNotice('Favorite drug saved.');
+    } catch {
+      showNotice('Could not save favorites (storage full?)');
+    }
+  };
+
+  const saveNamedTemplateShortcut = () => {
+    const name = window.prompt('Template name');
+    if (!name?.trim()) return;
+    const valid = drugs.filter((d) => d.brand.trim() && d.dose.trim());
+    if (!valid.length) {
+      showNotice('Add at least one complete drug row first.');
+      return;
+    }
+    try {
+      const existing = [...namedTemplatesList];
+      existing.unshift({ name: name.trim(), dx, drugs: cloneDrugRows(valid) });
+      window.localStorage.setItem(RX_LS_TEMPLATES, JSON.stringify(existing.slice(0, 24)));
+      setRxShortcutsTick((x) => x + 1);
+      showNotice('Template saved on this browser.');
+    } catch {
+      showNotice('Could not save template.');
+    }
+  };
+
+  const applyNamedTemplate = (t: RxNamedTemplate) => {
+    setDx(t.dx ?? '');
+    setDrugs(t.drugs?.length ? cloneDrugRows(t.drugs) : [createDrugRow()]);
+    showNotice(`Applied template "${t.name}"`);
+  };
+
   const applyTemplate = (key: string) => {
     const k = key.toLowerCase().replace(/\s+/g, '');
     if (k === 'oe' || key === 'O/E') setOe((o) => ({ ...o, heart: 'S1+S2+M0', lungs: 'NAD', abd: 'Soft, Non-Tender' }));
     if (k === 'cc' || key === 'C/C') setCc('Chief complaint here.');
     if (k === 'drug') {
-      setDrugs((d) => [...d, { ...createDrugRow(), brand: 'Sample Drug', dose: '1x1', duration: '7', durationUnit: 'D', beforeFood: false, afterFood: false }]);
+      setDrugs((d) => [...d, { ...createDrugRow(), brand: 'Sample Drug', dose: '1', frequency: '1+0+1', duration: '7', durationUnit: 'D', beforeFood: false, afterFood: false }]);
       setDrugInfoCnt('Sample Drug | 1x1 | 7 D');
     }
     if (k === 'treatment') {
@@ -955,19 +1213,25 @@ export const PrescriptionPage: React.FC<Props> = ({
     setZscore((z) => (z.ageDays !== String(ageDays) ? { ...z, ageDays: String(ageDays >= 0 ? ageDays : 0) } : z));
   }, [zscore.dob]);
 
-  const loadPatientFromSaved = (p: { patient?: { name?: string; age?: string; sex?: string; address?: string; mobile?: string; regNo?: string; date?: string } }) => {
-    const q = p.patient;
-    if (q) {
-      setPatient({
-        name: q.name ?? '',
-        age: q.age ?? '',
-        sex: q.sex ?? '',
-        address: q.address ?? '',
-        mobile: q.mobile ?? '',
-        regNo: q.regNo ?? '',
-        date: q.date ?? new Date().toISOString().slice(0, 10),
-      });
-    }
+  const loadPatientFromDirectory = (p: {
+    id: string;
+    name: string;
+    phone: string;
+    regNo?: string;
+    age?: string;
+    gender?: string;
+    address?: string;
+  }) => {
+    setLinkedPatientId(p.id);
+    setPatient({
+      name: p.name,
+      age: p.age ?? '',
+      sex: p.gender ?? '',
+      address: p.address ?? '',
+      mobile: p.phone,
+      regNo: p.regNo ?? '',
+      date: new Date().toISOString().slice(0, 10),
+    });
     setShowPatientSearch(false);
   };
 
@@ -1021,29 +1285,6 @@ export const PrescriptionPage: React.FC<Props> = ({
     const gestAgeStr = diffDays >= 0 ? `${weeks} weeks ${days} days` : '—';
     setEdd((e) => ({ ...e, lmp: v, edd: eddDate.toLocaleDateString(), gestAge: gestAgeStr }));
   }, [edd.lmp]);
-
-  const savedList = (() => {
-    try {
-      const raw = localStorage.getItem('baigdentpro:prescriptions');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  })();
-
-  // Render placeholder pages for different sections
-  const renderPlaceholderPage = (title: string, message: string, icon: string) => (
-    <main className="prescription-shell" style={{ padding: 24 }}>
-      <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-        <i className={`fa-solid ${icon}`} style={{ fontSize: '4rem', color: 'var(--primary-color)', marginBottom: '24px', opacity: 0.5 }}></i>
-        <h2 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>{title}</h2>
-        <p style={{ color: 'var(--text-secondary)', maxWidth: '500px', margin: '0 auto 24px' }}>{message}</p>
-        <button type="button" className="btn-primary" onClick={() => showNotice('This feature is available in the full version!')}>
-          <i className="fa-solid fa-rocket"></i> Explore Premium Features
-        </button>
-      </div>
-    </main>
-  );
 
   // Drug Database Page
   const renderDrugDatabase = () => (
@@ -1314,12 +1555,13 @@ export const PrescriptionPage: React.FC<Props> = ({
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => {
-                  const res = typeof reader.result === 'string' ? reader.result : '';
-                  setHeaderSettings((prev) => ({ ...prev, doctorLogo: res }));
-                };
-                reader.readAsDataURL(file);
+                void api.tenantProducts
+                  .uploadImage(file, 'doctorLogo')
+                  .then((url: string) => {
+                    const stamped = `${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`;
+                    setHeaderSettings((prev) => ({ ...prev, doctorLogo: stamped }));
+                  })
+                  .catch(() => showNotice('Failed to upload doctor logo.'));
               }}
             />
             {headerSettings.doctorLogo ? (
@@ -1391,12 +1633,13 @@ export const PrescriptionPage: React.FC<Props> = ({
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => {
-                  const res = typeof reader.result === 'string' ? reader.result : '';
-                  setHeaderSettings((prev) => ({ ...prev, clinicLogo: res }));
-                };
-                reader.readAsDataURL(file);
+                void api.tenantProducts
+                  .uploadImage(file, 'clinicLogo')
+                  .then((url: string) => {
+                    const stamped = `${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`;
+                    setHeaderSettings((prev) => ({ ...prev, clinicLogo: stamped }));
+                  })
+                  .catch(() => showNotice('Failed to upload clinic logo.'));
               }}
             />
             {headerSettings.clinicLogo ? (
@@ -1456,7 +1699,7 @@ export const PrescriptionPage: React.FC<Props> = ({
             className="btn-primary"
             onClick={() => {
               try {
-                localStorage.setItem(HEADER_SETTINGS_STORAGE_KEY, JSON.stringify(headerSettings));
+                api.ui.persistPrescriptionHeader(headerSettings);
                 showNotice('Header settings saved!');
               } catch {
                 showNotice('Failed to save header settings');
@@ -1497,18 +1740,57 @@ export const PrescriptionPage: React.FC<Props> = ({
   );
 
   // Page Setup
-  const savePrintSetup = () => {
+  const savePrintSetup = async () => {
     try {
-      localStorage.setItem(PRINT_SETUP_STORAGE_KEY, JSON.stringify(printSetup));
+      api.ui.persistPrescriptionPrintSetup(printSetup);
+      await api.settings.update({
+        useCustomPad: printSetup.useCustomPad,
+        printShowHeader: printSetup.showHeader,
+        printShowFooter: printSetup.showFooter,
+        printMarginTopMm: printSetup.marginTopMm,
+        printMarginBottomMm: printSetup.marginBottomMm,
+        printMarginLeftMm: printSetup.marginLeftMm,
+        printMarginRightMm: printSetup.marginRightMm,
+        printPageBorderEnabled: printSetup.printPageBorderEnabled,
+        printBorderWidthPt: printSetup.printBorderWidthPt,
+        printBorderMeasureFrom: printSetup.printBorderMeasureFrom,
+        printBorderOffsetMm: printSetup.printBorderOffsetMm,
+        printCenterHorizontal: printSetup.printCenterHorizontal,
+        printCenterVertical: printSetup.printCenterVertical,
+        watermarkText: printSetup.watermarkText,
+        watermarkOpacity: printSetup.watermarkOpacity,
+        watermarkPosition: printSetup.watermarkPosition,
+        watermarkFontSize: printSetup.watermarkFontSize,
+        watermarkRotation: printSetup.watermarkRotation,
+      });
       showNotice('Page setup saved!');
     } catch {
       showNotice('Failed to save page setup');
     }
   };
 
-  const resetPrintSetup = () => {
+  const resetPrintSetup = async () => {
     setPrintSetup(defaultPrintSetup);
-    showNotice('Factory reset applied');
+    try {
+      await api.settings.update({
+      useCustomPad: defaultPrintSetup.useCustomPad,
+      printShowHeader: defaultPrintSetup.showHeader,
+      printShowFooter: defaultPrintSetup.showFooter,
+      printMarginTopMm: defaultPrintSetup.marginTopMm,
+      printMarginBottomMm: defaultPrintSetup.marginBottomMm,
+      printMarginLeftMm: defaultPrintSetup.marginLeftMm,
+      printMarginRightMm: defaultPrintSetup.marginRightMm,
+      printPageBorderEnabled: defaultPrintSetup.printPageBorderEnabled,
+      printBorderWidthPt: defaultPrintSetup.printBorderWidthPt,
+      printBorderMeasureFrom: defaultPrintSetup.printBorderMeasureFrom,
+      printBorderOffsetMm: defaultPrintSetup.printBorderOffsetMm,
+      printCenterHorizontal: defaultPrintSetup.printCenterHorizontal,
+      printCenterVertical: defaultPrintSetup.printCenterVertical,
+      });
+      showNotice('Factory reset applied');
+    } catch {
+      showNotice('Failed to apply factory reset');
+    }
   };
 
   const renderPageSetup = () => (
@@ -1574,6 +1856,22 @@ export const PrescriptionPage: React.FC<Props> = ({
             <div className="form-group">
               <label className="label">Page Width</label>
               <input className="input" type="number" step="0.1" value={printSetup.pageWidthCm} onChange={(e) => setPrintSetup({ ...printSetup, pageWidthCm: Number(e.target.value) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Top Margin (mm)</label>
+              <input className="input" type="number" min={0} max={30} step="0.5" value={printSetup.marginTopMm} onChange={(e) => setPrintSetup({ ...printSetup, marginTopMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Bottom Margin (mm)</label>
+              <input className="input" type="number" min={0} max={30} step="0.5" value={printSetup.marginBottomMm} onChange={(e) => setPrintSetup({ ...printSetup, marginBottomMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Left Margin (mm)</label>
+              <input className="input" type="number" min={0} max={30} step="0.5" value={printSetup.marginLeftMm} onChange={(e) => setPrintSetup({ ...printSetup, marginLeftMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} />
+            </div>
+            <div className="form-group">
+              <label className="label">Right Margin (mm)</label>
+              <input className="input" type="number" min={0} max={30} step="0.5" value={printSetup.marginRightMm} onChange={(e) => setPrintSetup({ ...printSetup, marginRightMm: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} />
             </div>
           </div>
           <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1684,6 +1982,7 @@ export const PrescriptionPage: React.FC<Props> = ({
             <label><input type="checkbox" checked={printSetup.showOE} onChange={(e) => setPrintSetup({ ...printSetup, showOE: e.target.checked })} /> Display “O/E”</label>
             <label><input type="checkbox" checked={printSetup.showAdvice} onChange={(e) => setPrintSetup({ ...printSetup, showAdvice: e.target.checked })} /> Display “Advice”</label>
             <label><input type="checkbox" checked={printSetup.showDx} onChange={(e) => setPrintSetup({ ...printSetup, showDx: e.target.checked })} /> Display “D/x”</label>
+            <label><input type="checkbox" checked={printSetup.showHeader} onChange={(e) => setPrintSetup({ ...printSetup, showHeader: e.target.checked })} /> Display “Header”</label>
             <label><input type="checkbox" checked={printSetup.showFooter} onChange={(e) => setPrintSetup({ ...printSetup, showFooter: e.target.checked })} /> Display “Footer”</label>
           </div>
 
@@ -1915,15 +2214,18 @@ export const PrescriptionPage: React.FC<Props> = ({
         <main className="prescription-shell" style={{ padding: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
             <h2><i className="fa-solid fa-list"></i> All Prescriptions</h2>
-            <button type="button" className="btn-secondary" onClick={() => {
-              localStorage.removeItem('baigdentpro:prescriptions');
-              showNotice('All prescriptions cleared!');
-              window.location.reload();
-            }}>
-              <i className="fa-solid fa-trash"></i> Clear All
+            <button type="button" className="btn-secondary" onClick={() => void refreshServerPrescriptions()}>
+              <i className="fa-solid fa-rotate"></i> Refresh
             </button>
           </div>
-          <p>{savedList.length} prescription(s) saved locally.</p>
+          {!token ? (
+            <p>Sign in to view prescriptions from the server.</p>
+          ) : serverRxLoading ? (
+            <p>Loading prescriptions…</p>
+          ) : null}
+          {Boolean(token) && (
+            <p>{serverPrescriptions.length} prescription(s) on file.</p>
+          )}
           <div style={{ background: 'var(--bg-card)', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
             <table className="drugs-table">
               <thead>
@@ -1937,13 +2239,13 @@ export const PrescriptionPage: React.FC<Props> = ({
                 </tr>
               </thead>
               <tbody>
-                {savedList.slice().reverse().slice(0, 50).map((p: { patient?: { name?: string; regNo?: string; date?: string }; dx?: string; createdAt?: number }, i: number) => (
-                  <tr key={i}>
-                    <td>{savedList.length - i}</td>
-                    <td>{p.patient?.name || 'Unnamed'}</td>
-                    <td>{p.patient?.regNo || '-'}</td>
-                    <td>{p.patient?.date || (p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-')}</td>
-                    <td>{p.dx || '-'}</td>
+                {serverPrescriptions.slice(0, 50).map((p, i) => (
+                  <tr key={p.id}>
+                    <td>{i + 1}</td>
+                    <td>{p.patient.name || 'Unnamed'}</td>
+                    <td>{p.patient.regNo ?? '—'}</td>
+                    <td>{p.date || '—'}</td>
+                    <td>{p.diagnosis || '—'}</td>
                     <td>
                       <button type="button" className="records-table-btn records-table-btn-view" onClick={() => showNotice('View prescription details')}>
                         <i className="fa-solid fa-eye"></i>
@@ -1953,10 +2255,10 @@ export const PrescriptionPage: React.FC<Props> = ({
                 ))}
               </tbody>
             </table>
-            {savedList.length === 0 && (
+            {token && !serverRxLoading && serverPrescriptions.length === 0 && (
               <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                 <i className="fa-solid fa-prescription" style={{ fontSize: '3rem', marginBottom: '12px' }}></i>
-                <p>No prescriptions saved yet.</p>
+                <p>No prescriptions on file yet.</p>
               </div>
             )}
           </div>
@@ -2157,7 +2459,7 @@ export const PrescriptionPage: React.FC<Props> = ({
                   </option>
                 ))}
               </select>
-              {api.getToken() ? (
+              {token ? (
                 <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted, #64748b)' }}>
                   {linkedPatientId ? (
                     <>
@@ -2172,6 +2474,68 @@ export const PrescriptionPage: React.FC<Props> = ({
               ) : null}
             </div>
           )}
+          {embeddedInDashboard ? (
+            <div
+              className="rx-productivity-strip rx-no-print"
+              style={{
+                marginBottom: 12,
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(59,130,246,0.25)',
+                background: 'rgba(59,130,246,0.05)',
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '0.8rem', marginBottom: 8 }}>
+                Productivity shortcuts (this browser)
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <button type="button" className="btn-secondary btn-sm" onClick={applyDeviceLastDraft}>
+                  Reuse last (device draft)
+                </button>
+                <button type="button" className="btn-secondary btn-sm" onClick={() => void loadServerLastRxForPatient()}>
+                  Reuse latest (patient)
+                </button>
+                <button type="button" className="btn-secondary btn-sm" onClick={saveNamedTemplateShortcut}>
+                  Save as template…
+                </button>
+              </div>
+              {namedTemplatesList.length ? (
+                <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>Templates:</span>
+                  {namedTemplatesList.map((t) => (
+                    <button key={t.name + t.dx} type="button" className="btn-icon-sm" style={{ padding: '4px 8px' }} onClick={() => applyNamedTemplate(t)}>
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {favoritesList.length ? (
+                <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>Favorite brands:</span>
+                  {favoritesList.map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      className="btn-icon-sm"
+                      style={{ padding: '4px 8px' }}
+                      onClick={() =>
+                        setDrugs((curr) => [
+                          ...curr,
+                          { ...createDrugRow(), brand: b, dose: '1', frequency: '1+0+1', duration: '7', durationUnit: 'D', beforeFood: false, afterFood: true },
+                        ])
+                      }
+                    >
+                      + {b}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted,#64748b)' }}>
+                  Type a drug brand then click “favorite” beside the Rx bar below to capture quick-insert chips.
+                </p>
+              )}
+            </div>
+          ) : null}
           <div className="rx-create-top">
             <div className="rx-patient-strip">
               <div className="rx-field">
@@ -2383,12 +2747,19 @@ export const PrescriptionPage: React.FC<Props> = ({
                 <div className="rx-drug-bar">
                   <input className="rx-drug-inp brand" placeholder="Type Brand Name" value={rxBrand} onChange={(e) => setRxBrand(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddDrugFromRx())} />
                   <input className="rx-drug-inp dose" placeholder="Type Dose" value={rxDose} onChange={(e) => setRxDose(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddDrugFromRx())} />
+                  <input className="rx-drug-inp dose" placeholder="Frequency (e.g. 1+0+1)" value={rxFrequency} onChange={(e) => setRxFrequency(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddDrugFromRx())} />
                   <input className="rx-drug-inp dur" placeholder="Duration" value={rxDuration} onChange={(e) => setRxDuration(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddDrugFromRx())} />
+                  <input className="rx-drug-inp dur" placeholder="Max daily dose" title="Clinical guardrail. If exceeded, override confirmation is required." value={rxMaxDailyDose} onChange={(e) => setRxMaxDailyDose(e.target.value)} />
+                  <input className="rx-drug-inp brand" placeholder="Instruction" value={rxInstruction} onChange={(e) => setRxInstruction(e.target.value)} />
+                  <input className="rx-drug-inp brand" placeholder="Doctor notes (print only)" value={rxDoctorNotes} onChange={(e) => setRxDoctorNotes(e.target.value)} />
                   <button type="button" className="btn-icon-sm" onClick={() => setRxDuration((d) => d + (d ? ' ' : '') + 'দিন')} title="দিন">D</button>
                   <button type="button" className="btn-icon-sm" onClick={() => setRxDuration((d) => d + (d ? ' ' : '') + 'মাস')} title="মাস">M</button>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem' }}><input type="checkbox" checked={rxBeforeFood} onChange={(e) => setRxBeforeFood(e.target.checked)} /> খাবার আগে</label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem' }}><input type="checkbox" checked={rxAfterFood} onChange={(e) => setRxAfterFood(e.target.checked)} /> খাবার পর</label>
                   <button type="button" className="btn-primary" onClick={handleAddDrugFromRx}><i className="fa-solid fa-plus"></i> ADD</button>
+                  <button type="button" className="btn-secondary" title="Favorite current brand locally" onClick={addFavoriteBrandLine}>
+                    <i className="fa-solid fa-star" /> Favorite brand
+                  </button>
                 </div>
                 <div className="drug-info-cnt" title="Drug info" style={{ minHeight: 24, marginBottom: 10, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{drugInfoCnt || '\u00A0'}</div>
               </div>
@@ -2425,13 +2796,17 @@ export const PrescriptionPage: React.FC<Props> = ({
                 </div>
               </div>
               <table className="drugs-table" style={{ width: '100%', marginBottom: 12 }}>
-                <thead><tr><th>Brand name</th><th>Dose</th><th>Duration</th><th></th></tr></thead>
+                <thead><tr><th>Brand name</th><th>Dose</th><th>Frequency</th><th>Duration</th><th>Max/day</th><th>Instruction</th><th>Doctor notes</th><th></th></tr></thead>
                 <tbody>
                   {drugs.map((row) => (
                     <tr key={row.id}>
                       <td><input className="input input-sm" value={row.brand} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, brand: e.target.value } : d)))} /></td>
                       <td><input className="input input-sm" value={row.dose} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, dose: e.target.value } : d)))} /></td>
+                      <td><input className="input input-sm" value={row.frequency} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, frequency: e.target.value } : d)))} /></td>
                       <td><input className="input input-sm" value={row.duration} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, duration: e.target.value } : d)))} style={{ width: 80 }} /> {!/দিন|মাস/.test(row.duration) && <span className="dur-unit">{row.durationUnit}</span>}</td>
+                      <td><input className="input input-sm" value={row.maxDailyDose} title="Clinical guardrail for daily dose limit" onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, maxDailyDose: e.target.value } : d)))} /></td>
+                      <td><input className="input input-sm" value={row.instruction} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, instruction: e.target.value } : d)))} /></td>
+                      <td><input className="input input-sm" value={row.doctorNotes} onChange={(e) => setDrugs((list) => list.map((d) => (d.id === row.id ? { ...d, doctorNotes: e.target.value } : d)))} /></td>
                       <td><button type="button" className="btn-ghost btn-icon" onClick={() => setDrugs((list) => list.filter((d) => d.id !== row.id))}><i className="fa-solid fa-times"></i></button></td>
                     </tr>
                   ))}
@@ -2465,17 +2840,23 @@ export const PrescriptionPage: React.FC<Props> = ({
         <div className="prescription-modal-overlay" onClick={() => setShowPatientSearch(false)}>
           <div className="prescription-modal" onClick={(e) => e.stopPropagation()}>
             <div className="prescription-modal-header">
-              <h3><i className="fa-solid fa-search"></i> Search patient (saved prescriptions)</h3>
+              <h3><i className="fa-solid fa-search"></i> Select clinic patient</h3>
               <button type="button" className="btn-ghost btn-icon" onClick={() => setShowPatientSearch(false)} aria-label="Close">×</button>
             </div>
             <div className="prescription-modal-body">
-              {savedList.length === 0 ? (
-                <p><i className="fa-solid fa-info-circle"></i> No saved prescriptions. Save a prescription first, then you can load patient from here.</p>
+              {(patientsDirectory?.length ?? 0) === 0 ? (
+                <p>
+                  <i className="fa-solid fa-info-circle"></i> No clinic patients in directory. Use the practice dashboard patient list, or add patients first.
+                </p>
               ) : (
                 <ul style={{ listStyle: 'none', padding: 0, maxHeight: 320, overflow: 'auto' }}>
-                  {savedList.slice().reverse().slice(0, 50).map((p: { patient?: { name?: string; age?: string; sex?: string; address?: string; mobile?: string; regNo?: string; date?: string }; createdAt?: number }, i: number) => (
-                    <li key={i} style={{ padding: '12px', borderBottom: '1px solid var(--border-color)', cursor: 'pointer' }} onClick={() => loadPatientFromSaved(p)}>
-                      <strong>{p.patient?.name || 'Unnamed'}</strong> | Reg: {p.patient?.regNo || '-'} | {p.patient?.date || (p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-')}
+                  {(patientsDirectory ?? []).map((p) => (
+                    <li
+                      key={p.id}
+                      style={{ padding: '12px', borderBottom: '1px solid var(--border-color)', cursor: 'pointer' }}
+                      onClick={() => loadPatientFromDirectory(p)}
+                    >
+                      <strong>{p.name}</strong> | Reg: {p.regNo || '—'} | {p.phone}
                     </li>
                   ))}
                 </ul>
@@ -2543,7 +2924,7 @@ export const PrescriptionPage: React.FC<Props> = ({
           <i className="fa-solid fa-info-circle"></i> {notice}
         </div>
       )}
-      <a className="whatsapp-float" href="https://wa.me/8801617180711" target="_blank" rel="noopener noreferrer">
+      <a className="whatsapp-float" href="https://wa.me/8801601677122" target="_blank" rel="noopener noreferrer">
         <span>💬</span> Chat with Us on WhatsApp
       </a>
       {renderPrescriptionNav()}

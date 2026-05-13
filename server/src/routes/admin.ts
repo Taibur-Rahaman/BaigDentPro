@@ -4,20 +4,30 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { requireRole } from '../middleware/requireRole.js';
+import { requireCapability } from '../middleware/requireCapability.js';
 import { assertPasswordAcceptable } from '../utils/passwordPolicy.js';
 import { syncSupabasePasswordForEmail } from '../services/supabaseAuthSync.js';
 import { isPrismaUniqueViolation } from '../utils/prismaErrors.js';
 import { sendSafeError } from '../utils/safeError.js';
 import { writeAuditLog } from '../services/auditLogService.js';
+import { bumpSessionVersion } from '../services/sessionVersionService.js';
+import { revokeAllRefreshTokensForUser } from '../services/refreshTokenService.js';
 import { validateBody } from '../middleware/validateBody.js';
-import { adminDisableClinicBodySchema, adminUpgradePlanBodySchema } from '../validation/schemas.js';
+import {
+  adminDisableClinicBodySchema,
+  adminMasterLogoUpdateBodySchema,
+  adminUpgradePlanBodySchema,
+} from '../validation/schemas.js';
 
 const router = Router();
 
 router.use(authenticate);
 router.use(requireRole('ADMIN'));
 
-const ALLOWED_ROLES = new Set(['DOCTOR', 'CLINIC_ADMIN', 'RECEPTIONIST']);
+/** Roles clinic admins may assign inside their clinic. */
+const ALLOWED_ROLES = new Set(['DOCTOR', 'CLINIC_ADMIN', 'CLINIC_OWNER', 'RECEPTIONIST', 'STORE_MANAGER']);
+/** Platform super admin may additionally assign/remove SUPER_ADMIN. */
+const PLATFORM_ASSIGNABLE_ROLES = new Set<string>([...ALLOWED_ROLES, 'SUPER_ADMIN']);
 
 /** SaaS / admin list scope: super admin = global unless impersonating a clinic. */
 function adminDataScope(req: AuthRequest): { mode: 'all' } | { mode: 'clinic'; clinicId: string } | { mode: 'none' } {
@@ -106,6 +116,12 @@ function clinicScopedWhere(req: AuthRequest): { clinicId: string } | Record<stri
   return { clinicId: req.user!.clinicId };
 }
 
+function readMasterSiteLogo(settings: unknown): string {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return '';
+  const value = (settings as Record<string, unknown>).masterSiteLogo;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 async function getTargetUser(id: string) {
   return prisma.user.findUnique({
     where: { id },
@@ -118,6 +134,7 @@ async function getTargetUser(id: string) {
       clinicName: true,
       clinicId: true,
       isActive: true,
+      isApproved: true,
       createdAt: true,
     },
   });
@@ -183,6 +200,59 @@ router.get('/stats', async (req: AuthRequest, res) => {
     sendSafeError(res, 500, error, 'admin.stats');
   }
 });
+
+router.get('/branding/logo', requireRole('SUPER_ADMIN'), async (req: AuthRequest, res) => {
+  try {
+    const clinic = await prisma.clinic.findUnique({
+      where: { id: req.user!.clinicId },
+      select: { settings: true },
+    });
+    res.json({ logo: readMasterSiteLogo(clinic?.settings) });
+  } catch (error: unknown) {
+    sendSafeError(res, 500, error, 'admin.branding.logo.get');
+  }
+});
+
+router.put(
+  '/branding/logo',
+  requireRole('SUPER_ADMIN'),
+  validateBody(adminMasterLogoUpdateBodySchema),
+  async (req: AuthRequest, res) => {
+    try {
+      const logo = typeof (req.body as { logo?: unknown }).logo === 'string' ? (req.body as { logo: string }).logo.trim() : '';
+      const clinic = await prisma.clinic.findUnique({
+        where: { id: req.user!.clinicId },
+        select: { id: true, settings: true },
+      });
+      if (!clinic) {
+        res.status(404).json({ error: 'Clinic not found' });
+        return;
+      }
+      const current = clinic.settings && typeof clinic.settings === 'object' && !Array.isArray(clinic.settings)
+        ? (clinic.settings as Record<string, unknown>)
+        : {};
+      const updated = await prisma.clinic.update({
+        where: { id: clinic.id },
+        data: {
+          settings: {
+            ...current,
+            masterSiteLogo: logo,
+          },
+        },
+        select: { settings: true },
+      });
+      void writeAuditLog({
+        userId: req.user!.id,
+        action: 'SUPER_ADMIN_UPDATE_MASTER_SITE_LOGO',
+        entityType: 'CLINIC',
+        entityId: clinic.id,
+      });
+      res.json({ logo: readMasterSiteLogo(updated.settings) });
+    } catch (error: unknown) {
+      sendSafeError(res, 500, error, 'admin.branding.logo.put');
+    }
+  }
+);
 
 /** Tenant SaaS orders (table `saas_orders`) — no payment secrets, no full patient payloads. */
 router.get('/orders', async (req: AuthRequest, res) => {
@@ -271,18 +341,51 @@ router.get('/audit-logs', async (req: AuthRequest, res) => {
   }
 });
 
+/** Allowed sort keys for GET /users (validated; prevents arbitrary Prisma orderBy injection). */
+const ADMIN_USERS_LIST_SORT_KEYS = new Set([
+  'createdAt_desc',
+  'createdAt_asc',
+  'email_asc',
+  'email_desc',
+  'name_asc',
+  'name_desc',
+]);
+
+function orderByForAdminUsersList(sortRaw: string | undefined): Prisma.UserOrderByWithRelationInput {
+  const sort = typeof sortRaw === 'string' && ADMIN_USERS_LIST_SORT_KEYS.has(sortRaw) ? sortRaw : 'createdAt_desc';
+  switch (sort) {
+    case 'createdAt_asc':
+      return { createdAt: 'asc' };
+    case 'email_asc':
+      return { email: 'asc' };
+    case 'email_desc':
+      return { email: 'desc' };
+    case 'name_asc':
+      return { name: 'asc' };
+    case 'name_desc':
+      return { name: 'desc' };
+    case 'createdAt_desc':
+    default:
+      return { createdAt: 'desc' };
+  }
+}
+
 router.get('/users', async (req: AuthRequest, res) => {
   try {
-    const { search, role, page = '1', limit = '20', clinicId: filterClinicId } = req.query as {
+    const { search, role, page = '1', limit = '20', clinicId: filterClinicId, sort: sortQuery } = req.query as {
       search?: string;
       role?: string;
       page?: string;
       limit?: string;
       clinicId?: string;
+      sort?: string;
     };
 
     const pageNum = Math.max(parseInt(page || '1', 10), 1);
-    const take = Math.min(Math.max(parseInt(limit || '20', 10), 1), 100);
+    const requestedTake = Math.min(Math.max(parseInt(limit || '20', 10), 1), 500);
+    const maxUsersPerPage =
+      req.user!.role === 'SUPER_ADMIN' && req.impersonating !== true ? 500 : 100;
+    const take = Math.min(requestedTake, maxUsersPerPage);
     const skip = (pageNum - 1) * take;
 
     const where: Record<string, unknown> = {};
@@ -320,7 +423,7 @@ router.get('/users', async (req: AuthRequest, res) => {
         where,
         skip,
         take,
-        orderBy: { createdAt: 'desc' },
+        orderBy: orderByForAdminUsersList(sortQuery),
         select: {
           id: true,
           email: true,
@@ -331,6 +434,7 @@ router.get('/users', async (req: AuthRequest, res) => {
           clinicId: true,
           isActive: true,
           isApproved: true,
+          accountStatus: true,
           createdAt: true,
           clinic: { select: { id: true, name: true, plan: true, isActive: true } },
         },
@@ -346,7 +450,7 @@ router.get('/users', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/users', async (req: AuthRequest, res) => {
+router.post('/users', requireCapability('clinic:users:manage'), async (req: AuthRequest, res) => {
   try {
     const { email, password, name, phone, role: requestedRole } = req.body as {
       email?: string;
@@ -389,6 +493,9 @@ router.post('/users', async (req: AuthRequest, res) => {
       if (requestedRole === 'RECEPTIONIST') {
         newRole = 'RECEPTIONIST';
       }
+      if (requestedRole === 'STORE_MANAGER') {
+        newRole = 'STORE_MANAGER';
+      }
       if (requestedRole === 'SUPER_ADMIN') {
         return res.status(403).json({ error: 'Cannot assign platform admin role' });
       }
@@ -418,6 +525,7 @@ router.post('/users', async (req: AuthRequest, res) => {
           clinicName: adminClinic?.name ?? undefined,
           isActive: true,
           isApproved: true,
+          accountStatus: 'ACTIVE',
         },
         select: {
           id: true,
@@ -473,16 +581,21 @@ router.post('/users', async (req: AuthRequest, res) => {
   }
 });
 
-router.put('/users/:id', async (req: AuthRequest, res) => {
+router.put('/users/:id', requireCapability('clinic:users:manage'), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { role, clinicName, phone, isActive, name } = req.body as {
+    const body = req.body as {
       role?: string;
       clinicName?: string;
       phone?: string;
       isActive?: boolean;
       name?: string;
+      clinicId?: string;
+      password?: string;
+      accountStatus?: string;
+      isApproved?: boolean;
     };
+    const { role, clinicName, phone, isActive, name, clinicId: bodyClinicId, password, accountStatus, isApproved } = body;
 
     if (id === req.user!.id && isActive === false) {
       return res.status(400).json({ error: 'You cannot disable your own account' });
@@ -499,29 +612,129 @@ router.put('/users/:id', async (req: AuthRequest, res) => {
       return res.status(e.status || 403).json({ error: e.message });
     }
 
-    const data: Record<string, unknown> = {};
+    const actorIsSuper = req.user!.role === 'SUPER_ADMIN';
+    const data: Prisma.UserUncheckedUpdateInput = {};
+    let invalidateSessions = false;
+
     if (name !== undefined) data.name = name;
     if (clinicName !== undefined) data.clinicName = clinicName;
     if (phone !== undefined) data.phone = phone;
     if (typeof isActive === 'boolean') data.isActive = isActive;
 
-    if (role !== undefined) {
-      if (!ALLOWED_ROLES.has(role) && role !== 'SUPER_ADMIN') {
-        return res.status(400).json({ error: 'Invalid role' });
+    if (typeof isApproved === 'boolean') {
+      if (!actorIsSuper) {
+        return res.status(403).json({ error: 'Only platform administrators may change approval state' });
       }
-      if (req.user!.role !== 'SUPER_ADMIN') {
-        if (role === 'SUPER_ADMIN') {
-          return res.status(403).json({ error: 'Cannot assign platform admin role' });
+      data.isApproved = isApproved;
+      if (isApproved !== target.isApproved) {
+        invalidateSessions = true;
+      }
+      if (actorIsSuper && isApproved && accountStatus === undefined && isActive === undefined) {
+        data.accountStatus = 'ACTIVE';
+        data.isActive = true;
+      }
+      if (actorIsSuper && isApproved === false && accountStatus === undefined) {
+        data.accountStatus = 'PENDING';
+        if (isActive === undefined) {
+          data.isActive = false;
         }
       }
-      if (role === 'SUPER_ADMIN' && target.role !== 'SUPER_ADMIN') {
-        return res.status(403).json({ error: 'Use platform tools to promote super admins' });
+    }
+
+    if (accountStatus !== undefined) {
+      if (!actorIsSuper) {
+        return res.status(403).json({ error: 'Only platform administrators may change account status' });
+      }
+      const st = String(accountStatus).toUpperCase();
+      if (!['PENDING', 'ACTIVE', 'SUSPENDED'].includes(st)) {
+        return res.status(400).json({ error: 'Invalid accountStatus' });
+      }
+      data.accountStatus = st;
+      if (st === 'ACTIVE') {
+        if (isActive === undefined) data.isActive = true;
+        data.isApproved = true;
+      }
+      if (st === 'PENDING') {
+        data.isApproved = false;
+        if (isActive === undefined) data.isActive = false;
+      }
+      if (st === 'SUSPENDED' && isActive === undefined) {
+        data.isActive = false;
+      }
+      invalidateSessions = true;
+    }
+
+    if (bodyClinicId !== undefined && bodyClinicId.trim() !== target.clinicId) {
+      if (!actorIsSuper) {
+        return res.status(403).json({ error: 'Only platform administrators may reassign clinic membership' });
+      }
+      const clinic = await prisma.clinic.findUnique({ where: { id: bodyClinicId.trim() } });
+      if (!clinic) {
+        return res.status(404).json({ error: 'Clinic not found' });
+      }
+      data.clinicId = clinic.id;
+      data.clinicName = clinic.name;
+      invalidateSessions = true;
+    }
+
+    if (password !== undefined && String(password).length > 0) {
+      if (!actorIsSuper) {
+        return res.status(403).json({ error: 'Only platform administrators may set passwords on this endpoint' });
+      }
+      assertPasswordAcceptable(String(password), 'Password');
+      data.password = await bcrypt.hash(String(password), 12);
+      invalidateSessions = true;
+    }
+
+    if (role !== undefined) {
+      const allowed = actorIsSuper ? PLATFORM_ASSIGNABLE_ROLES : ALLOWED_ROLES;
+      if (!allowed.has(role)) {
+        return res.status(400).json({ error: 'Invalid role' });
+      }
+      if (!actorIsSuper && role === 'SUPER_ADMIN') {
+        return res.status(403).json({ error: 'Cannot assign platform admin role' });
       }
       data.role = role;
       if (role !== target.role) {
-        data.sessionVersion = { increment: 1 };
+        invalidateSessions = true;
       }
     }
+
+    if (invalidateSessions) {
+      data.sessionVersion = { increment: 1 };
+    }
+
+    if (Object.keys(data).length === 0) {
+      const unchanged = await prisma.user.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          phone: true,
+          clinicName: true,
+          clinicId: true,
+          isActive: true,
+          isApproved: true,
+          accountStatus: true,
+          createdAt: true,
+          clinic: { select: { id: true, name: true, plan: true, isActive: true } },
+        },
+      });
+      if (!unchanged) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      console.info('[admin.users.update] noop', { actorId: req.user!.id, targetId: id });
+      return res.json(unchanged);
+    }
+
+    console.info('[admin.users.update]', {
+      actorId: req.user!.id,
+      targetId: id,
+      actorRole: req.user!.role,
+      patchKeys: Object.keys(data),
+    });
 
     const user = await prisma.user.update({
       where: { id },
@@ -535,7 +748,10 @@ router.put('/users/:id', async (req: AuthRequest, res) => {
         clinicName: true,
         clinicId: true,
         isActive: true,
+        isApproved: true,
+        accountStatus: true,
         createdAt: true,
+        clinic: { select: { id: true, name: true, plan: true, isActive: true } },
       },
     });
 
@@ -555,12 +771,66 @@ router.put('/users/:id', async (req: AuthRequest, res) => {
       userId: req.user!.id,
       action: 'ADMIN_UPDATE_USER',
       entityId: user.id,
-      metadata: { targetUserId: user.id },
+      metadata: {
+        targetUserId: user.id,
+        patchKeys: Object.keys(req.body as object),
+        resultingLifecycle: { isActive: user.isActive, isApproved: user.isApproved, accountStatus: user.accountStatus },
+      },
     });
+
+    if (password && typeof user.email === 'string') {
+      void syncSupabasePasswordForEmail(user.email, String(password)).then((r) => {
+        if (!r.synced && r.note && r.note !== 'supabase_not_configured') {
+          console.warn('[admin update user] Supabase Auth sync:', r.note);
+        }
+      });
+    }
 
     res.json(user);
   } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('Password') || msg.includes('characters')) {
+      return res.status(400).json({ error: msg });
+    }
     sendSafeError(res, 500, error, 'admin.users.update');
+  }
+});
+
+router.post('/users/:id/revoke-sessions', requireCapability('clinic:users:manage'), async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    if (!id?.trim()) {
+      res.status(400).json({ error: 'User id required' });
+      return;
+    }
+    if (id === req.user!.id) {
+      res.status(400).json({ error: 'Use logout to end your own sessions' });
+      return;
+    }
+    const target = await getTargetUser(id);
+    if (!target) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    try {
+      assertCanManage(req, target);
+    } catch (e: any) {
+      return res.status(e.status || 403).json({ error: e.message });
+    }
+
+    await revokeAllRefreshTokensForUser(id);
+    await bumpSessionVersion(id);
+
+    void writeAuditLog({
+      userId: req.user!.id,
+      action: 'ADMIN_REVOKE_USER_SESSIONS',
+      entityId: id,
+      metadata: { targetUserId: id },
+    });
+
+    res.json({ ok: true });
+  } catch (error: unknown) {
+    sendSafeError(res, 500, error, 'admin.users.revokeSessions');
   }
 });
 

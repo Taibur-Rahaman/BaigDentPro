@@ -1,19 +1,9 @@
-import { apiRequest } from '@/lib/apiClient';
-import { apiRoutes } from '@/services/entityService';
+import api from '@/api';
+import type { AppUser } from '@/types/appUser';
 
-export type MeUser = {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  phone?: string | null;
-  clinicId: string | null;
-  clinicName?: string | null;
-  isActive?: boolean;
-  isApproved?: boolean;
-  createdAt?: string;
-};
+/** Alias for tenant/API-test consumers; same shape as {@link AppUser} from `/auth/me`. */
+export type MeUser = AppUser;
 
 export const userService = {
-  me: () => apiRequest(`${apiRoutes.auth}/me`),
+  me: () => api.auth.me(),
 };

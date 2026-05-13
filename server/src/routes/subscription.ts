@@ -56,12 +56,13 @@ router.post(
       if (!vp) {
         res.status(400).json({
           success: false,
-          error: 'verifiedPaymentId is required. Complete Stripe checkout first; the webhook activates the plan.',
+          error:
+            'verifiedPaymentId is required. Complete manual WhatsApp checkout first; a platform admin marks the payment PAID to activate the plan.',
         });
         return;
       }
       const pay = await prisma.subscriptionPayment.findFirst({
-        where: { id: vp, clinicId, status: 'SUCCESS' },
+        where: { id: vp, clinicId, status: { in: ['SUCCESS', 'PAID'] } },
       });
       if (!pay) {
         res.status(403).json({ success: false, error: 'No successful payment found for this clinic' });

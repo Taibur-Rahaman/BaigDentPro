@@ -8201,6 +8201,33 @@ body {
 .neo-btn-block {
   width: 100%;
   justify-content: center;
+  flex-wrap: nowrap;
+}
+
+.neo-btn-solid {
+  background: linear-gradient(135deg, #2dd4bf 0%, #0d9488 52%, #0f766e 100%);
+  border: 1px solid rgba(45, 212, 191, 0.7);
+  color: #061014;
+  font-weight: 700;
+  box-shadow: 0 10px 32px rgba(13, 148, 136, 0.38);
+}
+
+.neo-btn-solid:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 14px 40px rgba(13, 148, 136, 0.48);
+  transform: translateY(-2px);
+}
+
+.neo-btn-outline {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  color: var(--neo-text-primary);
+}
+
+.neo-btn-outline:hover {
+  border-color: var(--neo-primary);
+  color: var(--neo-primary);
+  background: rgba(38, 198, 218, 0.06);
 }
 
 .neo-btn-glow {
@@ -8310,6 +8337,277 @@ body {
   width: 1px;
   height: 40px;
   background: var(--neo-border);
+}
+
+.neo-hero-microcopy {
+  font-size: 0.88rem;
+  color: var(--neo-text-muted);
+  margin: -12px auto 40px;
+  max-width: 560px;
+  line-height: 1.5;
+}
+
+.neo-hero-em {
+  color: var(--neo-primary);
+  font-weight: 600;
+}
+
+/* Trust band */
+.neo-trust {
+  position: relative;
+  z-index: 1;
+  padding: 72px 32px;
+  background: linear-gradient(180deg, rgba(13, 148, 136, 0.06) 0%, transparent 100%);
+  border-top: 1px solid var(--neo-border);
+  border-bottom: 1px solid var(--neo-border);
+}
+
+.neo-trust-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.neo-trust-heading {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.65rem;
+  font-weight: 700;
+  margin: 0 0 14px;
+  color: var(--neo-text-primary);
+  line-height: 1.25;
+}
+
+.neo-trust-lead {
+  margin: 0 auto 36px;
+  max-width: 720px;
+  font-size: 1.05rem;
+  color: var(--neo-text-secondary);
+  line-height: 1.65;
+}
+
+.neo-trust-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 24px 48px;
+}
+
+.neo-trust-metric {
+  min-width: 140px;
+  padding: 20px 28px;
+  border-radius: 16px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur);
+}
+
+.neo-trust-metric-value {
+  display: block;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--neo-primary);
+}
+
+.neo-trust-metric-label {
+  font-size: 0.82rem;
+  color: var(--neo-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Platform deep-dive */
+.neo-platform {
+  padding: 100px 32px 80px;
+  position: relative;
+  z-index: 1;
+}
+
+.neo-platform-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.neo-platform-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  padding: 26px 26px 28px;
+  backdrop-filter: var(--glass-blur);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.neo-platform-card:hover {
+  border-color: var(--neo-border-glow);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+}
+
+.neo-platform-card-wide {
+  grid-column: 1 / -1;
+}
+
+.neo-platform-card-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--neo-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.neo-platform-card-icon {
+  color: var(--neo-primary);
+  font-size: 1.15rem;
+}
+
+.neo-platform-card-body {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--neo-text-secondary);
+  line-height: 1.65;
+}
+
+.neo-platform-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  align-items: center;
+  margin-top: 48px;
+}
+
+/* FOMO strip */
+.neo-fomo {
+  position: relative;
+  z-index: 1;
+  padding: 56px 32px;
+  background: linear-gradient(90deg, rgba(21, 101, 192, 0.12) 0%, rgba(38, 198, 218, 0.08) 100%);
+  border-top: 1px solid var(--neo-border);
+  border-bottom: 1px solid var(--neo-border);
+}
+
+.neo-fomo-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr minmax(220px, 280px);
+  gap: 36px;
+  align-items: center;
+}
+
+.neo-fomo-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.45rem;
+  font-weight: 700;
+  margin: 0 0 12px;
+  color: var(--neo-text-primary);
+  line-height: 1.3;
+}
+
+.neo-fomo-text {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--neo-text-secondary);
+  line-height: 1.65;
+}
+
+.neo-fomo-aside {
+  text-align: center;
+}
+
+.neo-fomo-stat-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--neo-accent);
+  margin: 0 0 14px;
+}
+
+/* Mid-page CTA */
+.neo-mid-cta {
+  padding: 72px 32px;
+  position: relative;
+  z-index: 1;
+}
+
+.neo-mid-cta-inner {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 36px 40px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(38, 198, 218, 0.12) 0%, rgba(21, 101, 192, 0.1) 100%);
+  border: 1px solid rgba(38, 198, 218, 0.25);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.neo-mid-cta-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.45rem;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--neo-text-primary);
+}
+
+.neo-mid-cta-text {
+  margin: 0;
+  max-width: 520px;
+  color: var(--neo-text-secondary);
+  line-height: 1.6;
+  font-size: 1rem;
+}
+
+.neo-mid-cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.neo-pricing-upgrade-hint {
+  margin: 14px 0 0;
+  font-size: 0.78rem;
+  color: var(--neo-text-muted);
+  line-height: 1.45;
+  font-style: italic;
+}
+
+.neo-pricing-footnote {
+  margin-top: 36px;
+  padding: 18px 22px;
+  border-radius: 14px;
+  background: rgba(38, 198, 218, 0.06);
+  border: 1px solid rgba(38, 198, 218, 0.15);
+  font-size: 0.9rem;
+  color: var(--neo-text-secondary);
+  text-align: center;
+}
+
+.neo-pricing-footnote a {
+  color: var(--neo-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.neo-pricing-footnote a:hover {
+  text-decoration: underline;
+}
+
+.neo-pricing-card-enterprise {
+  border-color: rgba(94, 234, 212, 0.35);
+  background: linear-gradient(180deg, rgba(6, 78, 59, 0.2) 0%, var(--neo-bg-surface) 38%);
+}
+
+.neo-pricing-price-main-lg .neo-pricing-price-value {
+  font-size: 2.05rem;
 }
 
 /* Feature Cards Orbit */
@@ -8956,11 +9254,10 @@ body {
 .neo-footer-content {
   max-width: 1200px;
   margin: 0 auto;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 32px;
+  display: grid;
+  grid-template-columns: minmax(200px, 320px) 1fr;
+  gap: 40px;
+  align-items: start;
   padding-bottom: 32px;
   border-bottom: 1px solid var(--neo-border);
 }
@@ -8969,6 +9266,38 @@ body {
   color: var(--neo-text-muted);
   margin: 12px 0 0;
   font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.neo-footer-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px 24px;
+}
+
+.neo-footer-col-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--neo-text-muted);
+  margin: 0 0 12px;
+}
+
+.neo-footer-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--neo-text-secondary);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.92rem;
+  margin-bottom: 10px;
+  transition: color 0.2s ease;
+}
+
+.neo-footer-link:hover {
+  color: var(--neo-primary);
 }
 
 .neo-footer-links {
@@ -8988,6 +9317,31 @@ body {
 
 .neo-footer-links a:hover {
   color: var(--neo-primary);
+}
+
+/* Fixed mobile conversion strip */
+.neo-mobile-cta {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1100;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0));
+  background: rgba(10, 10, 15, 0.92);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid var(--neo-border);
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.neo-mobile-cta .neo-btn {
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 200px;
+  justify-content: center;
 }
 
 .neo-footer-bottom {
@@ -9346,6 +9700,22 @@ body {
   z-index: 1;
 }
 
+/* Single-column pages (/login, /signup) — do not squeeze the card into one grid track */
+.neo-auth-container.neo-auth-container--solo {
+  grid-template-columns: 1fr;
+  place-items: center;
+  align-content: center;
+  padding: 2rem 1.25rem;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 480px;
+  margin-inline: auto;
+}
+
+.neo-auth-container.neo-auth-container--solo .neo-auth-card {
+  max-width: 100%;
+}
+
 /* Auth Brand Panel */
 .neo-auth-brand {
   display: flex;
@@ -9562,6 +9932,54 @@ body {
   color: var(--neo-accent);
 }
 
+.neo-auth-switch a {
+  color: var(--neo-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.neo-auth-switch a:hover {
+  color: var(--neo-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.neo-auth-subfooter {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.neo-auth-foot-nav {
+  font-size: 0.875rem;
+  color: var(--neo-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.neo-auth-foot-nav a {
+  color: var(--neo-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.neo-auth-foot-nav a:hover {
+  color: var(--neo-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.neo-auth-foot-dot {
+  color: var(--neo-text-muted);
+  user-select: none;
+}
+
 .neo-auth-footer {
   margin-top: 28px;
   text-align: center;
@@ -9590,6 +10008,25 @@ body {
   .neo-features-orbit {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  .neo-platform-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .neo-platform-card-wide {
+    grid-column: auto;
+  }
+
+  .neo-fomo-inner {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .neo-fomo-aside {
+    justify-self: center;
+    width: 100%;
+    max-width: 320px;
+  }
 }
 
 @media (max-width: 992px) {
@@ -9607,6 +10044,14 @@ body {
 }
 
 @media (max-width: 768px) {
+  .neo-home {
+    padding-bottom: 88px;
+  }
+
+  .neo-mobile-cta {
+    display: flex;
+  }
+
   .neo-header-content {
     padding: 12px 20px;
   }
@@ -9681,7 +10126,34 @@ body {
   }
   
   .neo-footer-content {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .neo-footer-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .neo-footer-link {
+    justify-content: center;
+  }
+
+  .neo-mid-cta-inner {
     flex-direction: column;
+    text-align: center;
+  }
+
+  .neo-mid-cta-actions {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .neo-trust-metrics {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .neo-trust-metric {
     text-align: center;
   }
 }
@@ -11015,6 +11487,14 @@ body {
   box-sizing: border-box;
 }
 
+/* Practice workspace fills width when outer DPMS sidebar is hidden (doctor / receptionist). */
+.dashboard-shell--clinical-staff .dashboard-content {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
 @media (max-width: 900px) {
   .dashboard-shell {
     flex-direction: column;
@@ -11032,5 +11512,287 @@ body {
     flex-wrap: wrap;
     flex: 1;
   }
+}
+
+/* —— Enterprise operatory calendar (Phase 3) —— */
+.operatory-calendar {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--neo-border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--neo-surface, #fff);
+}
+.operatory-calendar-inner {
+  display: flex;
+  min-width: 640px;
+}
+.operatory-calendar-time {
+  width: 72px;
+  flex-shrink: 0;
+}
+.operatory-calendar-corner {
+  height: 38px;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+}
+.operatory-calendar-time-slot {
+  height: 56px;
+  font-size: 0.72rem;
+  color: var(--neo-text-muted);
+  text-align: right;
+  padding-right: 6px;
+  border-top: 1px dashed var(--neo-border, #e2e8f0);
+}
+.operatory-calendar-col {
+  flex: 1;
+  min-width: 120px;
+  border-left: 1px solid var(--neo-border, #e2e8f0);
+}
+.operatory-calendar-head {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.85rem;
+  background: var(--neo-muted-bg, #f8fafc);
+}
+.operatory-calendar-cells {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.operatory-calendar-cell {
+  height: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  box-sizing: border-box;
+}
+.operatory-calendar-cell-droppable {
+  background: rgba(59, 130, 246, 0.04);
+}
+.operatory-calendar-blocks-layer {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+.operatory-block-chip {
+  pointer-events: auto;
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #fff;
+  font-size: 0.72rem;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+.operatory-block-chip:active {
+  cursor: grabbing;
+}
+.operatory-block-chip--conflict {
+  background: linear-gradient(135deg, #f97316, #dc2626);
+}
+.operatory-block-chip--tentative {
+  opacity: 0.78;
+}
+.operatory-block-chip-title {
+  font-weight: 600;
+}
+.operatory-block-chip-sub {
+  opacity: 0.9;
+  font-size: 0.68rem;
+}
+.calendar-conflict-bar {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  font-size: 0.82rem;
+}
+.calendar-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.calendar-toolbar label {
+  font-size: 0.83rem;
+  color: var(--neo-text-muted);
+}
+
+.feature-upgrade-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 12000;
+  padding: 16px;
+}
+.feature-upgrade-card {
+  max-width: 420px;
+  background: var(--neo-surface, #fff);
+  padding: 1.25rem 1.35rem;
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.2);
+}
+.plan-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+.plan-card {
+  border: 1px solid var(--neo-border, #e2e8f0);
+  border-radius: 10px;
+  padding: 1rem;
+  background: var(--neo-surface, #fff);
+}
+.plan-card ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.15rem;
+  font-size: 0.82rem;
+}
+
+/* Patient timeline (clinical / workflow / finance color bands) */
+.patient-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.patient-timeline-item {
+  position: relative;
+  padding: 0.65rem 0 0.85rem 1rem;
+  margin-left: 2px;
+  border-left: 4px solid #cbd5e1;
+}
+.patient-timeline-item--workflow {
+  border-left-color: #7c3aed;
+}
+.patient-timeline-item--clinical {
+  border-left-color: #2563eb;
+}
+.patient-timeline-item--finance {
+  border-left-color: #059669;
+}
+.patient-timeline-rowhead {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.patient-timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.patient-timeline-item--workflow .patient-timeline-dot {
+  background: #7c3aed;
+}
+.patient-timeline-item--clinical .patient-timeline-dot {
+  background: #2563eb;
+}
+.patient-timeline-item--finance .patient-timeline-dot {
+  background: #059669;
+}
+.patient-timeline-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.patient-timeline-date {
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+.patient-timeline-kind {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+.patient-timeline-chevron {
+  opacity: 0.55;
+  font-size: 0.85rem;
+}
+.patient-timeline-title {
+  font-weight: 600;
+  margin: 4px 0 2px 1.35rem;
+}
+.patient-timeline-summary {
+  margin-left: 1.35rem;
+  font-size: 0.88rem;
+  opacity: 0.92;
+}
+.patient-timeline-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.patient-timeline-detail {
+  margin: 8px 0 0 1.35rem;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.04);
+  font-size: 0.86rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tooth-surfaces-panel {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--neo-border, #e2e8f0);
+}
+.tooth-surfaces-hint {
+  font-size: 0.78rem;
+  opacity: 0.85;
+  margin: 0 0 8px;
+}
+.tooth-surface-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.tooth-surface-label {
+  min-width: 2rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.surface-chip {
+  min-width: 2rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--neo-border, #cbd5e1);
+  background: var(--neo-surface, #fff);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.surface-chip--active {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
 }
 

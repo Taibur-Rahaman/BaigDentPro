@@ -1,11 +1,18 @@
 import { Router } from 'express';
-import { Prisma } from '@prisma/client';
 import { prisma } from '../index.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { resolveBusinessClinicId } from '../utils/requestClinic.js';
 import { blockTenantFromEmr, requireAppointmentsEmrAccess } from '../middleware/clinicalRbac.js';
-import { appointmentWindow } from '../utils/appointmentTimeRange.js';
-import { assertNoAppointmentOverlap, AppointmentConflictError } from '../services/appointmentConflictService.js';
+import {
+  workflowCreateAppointment,
+  workflowUpdateAppointment,
+  workflowSetAppointmentStatus,
+  workflowCompleteAppointment,
+  workflowDeleteAppointment,
+  suggestNextAvailableSlotAfterConflict,
+  AppointmentConflictError,
+  InvalidStateTransitionError,
+} from '../domains/workflow/appointmentWorkflowService.js';
 
 const router = Router();
 
@@ -88,7 +95,7 @@ router.get('/upcoming', async (req: AuthRequest, res) => {
       where: {
         ...apptWhere(req),
         date: { gte: new Date() },
-        status: { in: ['SCHEDULED', 'CONFIRMED'] },
+        status: { in: ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] },
       } as any,
       orderBy: [{ date: 'asc' }, { time: 'asc' }],
       take: parseInt(limit as string),
@@ -137,6 +144,79 @@ router.get('/calendar', async (req: AuthRequest, res) => {
   }
 });
 
+router.get('/waitlist', async (req: AuthRequest, res) => {
+  try {
+    const clinicId = resolveBusinessClinicId(req);
+    const rows = await prisma.appointmentWaitlistEntry.findMany({
+      where: { clinicId },
+      orderBy: { createdAt: 'asc' },
+      include: { patient: { select: { id: true, name: true, phone: true } } },
+    });
+    res.json(rows);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Failed to load waitlist';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/waitlist', async (req: AuthRequest, res) => {
+  try {
+    const clinicId = resolveBusinessClinicId(req);
+    const body = req.body as Record<string, unknown>;
+    const patientId = typeof body.patientId === 'string' ? body.patientId.trim() : '';
+    if (!patientId) {
+      res.status(400).json({ error: 'patientId required' });
+      return;
+    }
+    const p = await prisma.patient.findFirst({ where: { id: patientId, clinicId } });
+    if (!p) {
+      res.status(404).json({ error: 'Patient not found' });
+      return;
+    }
+    const preferredRaw = body.preferredDate;
+    const durRaw = body.duration;
+    const duration =
+      typeof durRaw === 'number' && Number.isFinite(durRaw)
+        ? durRaw
+        : parseInt(String(durRaw ?? '30'), 10) || 30;
+    const row = await prisma.appointmentWaitlistEntry.create({
+      data: {
+        clinicId,
+        patientId,
+        preferredDate:
+          preferredRaw !== undefined && preferredRaw !== null && String(preferredRaw).trim() !== ''
+            ? new Date(String(preferredRaw))
+            : null,
+        duration,
+        notes: body.notes === undefined || body.notes === null ? null : String(body.notes),
+      },
+      include: { patient: { select: { id: true, name: true, phone: true } } },
+    });
+    res.status(201).json(row);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Failed to add waitlist entry';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.delete('/waitlist/:entryId', async (req: AuthRequest, res) => {
+  try {
+    const clinicId = resolveBusinessClinicId(req);
+    const existing = await prisma.appointmentWaitlistEntry.findFirst({
+      where: { id: req.params.entryId, clinicId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    await prisma.appointmentWaitlistEntry.delete({ where: { id: existing.id } });
+    res.json({ ok: true });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Failed to remove waitlist entry';
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/:id', async (req: AuthRequest, res) => {
   try {
     const appointment = await prisma.appointment.findFirst({
@@ -175,57 +255,52 @@ router.post('/', async (req: AuthRequest, res) => {
     const doctorUserId = String(bodyUserId || bodyDoctorId || req.user!.id).trim();
     const aptDate = new Date(date);
     const dur = duration || 30;
-    const { start, end } = appointmentWindow(aptDate, time, dur);
 
-    const appointment = await prisma.$transaction(
-      async (tx) => {
-        const patient = await tx.patient.findFirst({
-          where: { id: patientId, clinicId },
-        });
-
-        if (!patient) {
-          throw Object.assign(new Error('PATIENT_NOT_FOUND'), { code: 404 });
-        }
-
-        const practitioner = await tx.user.findFirst({
-          where: { id: doctorUserId, clinicId },
-        });
-        if (!practitioner) {
-          throw Object.assign(new Error('DOCTOR_NOT_IN_CLINIC'), { code: 400 });
-        }
-
-        await assertNoAppointmentOverlap(tx, {
-          clinicId,
-          doctorUserId,
-          chairId: chairId ?? null,
-          start,
-          end,
-        });
-
-        return tx.appointment.create({
-          data: {
-            patientId,
-            userId: doctorUserId,
-            clinicId,
-            chairId: chairId ? String(chairId).trim() || null : null,
-            date: aptDate,
-            time,
-            duration: dur,
-            type,
-            notes,
-          },
-          include: {
-            patient: { select: { id: true, name: true, phone: true } },
-          },
-        });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+    const appointment = await workflowCreateAppointment({
+      clinicId,
+      patientId,
+      doctorUserId,
+      date: aptDate,
+      time,
+      duration: dur,
+      type,
+      notes,
+      chairId: chairId ?? null,
+    });
 
     res.status(201).json(appointment);
   } catch (error: unknown) {
     if (error instanceof AppointmentConflictError) {
-      res.status(409).json({ error: error.message });
+      const clinicId = resolveBusinessClinicId(req);
+      const body = req.body as {
+        patientId?: string;
+        date?: string;
+        time?: string;
+        duration?: number;
+        chairId?: string | null;
+        userId?: string;
+        doctorId?: string;
+      };
+      const doctorUserId = String(body.userId || body.doctorId || req.user!.id).trim();
+      const aptDate = body.date ? new Date(body.date) : new Date();
+      const dur = body.duration || 30;
+      const chairId = body.chairId ?? null;
+      let suggestedSlot: { date: string; time: string } | null = null;
+      try {
+        suggestedSlot = await suggestNextAvailableSlotAfterConflict({
+          clinicId,
+          doctorUserId,
+          chairId,
+          preferredDate: aptDate,
+          duration: dur,
+        });
+      } catch {
+        suggestedSlot = null;
+      }
+      res.status(409).json({
+        error: error.message,
+        ...(suggestedSlot ? { suggestedSlot } : {}),
+      });
       return;
     }
     const err = error as { code?: number; message?: string };
@@ -270,55 +345,37 @@ router.put('/:id', async (req: AuthRequest, res) => {
       bodyUserId !== undefined || bodyDoctorId !== undefined
         ? String(bodyUserId || bodyDoctorId || '').trim()
         : existing.userId;
-    const nextDate = date ? new Date(date) : existing.date;
-    const nextTime = time !== undefined ? time : existing.time;
-    const nextDur = duration !== undefined ? duration : existing.duration;
-    const nextChair = chairId !== undefined ? (chairId ? String(chairId).trim() || null : null) : existing.chairId;
-    const { start, end } = appointmentWindow(nextDate, nextTime, nextDur);
-
-    const appointment = await prisma.$transaction(
-      async (tx) => {
-        if (bodyUserId !== undefined || bodyDoctorId !== undefined) {
-          const practitioner = await tx.user.findFirst({
-            where: { id: nextDoctorId, clinicId },
-          });
-          if (!practitioner) {
-            throw Object.assign(new Error('DOCTOR_NOT_IN_CLINIC'), { code: 400 });
-          }
-        }
-        await assertNoAppointmentOverlap(tx, {
-          clinicId,
-          doctorUserId: nextDoctorId,
-          chairId: nextChair,
-          start,
-          end,
-          excludeAppointmentId: existing.id,
-        });
-
-        return tx.appointment.update({
-          where: { id: existing.id },
-          data: {
-            date: date ? new Date(date) : undefined,
-            time,
-            duration,
-            type,
-            status,
-            notes,
-            ...(bodyUserId !== undefined || bodyDoctorId !== undefined ? { userId: nextDoctorId } : {}),
-            ...(chairId !== undefined ? { chairId: nextChair } : {}),
-          },
-          include: {
-            patient: { select: { id: true, name: true, phone: true } },
-          },
-        });
+    const appointment = await workflowUpdateAppointment({
+      clinicId,
+      appointmentId: existing.id,
+      existing: {
+        id: existing.id,
+        userId: existing.userId,
+        date: existing.date,
+        time: existing.time,
+        duration: existing.duration,
+        chairId: existing.chairId,
+        status: existing.status,
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+      date,
+      time,
+      duration,
+      type,
+      status,
+      notes,
+      chairId,
+      nextDoctorId,
+      doctorChanged: bodyUserId !== undefined || bodyDoctorId !== undefined,
+    });
 
     res.json(appointment);
   } catch (error: unknown) {
     if (error instanceof AppointmentConflictError) {
       res.status(409).json({ error: error.message });
+      return;
+    }
+    if (error instanceof InvalidStateTransitionError) {
+      res.status(400).json({ error: error.message });
       return;
     }
     const err = error as { code?: number; message?: string };
@@ -332,72 +389,84 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
 router.delete('/:id', async (req: AuthRequest, res) => {
   try {
-    const existing = await prisma.appointment.findFirst({
-      where: apptWhere(req, { id: req.params.id }) as any,
-    });
-
-    if (!existing) {
-      return res.status(404).json({ error: 'Appointment not found' });
-    }
-
-    await prisma.appointment.delete({ where: { id: req.params.id } });
+    const clinicId = resolveBusinessClinicId(req);
+    await workflowDeleteAppointment({ clinicId, appointmentId: req.params.id });
     res.json({ message: 'Appointment deleted' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    const err = error as { code?: number; message?: string };
+    if (err?.code === 404) {
+      res.status(404).json({ error: 'Appointment not found' });
+      return;
+    }
+    res.status(500).json({ error: err?.message || 'Failed to delete appointment' });
   }
 });
 
 router.post('/:id/cancel', async (req: AuthRequest, res) => {
   try {
-    const existing = await prisma.appointment.findFirst({
-      where: apptWhere(req, { id: req.params.id }) as any,
-    });
-    if (!existing) {
-      return res.status(404).json({ error: 'Appointment not found' });
-    }
-    const appointment = await prisma.appointment.update({
-      where: { id: req.params.id },
-      data: { status: 'CANCELLED' },
+    const clinicId = resolveBusinessClinicId(req);
+    const appointment = await workflowSetAppointmentStatus({
+      clinicId,
+      appointmentId: req.params.id,
+      status: 'CANCELLED',
     });
     res.json(appointment);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    if (error instanceof InvalidStateTransitionError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    const err = error as { code?: number; message?: string };
+    if (err?.code === 404) {
+      res.status(404).json({ error: 'Appointment not found' });
+      return;
+    }
+    res.status(500).json({ error: err?.message || 'Failed to cancel appointment' });
   }
 });
 
 router.post('/:id/complete', async (req: AuthRequest, res) => {
   try {
-    const existing = await prisma.appointment.findFirst({
-      where: apptWhere(req, { id: req.params.id }) as any,
-    });
-    if (!existing) {
-      return res.status(404).json({ error: 'Appointment not found' });
-    }
-    const appointment = await prisma.appointment.update({
-      where: { id: req.params.id },
-      data: { status: 'COMPLETED' },
+    const clinicId = resolveBusinessClinicId(req);
+    const appointment = await workflowCompleteAppointment({
+      clinicId,
+      appointmentId: req.params.id,
     });
     res.json(appointment);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    if (error instanceof InvalidStateTransitionError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    const err = error as { code?: number; message?: string };
+    if (err?.code === 404) {
+      res.status(404).json({ error: 'Appointment not found' });
+      return;
+    }
+    res.status(500).json({ error: err?.message || 'Failed to complete appointment' });
   }
 });
 
 router.post('/:id/confirm', async (req: AuthRequest, res) => {
   try {
-    const existing = await prisma.appointment.findFirst({
-      where: apptWhere(req, { id: req.params.id }) as any,
-    });
-    if (!existing) {
-      return res.status(404).json({ error: 'Appointment not found' });
-    }
-    const appointment = await prisma.appointment.update({
-      where: { id: req.params.id },
-      data: { status: 'CONFIRMED' },
+    const clinicId = resolveBusinessClinicId(req);
+    const appointment = await workflowSetAppointmentStatus({
+      clinicId,
+      appointmentId: req.params.id,
+      status: 'CONFIRMED',
     });
     res.json(appointment);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    if (error instanceof InvalidStateTransitionError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    const err = error as { code?: number; message?: string };
+    if (err?.code === 404) {
+      res.status(404).json({ error: 'Appointment not found' });
+      return;
+    }
+    res.status(500).json({ error: err?.message || 'Failed to confirm appointment' });
   }
 });
 

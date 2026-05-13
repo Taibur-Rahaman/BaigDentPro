@@ -2,6 +2,8 @@ import type { Response, NextFunction } from 'express';
 import { prisma } from '../index.js';
 import type { AuthRequest } from './auth.js';
 import { effectivePlanName, mergePlanFeatures, resolveDeviceLimit, type SubscriptionWithPlan } from '../services/planCatalog.js';
+import { resolveProductFeaturesForClinic, type ProductFeatureKey } from '../services/productFeatures.js';
+import { computeEffectiveCapabilities } from '../security/capabilityEngine.js';
 
 /**
  * Requires an authenticated user with a clinic that is active and has an ACTIVE subscription.
@@ -60,6 +62,14 @@ export async function requireActiveSubscription(req: AuthRequest, res: Response,
     const effectivePlan = effectivePlanName(sub, clinic.plan);
     const mergedPlanFeatures = mergePlanFeatures(sub?.planRef?.features, sub?.features);
     const deviceLimit = await resolveDeviceLimit(sub);
+    const productFeatures = (await resolveProductFeaturesForClinic(clinicId)) as Record<ProductFeatureKey, boolean>;
+
+    const role = req.user?.role ?? '';
+    const overrides = await prisma.clinicCapabilityOverride.findMany({
+      where: { clinicId },
+      select: { capabilityKey: true, grant: true },
+    });
+    req.effectiveCapabilities = computeEffectiveCapabilities(role, productFeatures, overrides);
 
     req.clinicSubscription = {
       clinicId,
@@ -70,6 +80,7 @@ export async function requireActiveSubscription(req: AuthRequest, res: Response,
       mergedPlanFeatures,
       deviceLimit,
       planId: sub?.planId ?? null,
+      productFeatures,
     };
     next();
   } catch (e) {

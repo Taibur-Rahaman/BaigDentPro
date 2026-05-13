@@ -2,8 +2,11 @@ import { Router } from 'express';
 import { prisma } from '../index.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { resolveBusinessClinicId } from '../utils/requestClinic.js';
+import { requireCapability } from '../middleware/requireCapability.js';
 
 const router = Router();
+
+router.use(requireCapability('dpms:access'));
 
 router.get('/stats', async (req: AuthRequest, res) => {
   try {
@@ -21,6 +24,7 @@ router.get('/stats', async (req: AuthRequest, res) => {
     const rxScope = { patient: { clinicId: cid } };
     const labScope = { patient: { clinicId: cid } };
 
+    // Sequential `$transaction` queries avoid connection pool stalls with Supabase PgBouncer + `connection_limit=1`.
     const [
       totalPatients,
       newPatientsThisMonth,
@@ -32,7 +36,7 @@ router.get('/stats', async (req: AuthRequest, res) => {
       prescriptionsThisMonth,
       pendingInvoicesCount,
       overdueInvoicesCount,
-    ] = await Promise.all([
+    ] = await prisma.$transaction([
       prisma.patient.count({ where: { clinicId: cid } }),
       prisma.patient.count({
         where: { clinicId: cid, createdAt: { gte: startOfMonth, lte: endOfMonth } },
@@ -118,7 +122,7 @@ router.get('/today', async (req: AuthRequest, res) => {
     const apptScope = { clinicId: cid };
     const rxScope = { patient: { clinicId: cid } };
 
-    const [appointments, prescriptions, invoices] = await Promise.all([
+    const [appointments, prescriptions, invoices] = await prisma.$transaction([
       prisma.appointment.findMany({
         where: { ...apptScope, date: { gte: today, lt: tomorrow } },
         orderBy: { time: 'asc' },
@@ -164,7 +168,7 @@ router.get('/recent-patients', async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/revenue-chart', async (req: AuthRequest, res) => {
+router.get('/revenue-chart', requireCapability('dpms:analytics:advanced'), async (req: AuthRequest, res) => {
   try {
     const cid = resolveBusinessClinicId(req);
     const { period = 'monthly' } = req.query;
@@ -222,7 +226,7 @@ router.get('/revenue-chart', async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/appointment-chart', async (req: AuthRequest, res) => {
+router.get('/appointment-chart', requireCapability('dpms:analytics:advanced'), async (req: AuthRequest, res) => {
   try {
     const cid = resolveBusinessClinicId(req);
     const today = new Date();
@@ -254,7 +258,7 @@ router.get('/appointment-chart', async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/treatment-stats', async (req: AuthRequest, res) => {
+router.get('/treatment-stats', requireCapability('dpms:analytics:advanced'), async (req: AuthRequest, res) => {
   try {
     const cid = resolveBusinessClinicId(req);
     const treatments = await prisma.treatmentPlan.groupBy({
@@ -276,7 +280,7 @@ router.get('/treatment-stats', async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/doctor-revenue', async (req: AuthRequest, res) => {
+router.get('/doctor-revenue', requireCapability('dpms:analytics:advanced'), async (req: AuthRequest, res) => {
   try {
     const cid = resolveBusinessClinicId(req);
     const today = new Date();
@@ -315,7 +319,7 @@ router.get('/doctor-revenue', async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/daily-closing', async (req: AuthRequest, res) => {
+router.get('/daily-closing', requireCapability('dpms:billing:read'), async (req: AuthRequest, res) => {
   try {
     const cid = resolveBusinessClinicId(req);
     const day = req.query.date ? new Date(String(req.query.date)) : new Date();

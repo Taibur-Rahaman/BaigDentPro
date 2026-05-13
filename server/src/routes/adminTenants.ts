@@ -9,6 +9,7 @@ import { issueRefreshToken } from '../services/refreshTokenService.js';
 import { writeAuditLog } from '../services/auditLogService.js';
 import { recordImpersonationFraud } from '../services/fraudAlertService.js';
 import { effectivePlanName, type SubscriptionWithPlan } from '../services/planCatalog.js';
+import { resolveJwtCapabilitiesForUser } from '../services/capabilityJwtPayload.js';
 
 async function subscriptionPlanSnapshot(clinicId: string): Promise<string | undefined> {
   const [sub, clinic] = await Promise.all([
@@ -209,6 +210,7 @@ router.post(
       return;
     }
     const planSnapshot = await subscriptionPlanSnapshot(clinicId);
+    const capabilities = await resolveJwtCapabilitiesForUser({ role: adminRow.role, clinicId: adminRow.clinicId });
     const impersonationJti = randomUUID();
     const expiresAt = new Date(Date.now() + 15 * 60_000);
     await prisma.impersonationSession.create({
@@ -233,6 +235,7 @@ router.post(
         impersonatedBy: adminRow.id,
         impersonationJti,
         planSnapshot,
+        capabilities,
         expiresIn: '15m',
       }
     );

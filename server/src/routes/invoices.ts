@@ -1,3 +1,7 @@
+/**
+ * @domain FINANCE_PATIENT_AR
+ * Patient invoices and payments toward invoices — not SaaS subscription billing (/api/billing, /api/payment/manual).
+ */
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../index.js';
@@ -385,7 +389,10 @@ router.post(
           return;
         }
         if (result.error === 'NOT_APPLICABLE') {
-          res.status(400).json({ error: 'Verification applies only to bKash or Nagad pending payments' });
+          res.status(410).json({
+            error:
+              'Online wallet verification is disabled. Legacy BKASH/NAGAD rows may still exist — contact support.',
+          });
           return;
         }
         if (result.error === 'NOT_PENDING') {
@@ -431,7 +438,6 @@ router.post('/:id/payments', async (req: AuthRequest, res) => {
       reference,
       notes,
       paymentSource = 'CASH',
-      stripePaymentIntentId,
       transactionRef: bodyTransactionRef,
     } = req.body as {
       amount: unknown;
@@ -439,7 +445,6 @@ router.post('/:id/payments', async (req: AuthRequest, res) => {
       reference?: string;
       notes?: string;
       paymentSource?: string;
-      stripePaymentIntentId?: string;
       transactionRef?: string;
     };
 
@@ -484,21 +489,6 @@ router.post('/:id/payments', async (req: AuthRequest, res) => {
           ? reference.trim()
           : '';
 
-    if (normalizedSource === 'BKASH' || normalizedSource === 'NAGAD') {
-      if (!txRefRaw) {
-        res.status(400).json({ error: 'transactionRef is required for bKash and Nagad payments' });
-        return;
-      }
-    }
-
-    if (normalizedSource === 'STRIPE') {
-      const pi = typeof stripePaymentIntentId === 'string' ? stripePaymentIntentId.trim() : '';
-      if (!pi) {
-        res.status(400).json({ error: 'stripePaymentIntentId is required for STRIPE payments' });
-        return;
-      }
-    }
-
     const result = await prisma.$transaction(
       async (tx) => {
         const invoice = await tx.invoice.findFirst({
@@ -509,83 +499,10 @@ router.post('/:id/payments', async (req: AuthRequest, res) => {
           return { error: 'NOT_FOUND' as const };
         }
 
-        if (normalizedSource === 'CASH') {
-          const payment = await tx.payment.create({
-            data: {
-              invoiceId: req.params.id,
-              amount: paymentAmount,
-              method,
-              reference: reference ?? null,
-              notes,
-              paymentSource: 'CASH',
-              paymentStatus: 'VERIFIED',
-              reconciliationStatus: reconciliationStatusForPaymentStatus('VERIFIED'),
-              transactionRef: txRefRaw || null,
-              verifiedAt: new Date(),
-              verifiedByUserId: req.user!.id,
-            },
-          });
-          await reconcileInvoiceFromVerifiedPayments(tx, invoice.id, {
-            userId: req.user!.id,
-            clinicId: cid,
-            ipAddress: req.ip,
-            userAgent: req.get('user-agent') ?? null,
-            metadata: { source: 'cash_payment' },
-          });
-          return { payment };
+        if (normalizedSource !== 'CASH') {
+          return { error: 'ONLY_CASH' as const };
         }
 
-        if (normalizedSource === 'BKASH' || normalizedSource === 'NAGAD') {
-          const payment = await tx.payment.create({
-            data: {
-              invoiceId: req.params.id,
-              amount: paymentAmount,
-              method: method || normalizedSource,
-              reference: reference ?? null,
-              notes,
-              paymentSource: normalizedSource,
-              paymentStatus: 'PENDING',
-              reconciliationStatus: reconciliationStatusForPaymentStatus('PENDING'),
-              transactionRef: txRefRaw,
-            },
-          });
-          return { payment };
-        }
-
-        const piStr = String(stripePaymentIntentId).trim();
-        const Stripe = (await import('stripe')).default;
-        const key = process.env.STRIPE_SECRET_KEY?.trim();
-        if (!key) {
-          return { error: 'STRIPE_UNCONFIGURED' as const };
-        }
-        const stripe = new Stripe(key);
-        let intent: import('stripe').Stripe.PaymentIntent;
-        try {
-          intent = await stripe.paymentIntents.retrieve(piStr);
-        } catch {
-          return { error: 'STRIPE_REJECTED' as const, message: 'Could not retrieve Stripe PaymentIntent' };
-        }
-        const meta = (intent.metadata || {}) as Record<string, string>;
-        if (String(meta.baigdentpro_invoice_id || '').trim() !== invoice.id) {
-          return {
-            error: 'STRIPE_REJECTED' as const,
-            message: 'PaymentIntent metadata does not match this invoice',
-          };
-        }
-        if (String(meta.clinic_id || '').trim() !== cid) {
-          return { error: 'STRIPE_REJECTED' as const, message: 'PaymentIntent metadata does not match this clinic' };
-        }
-        const expectedMinor = Math.round(paymentAmount * 100);
-        if (!Number.isFinite(expectedMinor) || expectedMinor <= 0 || intent.amount !== expectedMinor) {
-          return { error: 'STRIPE_REJECTED' as const, message: 'PaymentIntent amount does not match requested payment amount' };
-        }
-        if (intent.currency.toLowerCase() !== 'bdt') {
-          return { error: 'STRIPE_REJECTED' as const, message: 'PaymentIntent currency does not match invoice currency' };
-        }
-        const dup = await tx.payment.findFirst({ where: { stripePaymentIntentId: intent.id } });
-        if (dup) {
-          return { error: 'DUPLICATE_PI' as const };
-        }
         const payment = await tx.payment.create({
           data: {
             invoiceId: req.params.id,
@@ -593,11 +510,20 @@ router.post('/:id/payments', async (req: AuthRequest, res) => {
             method,
             reference: reference ?? null,
             notes,
-            paymentSource: 'STRIPE',
-            paymentStatus: 'PENDING',
-            reconciliationStatus: reconciliationStatusForPaymentStatus('PENDING'),
-            stripePaymentIntentId: intent.id,
+            paymentSource: 'CASH',
+            paymentStatus: 'VERIFIED',
+            reconciliationStatus: reconciliationStatusForPaymentStatus('VERIFIED'),
+            transactionRef: txRefRaw || null,
+            verifiedAt: new Date(),
+            verifiedByUserId: req.user!.id,
           },
+        });
+        await reconcileInvoiceFromVerifiedPayments(tx, invoice.id, {
+          userId: req.user!.id,
+          clinicId: cid,
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') ?? null,
+          metadata: { source: 'cash_payment' },
         });
         return { payment };
       },
@@ -609,16 +535,10 @@ router.post('/:id/payments', async (req: AuthRequest, res) => {
         res.status(404).json({ error: 'Invoice not found' });
         return;
       }
-      if (result.error === 'STRIPE_REJECTED') {
-        res.status(400).json({ error: 'message' in result ? result.message : 'Stripe verification failed' });
-        return;
-      }
-      if (result.error === 'DUPLICATE_PI') {
-        res.status(409).json({ error: 'This Stripe payment was already applied' });
-        return;
-      }
-      if (result.error === 'STRIPE_UNCONFIGURED') {
-        res.status(503).json({ error: 'Stripe is not configured on the server' });
+      if (result.error === 'ONLY_CASH') {
+        res.status(400).json({
+          error: 'Only CASH invoice payments are supported. SaaS plans use WhatsApp (see subscription page).',
+        });
         return;
       }
     }
