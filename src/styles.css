@@ -4653,22 +4653,28 @@ body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
-/* Professional Dark Sidebar */
-.dashboard-sidebar {
+/* Practice EMR shell only — must stay inside `.dashboard-layout` so nested starter chrome is not broken */
+.dashboard-layout > .dashboard-sidebar {
   width: 260px;
   min-width: 260px;
   background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
   color: #f8fafc;
   display: flex;
   flex-direction: column;
-  position: fixed;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
   height: 100vh;
-  z-index: 100;
+  max-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-shrink: 0;
+  z-index: 30;
   border-right: 1px solid var(--neo-border);
   box-shadow: 4px 0 30px rgba(0, 0, 0, 0.3);
 }
 
-.dashboard-sidebar::before {
+.dashboard-layout > .dashboard-sidebar::before {
   content: '';
   position: absolute;
   top: 0;
@@ -4839,16 +4845,19 @@ body {
   box-shadow: 0 0 20px rgba(255, 82, 82, 0.2);
 }
 
-/* Futuristic Main Area */
-.dashboard-main {
+/* Practice EMR main column — flex row with sidebar (no viewport-fixed overlap) */
+.dashboard-layout > .dashboard-main {
   flex: 1;
-  margin-left: 260px;
+  min-width: 0;
+  margin-left: 0;
   min-height: 100vh;
   background: #f8fafc;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
-.dashboard-main::before {
+.dashboard-layout > .dashboard-main::before {
   display: none;
 }
 
@@ -7763,13 +7772,12 @@ body {
   }
 }
 
-/* Responsive - Futuristic */
+/* Responsive - Futuristic (practice `.dashboard-layout` + DPMS shell sidebar) */
 @media (max-width: 1024px) {
-  .dashboard-sidebar {
+  .dashboard-layout > .dashboard-sidebar,
+  .dashboard-shell > .dashboard-sidebar {
     width: 240px;
-  }
-  .dashboard-main {
-    margin-left: 240px;
+    min-width: 240px;
   }
   .two-column-layout {
     grid-template-columns: 1fr;
@@ -7780,7 +7788,8 @@ body {
 }
 
 @media (max-width: 768px) {
-  .dashboard-sidebar {
+  .dashboard-layout > .dashboard-sidebar,
+  .dashboard-shell > .dashboard-sidebar {
     width: 60px;
     min-width: 60px;
     overflow: hidden;
@@ -7816,9 +7825,6 @@ body {
   .sidebar-item i {
     font-size: 1.2rem;
     margin: 0;
-  }
-  .dashboard-main {
-    margin-left: 60px;
   }
   .dashboard-content {
     padding: 16px;
@@ -7883,11 +7889,8 @@ body {
   .sidebar-item i {
     font-size: 1.3rem;
   }
-  .dashboard-main {
-    margin-left: 70px;
-  }
-  .dashboard-main::before {
-    left: 70px;
+  .dashboard-layout > .dashboard-main {
+    margin-left: 0;
   }
   .dashboard-content {
     padding: 20px 16px;
@@ -11488,6 +11491,10 @@ body {
 }
 
 /* Practice workspace fills width when outer DPMS sidebar is hidden (doctor / receptionist). */
+.dashboard-shell--clinical-staff .dashboard-main {
+  margin-left: 0;
+}
+
 .dashboard-shell--clinical-staff .dashboard-content {
   max-width: none;
   margin: 0;
@@ -11499,7 +11506,7 @@ body {
   .dashboard-shell {
     flex-direction: column;
   }
-  .dashboard-sidebar {
+  .dashboard-shell > .dashboard-sidebar {
     width: 100%;
     flex-direction: row;
     flex-wrap: wrap;
