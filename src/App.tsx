@@ -9,7 +9,7 @@ import { PracticeLegacyRedirect } from '@/pages/practice/PracticeLegacyRedirect'
 import { HomePage } from './HomePage';
 import { ApiTestPage } from './pages/ApiTestPage';
 import { DashboardIndexRedirect } from './pages/dashboard/DashboardIndexRedirect';
-import { DashboardLayout } from './pages/dashboard/DashboardLayout';
+import { DashboardRouteChrome } from './pages/dashboard/DashboardRouteChrome';
 import { OrdersPage } from './pages/dashboard/OrdersPage';
 import { ProductsPage } from './pages/dashboard/ProductsPage';
 import { SettingsPage } from './pages/dashboard/SettingsPage';
@@ -69,6 +69,8 @@ const CLINICAL_PRACTICE_ROLE_ALLOW = [
   'CLINIC_OWNER',
   'DOCTOR',
   'RECEPTIONIST',
+  'DENTAL_ASSISTANT',
+  'LAB_TECH',
   'SUPER_ADMIN',
 ] as const satisfies readonly string[];
 
@@ -292,7 +294,7 @@ export const App: React.FC = () => (
           <Route path="branding" element={<AdminBrandingPage />} />
           <Route path="settings" element={<AdminSettingsCenterPage />} />
         </Route>
-        <Route element={<DashboardLayout />}>
+        <Route element={<DashboardRouteChrome />}>
           <Route index element={<DashboardIndexRedirect />} />
           <Route
             path="branches"
@@ -448,6 +450,7 @@ export const App: React.FC = () => (
             <Route path="prescriptions" element={<PrescriptionsPage />} />
             <Route path="prescription" element={<PracticeChildRoute />} />
             <Route path="billing" element={<BillingPage />} />
+            <Route path="workspace-calendar" element={<PracticeChildRoute />} />
             <Route path="reports" element={<PracticeChildRoute />} />
             <Route path="lab" element={<PracticeChildRoute />} />
             <Route path="drugs" element={<PracticeChildRoute />} />

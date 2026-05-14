@@ -23,6 +23,7 @@ export const EnterpriseWorkspaceShell: React.FC<EnterpriseWorkspaceShellProps> =
 
   return (
     <PracticeWorkspaceController
+      practiceSidebarVariant="clinic"
       onLogout={handleLogout}
       userName={user?.name}
       userRole={user?.role}

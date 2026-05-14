@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -12,6 +12,8 @@ import {
   EnterpriseWorkspaceShell,
   StarterWorkspaceShell,
 } from '@/layouts/workspaces';
+import { PracticeWorkspaceProvider } from '@/contexts/practiceWorkspace';
+import { useDevExcessiveRerenderWarning } from '@/lib/devExcessiveRerenderWarning';
 
 const workspaceLoading = (
   <div className="tenant-loading" role="status" style={{ padding: '2rem' }}>
@@ -25,23 +27,38 @@ const workspaceLoading = (
  * for clinical `/dashboard/*` practice routes; shells and controller consume only
  * `workspaceType` + `capabilities`.
  *
- * Data loading resilience: optional plan-gated modules (e.g. invoices, lab) use
- * soft fallbacks in `loadPracticeLists`; failed core EMR requests still surface
- * as bundle errors — this component does not need to gate on those.
+ * Child routes render inside {@link PracticeWorkspaceController} via `<Outlet />`.
  */
 export const PracticeWorkspacePage: React.FC = () => {
   const { user, loading } = useAuth();
   const location = useLocation();
+  useDevExcessiveRerenderWarning('PracticeWorkspacePage');
+
+  const workspace = useMemo(() => getWorkspaceByRole(user?.role), [user?.role]);
+
+  const workspaceShell = useMemo(() => {
+    switch (workspace.type) {
+      case 'STARTER_WORKSPACE':
+        return <StarterWorkspaceShell key="starter-shell" />;
+      case 'CLINIC_WORKSPACE':
+        return <ClinicWorkspaceShell key="clinic-shell" capabilities={workspace.capabilities} />;
+      case 'ENTERPRISE_WORKSPACE':
+        return (
+          <EnterpriseWorkspaceShell key="enterprise-shell" redirectFromClinicalPracticeRoutes />
+        );
+      default:
+        return null;
+    }
+  }, [workspace]);
+
+  const isDev =
+    import.meta.env.DEV ||
+    (typeof process !== 'undefined' && process.env.NODE_ENV === 'development');
 
   if (loading) {
     return workspaceLoading;
   }
 
-  const workspace = getWorkspaceByRole(user?.role);
-
-  const isDev =
-    import.meta.env.DEV ||
-    (typeof process !== 'undefined' && process.env.NODE_ENV === 'development');
   if (isDev) {
     console.assert(
       workspace.type !== 'CLINIC_WORKSPACE' || (user?.role ?? '').trim() !== 'DOCTOR',
@@ -57,16 +74,17 @@ export const PracticeWorkspacePage: React.FC = () => {
     return <Navigate to={STARTER_PRACTICE_HOME} replace />;
   }
 
-  switch (workspace.type) {
-    case 'STARTER_WORKSPACE':
-      return <StarterWorkspaceShell />;
-    case 'CLINIC_WORKSPACE':
-      return <ClinicWorkspaceShell capabilities={workspace.capabilities} />;
-    case 'ENTERPRISE_WORKSPACE':
-      return <EnterpriseWorkspaceShell redirectFromClinicalPracticeRoutes />;
-    case 'SHOP_WORKSPACE':
-      return <Navigate to="/dashboard" replace />;
-    default:
-      return <Navigate to={STARTER_PRACTICE_HOME} replace />;
+  if (workspace.type === 'SHOP_WORKSPACE') {
+    return <Navigate to="/dashboard" replace />;
   }
+
+  if (workspaceShell == null) {
+    return <Navigate to={STARTER_PRACTICE_HOME} replace />;
+  }
+
+  return (
+    <PracticeWorkspaceProvider key={workspace.type}>
+      {workspaceShell}
+    </PracticeWorkspaceProvider>
+  );
 };

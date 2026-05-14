@@ -7,6 +7,7 @@ import {
   canAccessEnterpriseAdminRoute,
 } from '@/lib/routeAccess';
 import { isClinicalWorkspacePathname } from '@/pages/practice/practiceNav';
+import { isStarterStaffRole } from '@/lib/starterStaffRoles';
 
 export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -20,7 +21,8 @@ export const DashboardLayout: React.FC = () => {
   const isClinicOwner = role === 'CLINIC_OWNER';
   const isDoctor = role === 'DOCTOR';
   const isReception = role === 'RECEPTIONIST';
-  const hideClinicDpmsSidebar = isDoctor || isReception || isCommerceOnly;
+  const starterStaff = isStarterStaffRole(role);
+  const hideClinicDpmsSidebar = starterStaff || isCommerceOnly;
   const siteLogo = useSiteLogo();
 
   const handleLogout = async () => {

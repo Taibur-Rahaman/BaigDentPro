@@ -25,13 +25,18 @@ function norm(role: string | undefined): string {
   return (role ?? '').trim();
 }
 
-/** DOCTOR / RECEPTIONIST: EMR core only (flat segments), not full clinic-operator URLs. */
+/** Starter workspace: flat `/dashboard/<segment>` allowlist (no clinic growth / audit URLs). */
 const STARTER_ALLOWED_SEGMENTS = new Set([
   'overview',
   'patients',
   'appointments',
   'prescriptions',
   'prescription',
+  'billing',
+  'workspace-calendar',
+  'lab',
+  'drugs',
+  'workspace-settings',
 ]);
 
 /**
@@ -57,7 +62,12 @@ export function getWorkspaceByRole(role: string | undefined): ResolvedWorkspace 
   if (r === 'CLINIC_ADMIN' || r === 'CLINIC_OWNER') {
     return { type: 'CLINIC_WORKSPACE', capabilities: { fullDpmsSidebar: true } };
   }
-  if (r === 'DOCTOR' || r === 'RECEPTIONIST') {
+  if (
+    r === 'DOCTOR' ||
+    r === 'RECEPTIONIST' ||
+    r === 'DENTAL_ASSISTANT' ||
+    r === 'LAB_TECH'
+  ) {
     return { type: 'STARTER_WORKSPACE', capabilities: { fullDpmsSidebar: false } };
   }
   return { type: 'STARTER_WORKSPACE', capabilities: { fullDpmsSidebar: false } };

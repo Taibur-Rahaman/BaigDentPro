@@ -63,6 +63,7 @@ export function PracticeWorkspaceProvider({ children }: { children: ReactNode })
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const legacyTabQuery = searchParams.get('tab');
   const skipPathSyncOnce = useRef(false);
   const refreshRef = useRef<RefreshFn>(null);
 
@@ -102,16 +103,15 @@ export function PracticeWorkspaceProvider({ children }: { children: ReactNode })
     setActiveTabState(tab);
   }, []);
 
-  /** Legacy `?tab=` → canonical path */
+  /** Legacy `?tab=` → canonical path (depend on primitive to avoid effect churn from new URLSearchParams identity). */
   useEffect(() => {
-    const tab = searchParams.get('tab');
-    if (!tab) return;
-    const mapped = PRACTICE_TAB_TO_NAV[tab];
+    if (!legacyTabQuery) return;
+    const mapped = PRACTICE_TAB_TO_NAV[legacyTabQuery];
     const segPath = mapped ? NAV_TO_PRACTICE_PATH[mapped] : undefined;
     if (!mapped || !segPath) return;
     navigate(practiceWorkspaceHref(segPath), { replace: true });
     setSearchParams({}, { replace: true });
-  }, [navigate, searchParams, setSearchParams]);
+  }, [navigate, legacyTabQuery, setSearchParams]);
 
   /** URL → workspace tab (/dashboard/:segment) */
   useEffect(() => {
@@ -145,8 +145,11 @@ export function PracticeWorkspaceProvider({ children }: { children: ReactNode })
       setActiveTab,
       setAuxiliaryTab,
       selectedPatientId,
+      setSelectedPatientId,
       selectedAppointmentId,
+      setSelectedAppointmentId,
       filters,
+      setFilters,
       refreshWorkspace,
       registerWorkspaceRefresh,
       skipNextUrlDerivedTabSync,
@@ -165,5 +168,9 @@ export function usePracticeWorkspace(): PracticeWorkspaceContextValue {
 /** Register bundle reload (`usePracticeDashboardBundle().reload`). */
 export function useRegisterPracticeWorkspaceRefresh(loadData: () => void | Promise<void>): void {
   const { registerWorkspaceRefresh } = usePracticeWorkspace();
-  useLayoutEffect(() => registerWorkspaceRefresh(loadData), [registerWorkspaceRefresh, loadData]);
+  const loadRef = useRef(loadData);
+  loadRef.current = loadData;
+  useLayoutEffect(() => {
+    return registerWorkspaceRefresh(() => loadRef.current());
+  }, [registerWorkspaceRefresh]);
 }

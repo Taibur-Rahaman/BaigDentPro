@@ -1,5 +1,4 @@
-import React, { useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import React from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSafeHealthProbe } from '@/hooks/useSafeHealthProbe';
 
@@ -8,24 +7,13 @@ import { useSafeHealthProbe } from '@/hooks/useSafeHealthProbe';
  * Renders only under `AuthenticatedLayout`; unmount clears probe state.
  */
 export const ApiHealthBanner: React.FC = () => {
-  const location = useLocation();
   const { isAuthenticated } = useAuth();
 
-  const { failed, isLoading } = useSafeHealthProbe({
+  const { failed } = useSafeHealthProbe({
     enabled: isAuthenticated,
-    pathname: location.pathname,
-    debounceMs: 175,
+    debounceMs: 400,
     deferUntilPaint: true,
   });
-
-  useEffect(() => {
-    console.log('[HEALTH BANNER RENDER]', {
-      pathname: location.pathname,
-      failed,
-      isLoading,
-      isAuthenticated,
-    });
-  }, [failed, isLoading, isAuthenticated, location.pathname]);
 
   if (!isAuthenticated) return null;
   if (!failed) return null;

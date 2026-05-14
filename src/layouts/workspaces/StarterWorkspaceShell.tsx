@@ -18,6 +18,7 @@ export const StarterWorkspaceShell: React.FC = () => {
 
   return (
     <PracticeWorkspaceController
+      practiceSidebarVariant="starter"
       onLogout={handleLogout}
       userName={user?.name}
       userRole={user?.role}

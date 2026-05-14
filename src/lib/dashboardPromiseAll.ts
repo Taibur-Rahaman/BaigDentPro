@@ -1,4 +1,4 @@
-import { CORE_MODULES, OPTIONAL_MODULES, type CoreModuleName, type OptionalModuleName } from '@/lib/dashboardLoaderConstants';
+import type { CoreModuleName, OptionalModuleName } from '@/lib/dashboardLoaderConstants';
 import { isApiHttpError } from '@/lib/apiErrors';
 
 type Api = typeof import('@/api').default;
@@ -26,14 +26,14 @@ function withCoreFailureLog<T>(module: string, p: Promise<T>): Promise<T> {
   });
 }
 
-function unwrapOptionalOrThrow<T>(module: 'invoices' | 'lab', result: PromiseSettledResult<T>): T {
+function unwrapOptionalSettled<T>(module: 'invoices' | 'lab', result: PromiseSettledResult<T>, fallback: T): T {
   if (result.status === 'fulfilled') return result.value;
   if (isDev) {
     const r = result.reason;
     const msg = isApiHttpError(r) ? `${r.status} — ${r.message}` : String(r);
-    console.error(`[DASHBOARD] Optional module failed (propagating): ${module} — ${msg}`, r);
+    console.error(`[DASHBOARD] Optional module "${module}" rejected unexpectedly — using empty fallback — ${msg}`, r);
   }
-  throw result.reason;
+  return fallback;
 }
 
 /**
@@ -66,16 +66,16 @@ export async function dashboardEntityListPromiseAll(
     withCoreFailureLog('prescriptions', prescriptionsFn() as Promise<PrescriptionsListPayload>),
   ]);
 
+  const EMPTY_INVOICES: InvoicesListPayload = { invoices: [], total: 0, page: 1, limit: 500 };
+  const EMPTY_LAB: LabListPayload = { labOrders: [], total: 0, page: 1, limit: 500 };
+
   const optionalSettled = await Promise.allSettled([
     invoicesFn() as Promise<InvoicesListPayload>,
     labFn() as Promise<LabListPayload>,
   ]);
 
-  const invoicesRes = unwrapOptionalOrThrow('invoices', optionalSettled[0]);
-  const labRes = unwrapOptionalOrThrow('lab', optionalSettled[1]);
-
-  void CORE_MODULES;
-  void OPTIONAL_MODULES;
+  const invoicesRes = unwrapOptionalSettled('invoices', optionalSettled[0], EMPTY_INVOICES);
+  const labRes = unwrapOptionalSettled('lab', optionalSettled[1], EMPTY_LAB);
 
   return {
     patients: patientsRes.patients,

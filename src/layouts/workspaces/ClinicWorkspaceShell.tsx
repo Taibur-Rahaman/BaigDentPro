@@ -20,6 +20,7 @@ export const ClinicWorkspaceShell: React.FC<ClinicWorkspaceShellProps> = ({ capa
 
   return (
     <PracticeWorkspaceController
+      practiceSidebarVariant="clinic"
       onLogout={handleLogout}
       userName={user?.name}
       userRole={user?.role}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 import api from '@/api';
 import { PrescriptionPage } from '@/PrescriptionPage';
 import { ShopUserDashboardPage } from '@/pages/ShopUserDashboardPage';
@@ -31,6 +31,9 @@ import { prettifyAppointmentStatus } from '@/viewModels/formatters';
 import { practiceWorkspaceHref } from '@/pages/practice/practiceNav';
 import { PracticeOverviewPage } from '@/pages/practice/workspace/PracticeOverviewPage';
 import { PracticeReportsPanel } from '@/pages/practice/workspace/PracticeReportsPanel';
+import { OperationsCalendarPage } from '@/pages/dashboard/OperationsCalendarPage';
+import { ClinicPracticeSidebar } from '@/components/practiceWorkspace/ClinicPracticeSidebar';
+import { StarterPracticeSidebar } from '@/components/practiceWorkspace/StarterPracticeSidebar';
 import { useSiteLogo } from '@/hooks/useSiteLogo';
 import { PatientTimelinePanel } from '@/components/PatientTimelinePanel';
 import {
@@ -45,6 +48,8 @@ interface Props {
   userRole?: string;
   userClinicId?: string;
   currentUserId?: string;
+  /** Starter staff use an isolated sidebar source; clinic/platform use full practice nav. */
+  practiceSidebarVariant?: 'starter' | 'clinic';
 }
 
 export const PracticeWorkspaceController: React.FC<Props> = ({
@@ -53,6 +58,7 @@ export const PracticeWorkspaceController: React.FC<Props> = ({
   userRole,
   userClinicId,
   currentUserId,
+  practiceSidebarVariant = 'clinic',
 }) => {
   const { token } = useAuth();
   const siteLogo = useSiteLogo();
@@ -92,6 +98,17 @@ export const PracticeWorkspaceController: React.FC<Props> = ({
     skipNextUrlDerivedTabSync,
   } = usePracticeWorkspace();
   useRegisterPracticeWorkspaceRefresh(loadData);
+
+  const isDev =
+    import.meta.env.DEV || (typeof process !== 'undefined' && process.env.NODE_ENV === 'development');
+  useEffect(() => {
+    if (!isDev) return;
+    if ((userRole ?? '').trim() === 'DOCTOR' && practiceSidebarVariant !== 'starter') {
+      console.error(
+        '[BaigDentPro] Doctor users must mount PracticeWorkspaceController with practiceSidebarVariant="starter".',
+      );
+    }
+  }, [isDev, userRole, practiceSidebarVariant]);
 
   const setPracticeNav = setActiveTab;
   const setAuxNav = setAuxiliaryTab;
@@ -384,120 +401,29 @@ export const PracticeWorkspaceController: React.FC<Props> = ({
     setSelectedPatientId(selectedPatient?.id ?? null);
   }, [selectedPatient?.id, setSelectedPatientId]);
 
-  const renderSidebar = () => (
-    <aside className="dashboard-sidebar">
-      <div className="sidebar-header">
-        <div className="sidebar-logo">
-          <img src={siteLogo} alt="BaigDentPro" className="sidebar-logo-img" />
-          <span>BaigDentPro</span>
-        </div>
-        <div className="sidebar-user">
-          <i className="fa-solid fa-user-circle"></i>
-          <span>{userName}</span>
-        </div>
-      </div>
-      <nav className="sidebar-nav">
-        <NavLink
-          to={practiceWorkspaceHref('overview')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-          end
-        >
-          <i className="fa-solid fa-grid-2"></i> <span>Dashboard</span>
-        </NavLink>
-        {(userRole === 'CLINIC_ADMIN' || userRole === 'SUPER_ADMIN') && (
-          <button
-            type="button"
-            className={`sidebar-item ${activeNav === 'shop-dashboard' ? 'active' : ''}`}
-            onClick={() => setAuxNav('shop-dashboard')}
-          >
-            <i className="fa-solid fa-store" /> <span>Shop</span>
-          </button>
-        )}
-        <NavLink
-          to={practiceWorkspaceHref('patients')}
-          className={({ isActive }) =>
-            `sidebar-item${isActive || activeNav === 'patient-detail' ? ' active' : ''}`
-          }
-        >
-          <i className="fa-solid fa-user-group"></i> <span>Patients</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('prescription')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-prescription"></i> <span>New Prescription</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('prescriptions')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-file-waveform"></i> <span>All Prescriptions</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('appointments')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-calendar-check"></i> <span>Appointments</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('billing')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-credit-card"></i> <span>Billing</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('reports')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-chart-column"></i> <span>Reports</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('lab')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-flask-vial"></i> <span>Lab Orders</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('drugs')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-capsules"></i> <span>Drug Database</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('sms')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-message"></i> <span>SMS & Messages</span>
-        </NavLink>
-        <NavLink
-          to={practiceWorkspaceHref('workspace-settings')}
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <i className="fa-solid fa-gear"></i> <span>Settings</span>
-        </NavLink>
-        {(userRole === 'CLINIC_ADMIN' || userRole === 'SUPER_ADMIN') && (
-          <button
-            type="button"
-            className={`sidebar-item ${activeNav === 'clinic-admin' ? 'active' : ''}`}
-            onClick={() => setAuxNav('clinic-admin')}
-            style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4 }}
-          >
-            <i className="fa-solid fa-user-shield"></i> <span>Clinic admin</span>
-          </button>
-        )}
-        {userRole === 'SUPER_ADMIN' && (
-          <button className={`sidebar-item ${activeNav === 'super-admin' ? 'active' : ''}`} onClick={() => setAuxNav('super-admin')} style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4 }}>
-            <i className="fa-solid fa-shield-halved"></i> <span>Super Admin</span>
-          </button>
-        )}
-      </nav>
-      <div className="sidebar-footer">
-        <button className="sidebar-logout" onClick={onLogout}>
-          <i className="fa-solid fa-arrow-right-from-bracket"></i> <span>Logout</span>
-        </button>
-      </div>
-    </aside>
-  );
+  const renderSidebar = () => {
+    if (practiceSidebarVariant === 'starter') {
+      return (
+        <StarterPracticeSidebar
+          userName={userName}
+          userRole={userRole}
+          activeNav={activeNav}
+          siteLogo={siteLogo}
+          onLogout={onLogout}
+        />
+      );
+    }
+    return (
+      <ClinicPracticeSidebar
+        userName={userName}
+        userRole={userRole}
+        activeNav={activeNav}
+        siteLogo={siteLogo}
+        onLogout={onLogout}
+        setAuxNav={setAuxNav}
+      />
+    );
+  };
 
   const renderPatients = () => {
     const listEmpty = patientsSortedForList.length === 0;
@@ -3448,6 +3374,8 @@ export const PracticeWorkspaceController: React.FC<Props> = ({
     switch (activeNav) {
       case 'dashboard':
         return overviewEl;
+      case 'clinic-calendar':
+        return <OperationsCalendarPage />;
       case 'practice-reports':
         return <PracticeReportsPanel />;
       case 'shop-dashboard': return <ShopUserDashboardPage />;
@@ -3515,6 +3443,7 @@ export const PracticeWorkspaceController: React.FC<Props> = ({
           </div>
         )}
         {renderContent()}
+        <Outlet />
       </main>
       {showNotice && (
         <div className="toast-notification">

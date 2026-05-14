@@ -302,7 +302,9 @@ export const PracticeOverviewPage: React.FC<PracticeOverviewPageProps> = ({
                     <strong>{apt.patientName}</strong>
                     <span>{apt.type}</span>
                   </div>
-                  <span className={`apt-status status-${apt.status.toLowerCase()}`}>{apt.status}</span>
+                    <span className={`apt-status status-${String(apt.status ?? '')
+                      .toLowerCase()
+                      .replace(/\s+/g, '-')}`}>{apt.status}</span>
                 </div>
               ))}
             </div>
@@ -363,7 +365,9 @@ export const PracticeOverviewPage: React.FC<PracticeOverviewPageProps> = ({
                   <div key={l.id} className="lab-item-mini">
                     <span className="lab-type">{l.workType}</span>
                     <span style={{ color: 'var(--neo-text-secondary)' }}>{l.patientName}</span>
-                    <span className={`lab-status status-${l.status.toLowerCase()}`}>{l.status}</span>
+                    <span className={`lab-status status-${String(l.status ?? '')
+                      .toLowerCase()
+                      .replace(/\s+/g, '-')}`}>{l.status}</span>
                   </div>
                 ))}
             </div>

@@ -5,7 +5,8 @@ const DEFAULT_DEBOUNCE_MS = 175;
 
 export type UseSafeHealthProbeOptions = {
   enabled: boolean;
-  pathname: string;
+  /** @deprecated No longer used for scheduling — probes run on `enabled` / `refetch` only to avoid /api/health spam on every route change. */
+  pathname?: string;
   debounceMs?: number;
   /**
    * When true, waits until after the first client `requestAnimationFrame` before `enabled`
@@ -32,7 +33,6 @@ function isAbortError(e: unknown): boolean {
 export function useSafeHealthProbe(options: UseSafeHealthProbeOptions): UseSafeHealthProbeReturn {
   const {
     enabled,
-    pathname,
     debounceMs = DEFAULT_DEBOUNCE_MS,
     deferUntilPaint = false,
   } = options;
@@ -116,7 +116,8 @@ export function useSafeHealthProbe(options: UseSafeHealthProbeOptions): UseSafeH
       abortActiveProbe();
       setIsLoading(false);
     };
-  }, [abortActiveProbe, debounceMs, pathname, probeEnabled, refetchNonce]);
+    /** Intentionally omit `pathname`: re-probing on every client navigation caused redundant /api/health traffic and main-thread work. */
+  }, [abortActiveProbe, debounceMs, probeEnabled, refetchNonce]);
 
   const refetch = useCallback(() => {
     setRefetchNonce((n) => n + 1);

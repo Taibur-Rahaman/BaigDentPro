@@ -7,6 +7,7 @@ export interface PracticeWorkspaceShellProps {
   userRole?: string;
   userClinicId?: string;
   currentUserId?: string;
+  practiceSidebarVariant?: 'starter' | 'clinic';
 }
 
 /**

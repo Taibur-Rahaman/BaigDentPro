@@ -26,7 +26,7 @@ export function mapPatientToViewModel(p: PracticePatientSummary): PatientViewMod
   return {
     id: p.id,
     regNo: p.regNo,
-    name: p.name,
+    name: typeof p.name === 'string' && p.name.trim() ? p.name : 'Unknown',
     age: p.age,
     gender: p.gender,
     phone: p.phone,
@@ -71,6 +71,8 @@ export function mapPrescriptionDrugToViewModel(d: PracticePrescriptionDrugRow): 
 }
 
 export function mapPrescriptionToViewModel(rx: PracticePrescriptionListItem): PrescriptionViewModel {
+  const patient = rx.patient ?? { id: '', name: '', phone: '' };
+  const drugRows = Array.isArray(rx.drugs) ? rx.drugs : [];
   return {
     id: rx.id,
     patientId: rx.patientId,
@@ -78,12 +80,12 @@ export function mapPrescriptionToViewModel(rx: PracticePrescriptionListItem): Pr
     date: rx.date,
     diagnosis: rx.diagnosis,
     patient: {
-      id: rx.patient.id,
-      name: rx.patient.name,
-      phone: rx.patient.phone,
-      regNo: rx.patient.regNo,
+      id: typeof patient.id === 'string' ? patient.id : '',
+      name: typeof patient.name === 'string' ? patient.name : 'Unknown',
+      phone: typeof patient.phone === 'string' ? patient.phone : '',
+      regNo: typeof patient.regNo === 'string' ? patient.regNo : undefined,
     },
-    drugs: rx.drugs.map(mapPrescriptionDrugToViewModel),
+    drugs: drugRows.map(mapPrescriptionDrugToViewModel),
   };
 }
 

@@ -11,6 +11,7 @@ export type PracticeNavSection =
   | 'prescriptions-list'
   | 'appointments'
   | 'billing'
+  | 'clinic-calendar'
   | 'lab'
   | 'drugs'
   | 'sms'
@@ -27,6 +28,7 @@ export const PRACTICE_PATH_TO_NAV: Record<string, PracticeNavSection> = {
   prescriptions: 'prescriptions-list',
   appointments: 'appointments',
   billing: 'billing',
+  'workspace-calendar': 'clinic-calendar',
   lab: 'lab',
   drugs: 'drugs',
   sms: 'sms',
@@ -41,6 +43,7 @@ export const NAV_TO_PRACTICE_PATH: Partial<Record<PracticeNavSection, string>> =
   'prescriptions-list': 'prescriptions',
   appointments: 'appointments',
   billing: 'billing',
+  'clinic-calendar': 'workspace-calendar',
   lab: 'lab',
   drugs: 'drugs',
   sms: 'sms',

@@ -1,3 +1,4 @@
+import { isApiHttpError } from '@/lib/apiErrors';
 import { isFeatureDisabledError } from '@/lib/apiErrorClassifier';
 
 const isDev =
@@ -5,10 +6,14 @@ const isDev =
   (typeof process !== 'undefined' && process.env.NODE_ENV === 'development');
 
 /**
- * Runs a feature-gated request. Subscription feature denials ({@link isFeatureDisabledError})
- * resolve to `fallback` so dashboards do not hard-fail; RBAC and other errors rethrow.
+ * Runs a feature-gated request.
  *
- * @param optionalModule - when set, dev logs a clear message when the call degrades to fallback.
+ * When `optionalModule` is set (dashboard **invoices** / **lab** list lanes only), **any** failure
+ * resolves to `fallback` so one broken transport, RBAC denial, or parse error cannot reject the
+ * practice bundle loader (which would blank the whole workspace / trip higher-level error UX).
+ *
+ * Callers that need strict semantics must omit `optionalModule` (then only {@link isFeatureDisabledError}
+ * soft-fails; everything else rethrows).
  */
 export async function safeFeatureCall<T>(
   request: () => Promise<T>,
@@ -21,6 +26,13 @@ export async function safeFeatureCall<T>(
     if (isFeatureDisabledError(e)) {
       if (isDev && optionalModule) {
         console.warn(`[DASHBOARD] Optional module failed safely: ${optionalModule} (feature gated)`, e);
+      }
+      return fallback;
+    }
+    if (optionalModule) {
+      if (isDev) {
+        const hint = isApiHttpError(e) ? `HTTP ${e.status}` : 'non-HTTP';
+        console.warn(`[DASHBOARD] Optional "${optionalModule}" degraded to empty (${hint})`, e);
       }
       return fallback;
     }
