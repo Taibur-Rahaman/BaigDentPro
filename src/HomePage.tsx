@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import api from './api';
 import { useSiteLogo } from '@/hooks/useSiteLogo';
 import '@/components/landing/landing-page.css';
@@ -87,7 +87,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick, onPortalClick,
   const [searchQuery, setSearchQuery] = useState('');
   const [showCart, setShowCart] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [shopActivated, setShopActivated] = useState(false);
+  const shopSectionRef = useRef<HTMLElement | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [checkoutData, setCheckoutData] = useState({
     customerName: '',
     customerPhone: '',
@@ -121,11 +124,36 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick, onPortalClick,
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery), 400);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const el = shopSectionRef.current;
+    if (!el || shopActivated) return undefined;
+    if (typeof IntersectionObserver === 'undefined') {
+      setShopActivated(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShopActivated(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px 0px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shopActivated]);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [productsRes, categoriesRes, cartRes] = await Promise.all([
-        api.shop.products({ category: selectedCategory || undefined, search: searchQuery || undefined }),
+        api.shop.products({ category: selectedCategory || undefined, search: debouncedSearch || undefined }),
         api.shop.categories(),
         api.shop.cart(),
       ]);
@@ -220,11 +248,12 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick, onPortalClick,
     } finally {
       setLoading(false);
     }
-  }, [selectedCategory, searchQuery]);
+  }, [selectedCategory, debouncedSearch]);
 
   useEffect(() => {
+    if (!shopActivated) return;
     void loadData();
-  }, [loadData]);
+  }, [loadData, shopActivated]);
 
   const addToCart = async (product: ProductCard) => {
     try {
@@ -356,7 +385,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick, onPortalClick,
         siteLogo={siteLogo}
         cartItemCount={cart.items.length}
         scrolled={scrolled}
-        onCartClick={() => setShowCart(true)}
+        onCartClick={() => {
+          setShopActivated(true);
+          setShowCart(true);
+        }}
         onRequestTrialWhatsApp={requestTrialWhatsApp}
         onLoginClick={onLoginClick}
         onPortalClick={onPortalClick}
@@ -378,9 +410,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onLoginClick, onPortalClick,
         </Suspense>
         <PlatformSection onRequestTrialWhatsApp={requestTrialWhatsApp} />
         <ProductShop
+          ref={shopSectionRef}
           categories={categories}
           products={products}
-          loading={loading}
+          loading={shopActivated && loading}
           selectedCategory={selectedCategory}
           searchQuery={searchQuery}
           onSelectCategory={setSelectedCategory}

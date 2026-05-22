@@ -13,18 +13,22 @@ export interface ProductShopProps {
   getCategoryIcon: (category: string) => string;
 }
 
-export const ProductShop: React.FC<ProductShopProps> = ({
-  categories,
-  products,
-  loading,
-  selectedCategory,
-  searchQuery,
-  onSelectCategory,
-  onSearchChange,
-  onAddToCart,
-  getCategoryIcon,
-}) => (
-  <section id="shop" className="bdp-section bdp-shop">
+export const ProductShop = React.forwardRef<HTMLElement, ProductShopProps>(function ProductShop(
+  {
+    categories,
+    products,
+    loading,
+    selectedCategory,
+    searchQuery,
+    onSelectCategory,
+    onSearchChange,
+    onAddToCart,
+    getCategoryIcon,
+  },
+  ref,
+) {
+  return (
+  <section id="shop" ref={ref} className="bdp-section bdp-shop">
     <div className="bdp-section__inner">
       <header className="bdp-section__header">
         <div className="bdp-eyebrow">
@@ -129,4 +133,5 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       </div>
     </div>
   </section>
-);
+  );
+});

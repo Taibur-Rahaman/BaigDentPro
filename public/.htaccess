@@ -21,10 +21,13 @@
 # Optional: block directory listing
 Options -Indexes
 
-# Prefer fresh HTML shell after deploy; hashed assets stay long-cache via immutable filenames.
+# Prefer fresh HTML shell after deploy; hashed /assets bundles are safe to cache long-term.
 <IfModule mod_headers.c>
   <FilesMatch "\.(html)$">
-    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+  <FilesMatch "^assets/.*\.(js|css|woff2?)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
   </FilesMatch>
   # Never cache logo so branding updates appear immediately.
   <Files "logo.png">

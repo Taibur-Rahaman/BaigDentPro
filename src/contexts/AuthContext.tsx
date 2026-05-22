@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- context module exports types + provider */
 import type { Session, User } from '@supabase/supabase-js';
-import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { createContext, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api from '@/api';
 import { useToastBridge } from '@/components/ToastBridgeProvider';
 import { getSupabase, isSupabaseAuthConfigured } from '@/lib/supabaseClient';
@@ -9,6 +9,10 @@ import { getSpaOrigin } from '@/lib/spaOrigin';
 import type { AppUser } from '@/types/appUser';
 import { setErrorHandlerUserContext } from '@/lib/errorHandler';
 import { IDLE_SESSION_WALL_MS, setIdleLogoutMarker } from '@/lib/idleSessionLogout';
+import {
+  isPublicCredentialRoute,
+  isPublicMarketingRoute,
+} from '@/lib/publicRoutes';
 
 export type { AppUser } from '@/types/appUser';
 export type { TenantSummary } from '@/types/tenant';
@@ -23,7 +27,7 @@ export type AuthContextValue = {
   currentUser: User | null;
   isAuthenticated: boolean;
   isSupabaseConfigured: boolean;
-  login: (email: string, password: string) => Promise<AppUser>;
+  login: (email: string, password: string, options?: { signal?: AbortSignal }) => Promise<AppUser>;
   signup: (email: string, password: string) => Promise<{ needsEmailConfirmation: boolean; message?: string }>;
   registerSaasTenant: (input: { email: string; password: string; name?: string }) => Promise<void>;
   logout: () => Promise<void>;
@@ -33,8 +37,26 @@ export type AuthContextValue = {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 8000;
+const MARKETING_AUTH_ME_TIMEOUT_MS = 3500;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return (await Promise.race([promise, timeoutPromise])) as T;
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { showSuccess } = useToastBridge();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
@@ -60,11 +82,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const idleSignoutInProgress = useRef(false);
+  const bootstrapGenRef = useRef(0);
 
   const restoreSession = useCallback(async () => {
+    if (typeof window !== 'undefined' && isPublicCredentialRoute(window.location.pathname)) {
+      api.session.clearForCredentialLogin();
+      setSession(null);
+      setUser(null);
+      setTokenState(null);
+      return;
+    }
+
     const sb = getSupabase();
     if (sb) {
-      const { data } = await sb.auth.getSession();
+      const { data } = await withTimeout(sb.auth.getSession(), AUTH_BOOTSTRAP_TIMEOUT_MS, 'supabase.getSession');
       setSession(data.session ?? null);
     } else {
       setSession(null);
@@ -78,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const me = await api.auth.me();
+      const me = await withTimeout(api.auth.me(), AUTH_BOOTSTRAP_TIMEOUT_MS, 'auth.me');
       if (me) {
         setUser(me);
         api.session.setUserSnapshotJson(JSON.stringify(me));
@@ -93,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshSession = useCallback(async () => {
     const sb = getSupabase();
     if (sb) {
-      const { data } = await sb.auth.getSession();
+      const { data } = await withTimeout(sb.auth.getSession(), AUTH_BOOTSTRAP_TIMEOUT_MS, 'supabase.getSession');
       setSession(data.session ?? null);
     } else {
       setSession(null);
@@ -102,7 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const hadToken = Boolean(api.session.getAccessToken());
     if (hadToken) {
       try {
-        const me = await api.auth.me();
+        const me = await withTimeout(api.auth.me(), AUTH_BOOTSTRAP_TIMEOUT_MS, 'auth.me');
         if (me) {
           setUser(me);
           api.session.setUserSnapshotJson(JSON.stringify(me));
@@ -118,15 +149,86 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [clearApiSession, syncTokenFromStorage]);
 
   useEffect(() => {
+    if (isPublicCredentialRoute(location.pathname)) {
+      setLoading(false);
+    }
+  }, [location.pathname]);
+
+  /** Initial session restore once — route changes must not flip `loading` back on (loader dead-state). */
+  useEffect(() => {
+    const gen = ++bootstrapGenRef.current;
     let cancelled = false;
+    const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
+    const marketing = isPublicMarketingRoute(pathname);
+    const hasToken = Boolean(api.session.getAccessToken());
+
+    if (marketing && !hasToken) {
+      setSession(null);
+      setUser(null);
+      setTokenState(null);
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (marketing && hasToken) {
+      setLoading(false);
+      void (async () => {
+        try {
+          await withTimeout(restoreSession(), MARKETING_AUTH_ME_TIMEOUT_MS, 'auth bootstrap (marketing)');
+        } catch (error) {
+          console.error('[auth] marketing bootstrap failed', error);
+          if (!cancelled && gen === bootstrapGenRef.current) {
+            setSession(null);
+            clearApiSession(false);
+          }
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     void (async () => {
-      await restoreSession();
-      if (!cancelled) setLoading(false);
+      try {
+        await withTimeout(restoreSession(), AUTH_BOOTSTRAP_TIMEOUT_MS + 1000, 'auth bootstrap');
+      } catch (error) {
+        console.error('[auth] bootstrap failed', error);
+        if (!cancelled && gen === bootstrapGenRef.current) {
+          setSession(null);
+          clearApiSession(false);
+        }
+      } finally {
+        if (!cancelled && gen === bootstrapGenRef.current) setLoading(false);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [restoreSession]);
+  }, [clearApiSession, restoreSession]);
+
+  /** Silent revalidate on navigation (debounced — avoids stacked auth.me + state churn freezing the tab). */
+  useEffect(() => {
+    if (loading) return undefined;
+    if (isPublicCredentialRoute(location.pathname)) return undefined;
+    if (isPublicMarketingRoute(location.pathname)) return undefined;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await restoreSession();
+        } catch {
+          /* ignore — initial bootstrap already surfaced failures */
+        }
+        if (cancelled) return;
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [loading, location.pathname, restoreSession]);
 
   useEffect(() => {
     const onExpired = () => {
@@ -234,18 +336,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * Pages must handle failures only with `loginErrorMessageForUser` from `@/lib/apiErrors` — never branch on status or message strings in UI for this flow.
    */
   const login = useCallback(
-    async (email: string, password: string): Promise<AppUser> => {
-      const result = await api.auth.login(email.trim(), password);
-      setUser(result.user);
+    async (email: string, password: string, options?: { signal?: AbortSignal }): Promise<AppUser> => {
+      bootstrapGenRef.current += 1;
+      setLoading(false);
+
+      const result = await api.auth.login(email.trim(), password, options);
+
+      startTransition(() => {
+        setUser(result.user);
+        setSession(null);
+      });
       api.session.setUserSnapshotJson(JSON.stringify(result.user));
-      setSession(null);
-      try {
-        await getSupabase()?.auth.signOut();
-      } catch {
-        /* ignore */
-      }
       syncTokenFromStorage();
-      showSuccess('Signed in successfully.');
+
+      void (async () => {
+        const sb = getSupabase();
+        if (!sb) return;
+        try {
+          await Promise.race([
+            sb.auth.signOut(),
+            new Promise<void>((resolve) => {
+              window.setTimeout(resolve, 1500);
+            }),
+          ]);
+        } catch {
+          /* ignore */
+        }
+      })();
+
+      window.setTimeout(() => showSuccess('Signed in successfully.'), 0);
       return result.user;
     },
     [showSuccess, syncTokenFromStorage]
