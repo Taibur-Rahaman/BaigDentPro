@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import api from '@/api';
+import { AUTH_LOGIN_TIMEOUT_MS } from '@/config/api';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLoginLocationState } from '@/hooks/useLoginLocationState';
 import { useAuth } from '@/hooks/useAuth';
@@ -6,6 +8,7 @@ import { loginErrorMessageForUser } from '@/lib/apiErrors';
 import { resolveLoginDestination } from '@/lib/postAuthDashboardPath';
 import { IdleSessionReturnedModal } from '@/components/IdleSessionReturnedModal';
 import { consumeIdleLogoutMarker } from '@/lib/idleSessionLogout';
+import { fetchApiHealthSnapshot, loginBlockedMessage } from '@/lib/apiHealthPreflight';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -16,6 +19,13 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showIdleReturnModal, setShowIdleReturnModal] = useState(false);
+  const [apiHealthBlocked, setApiHealthBlocked] = useState<string | null>(null);
+  const loginAbortRef = useRef<AbortController | null>(null);
+  const LOGIN_UI_MAX_MS = AUTH_LOGIN_TIMEOUT_MS + 3_000;
+
+  useEffect(() => {
+    api.session.clearForCredentialLogin();
+  }, []);
 
   useEffect(() => {
     if (consumeIdleLogoutMarker()) {
@@ -24,22 +34,60 @@ export const LoginPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!loading && isAuthenticated) {
+    if (!loading && isAuthenticated && api.session.getAccessToken()) {
       navigate(resolveLoginDestination(user, from), { replace: true });
     }
   }, [loading, isAuthenticated, navigate, from, user]);
 
+  useEffect(() => {
+    return () => {
+      loginAbortRef.current?.abort();
+    };
+  }, []);
+
+  /** Hard cap — never leave “Signing in…” forever (even if an old bundle lacks fetch timeout). */
+  useEffect(() => {
+    if (!submitting) return undefined;
+    const id = window.setTimeout(() => {
+      loginAbortRef.current?.abort();
+      setSubmitting(false);
+      setError('Sign-in took too long. Refresh the page, then try again.');
+    }, LOGIN_UI_MAX_MS);
+    return () => window.clearTimeout(id);
+  }, [submitting]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
+
+    loginAbortRef.current?.abort();
+    const controller = new AbortController();
+    loginAbortRef.current = controller;
+
+    if (apiHealthBlocked) {
+      setError(apiHealthBlocked);
+      return;
+    }
+
     setError('');
     setSubmitting(true);
     try {
-      const signedIn = await login(email, password);
+      const signedIn = await login(email, password, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+      });
       navigate(resolveLoginDestination(signedIn, from), { replace: true });
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       setError(loginErrorMessageForUser(err));
     } finally {
-      setSubmitting(false);
+      if (loginAbortRef.current === controller) {
+        loginAbortRef.current = null;
+      }
+      if (!controller.signal.aborted) {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -70,6 +118,12 @@ export const LoginPage: React.FC = () => {
             <h2>Staff sign in</h2>
             <p>Enter the email and password for your BaigDentPro account.</p>
           </div>
+          {apiHealthBlocked && !error ? (
+            <div className="neo-auth-error" role="alert">
+              <i className="fa-solid fa-circle-exclamation" />
+              <span>{apiHealthBlocked}</span>
+            </div>
+          ) : null}
           {error ? (
             <div className="neo-auth-error" role="alert">
               <i className="fa-solid fa-circle-exclamation" />
@@ -87,6 +141,7 @@ export const LoginPage: React.FC = () => {
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  disabled={submitting}
                   required
                 />
               </div>
@@ -101,11 +156,17 @@ export const LoginPage: React.FC = () => {
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  disabled={submitting}
                   required
                 />
               </div>
             </div>
-            <button type="submit" className="neo-btn neo-btn-primary neo-btn-block neo-btn-lg" disabled={submitting || loading}>
+            <button
+              type="submit"
+              className="neo-btn neo-btn-primary neo-btn-block neo-btn-lg"
+              disabled={submitting || Boolean(apiHealthBlocked)}
+              aria-busy={submitting}
+            >
               {submitting ? (
                 <>
                   <i className="fa-solid fa-spinner fa-spin" aria-hidden />
@@ -118,6 +179,11 @@ export const LoginPage: React.FC = () => {
                 </>
               )}
             </button>
+            {submitting ? (
+              <p className="neo-auth-hint" style={{ marginTop: 10, fontSize: 13, color: 'var(--neo-text-muted)' }}>
+                This usually takes a few seconds. The form will reset automatically if the server is slow.
+              </p>
+            ) : null}
             <div className="neo-auth-subfooter">
               <p className="neo-auth-switch" style={{ marginTop: 0 }}>
                 Need an account? <Link to="/signup">Create an account</Link>

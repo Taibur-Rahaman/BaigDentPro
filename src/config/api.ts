@@ -27,6 +27,9 @@ export const AUTH_LOGIN_URL = `${API_BASE}/auth/login`;
 
 export const API_TIMEOUT_MS = 10_000;
 
+/** Staff login — bounded so Chrome does not show “Page Unresponsive”. */
+export const AUTH_LOGIN_TIMEOUT_MS = 10_000;
+
 const HTML_API_ERROR =
   'API returned HTML instead of JSON. Likely wrong API URL or frontend routing issue.';
 

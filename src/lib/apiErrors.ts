@@ -135,6 +135,9 @@ function classifyLoginError(e: unknown): {
  */
 /** Sole UX mapping for JWT email/password login — call sites must not re-map or overlay messages. */
 export function loginErrorMessageForUser(e: unknown): string {
+  if (e instanceof Error && (e.name === 'AbortError' || /aborted|timeout/i.test(e.message))) {
+    return 'Sign-in took too long. Wait a moment and try again.';
+  }
   const networkLike =
     e instanceof Error && /Load failed|NetworkError|ERR_NETWORK|fetch failed|network request/i.test(e.message);
   if (networkLike) {
@@ -142,7 +145,16 @@ export function loginErrorMessageForUser(e: unknown): string {
   }
   if (isApiHttpError(e)) {
     const parsed = parseApiErrorBody(e.rawBody);
-    if (parsed) return parsed;
+    if (parsed) {
+      const lower = parsed.toLowerCase();
+      if (lower.includes('database not connected')) {
+        return 'Sign-in is unavailable because the server database is down. Wait a minute and try again.';
+      }
+      if (lower.includes('database is busy')) {
+        return 'Sign-in is temporarily busy. Wait a few seconds and try again.';
+      }
+      return parsed;
+    }
     if (e.message?.trim()) return e.message.trim();
   }
   if (e instanceof Error && e.message?.trim()) {

@@ -1,6 +1,8 @@
-import { AUTH_LOGIN_URL } from '@/config/api';
+import { AUTH_LOGIN_URL, AUTH_LOGIN_TIMEOUT_MS } from '@/config/api';
+import { fetchApiHealthSnapshot } from '@/lib/apiHealthPreflight';
 import {
   ApiHttpError,
+  isApiHttpError,
   LoginEmptySuccessBodyError,
   LoginExpectedJsonBodyError,
 } from '@/lib/apiErrors';
@@ -13,6 +15,7 @@ import {
 } from '@/lib/core/coreHttpClient';
 import { parseCoreMessageAck, type CoreMessageAck } from '@/lib/core/coreMessageAck';
 import {
+  clearAuthForCredentialLogin,
   clearCoreApiSession,
   getRefreshToken,
   persistAuthTokensFromResponse,
@@ -73,7 +76,15 @@ function finalizeLoginPack(
       throw new ApiHttpError('Invalid credentials', status, rawText);
     }
     if (status >= 500) {
-      throw new ApiHttpError('Server error', status, rawText);
+      const parsed = typeof rawText === 'string' ? rawText : '';
+      let msg = 'Server error';
+      try {
+        const j = JSON.parse(parsed) as { error?: string };
+        if (typeof j.error === 'string' && j.error.trim()) msg = j.error.trim();
+      } catch {
+        /* ignore */
+      }
+      throw new ApiHttpError(msg, status, rawText);
     }
     throw new ApiHttpError('Invalid credentials', status, rawText);
   }
@@ -94,34 +105,111 @@ function finalizeLoginPack(
   return data as { user: unknown; token: string; refreshToken?: string; tenant?: unknown };
 }
 
+function isLoginRetryable503(err: unknown): boolean {
+  if (!isApiHttpError(err) || err.status !== 503) return false;
+  const body = (err.rawBody || err.message || '').toLowerCase();
+  return body.includes('database') || body.includes('db_busy') || body.includes('busy');
+}
+
+function isLoginRetryable(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === 'AbortError') return false;
+  if (err instanceof Error && /aborted|timeout/i.test(err.message)) return false;
+  if (isLoginRetryable503(err)) return true;
+  return err instanceof TypeError;
+}
+
+let loginInFlight: Promise<{ user: AppUser; token: string; refreshToken?: string; tenant?: unknown }> | null =
+  null;
+
+function loginTransportSignal(userSignal?: AbortSignal): AbortSignal | undefined {
+  if (typeof window === 'undefined') return userSignal;
+  const timeoutController = new AbortController();
+  const timeoutId = window.setTimeout(() => timeoutController.abort(), AUTH_LOGIN_TIMEOUT_MS);
+  if (!userSignal) {
+    return timeoutController.signal;
+  }
+  userSignal.addEventListener('abort', () => {
+    window.clearTimeout(timeoutId);
+    timeoutController.abort();
+  }, { once: true });
+  if (typeof AbortSignal !== 'undefined' && 'any' in AbortSignal && typeof AbortSignal.any === 'function') {
+    return AbortSignal.any([userSignal, timeoutController.signal]);
+  }
+  return timeoutController.signal;
+}
+
+async function coreApiLoginAttempt(
+  email: string,
+  password: string,
+  options: { signal?: AbortSignal },
+): Promise<{ user: AppUser; token: string; refreshToken?: string; tenant?: unknown }> {
+  clearAuthForCredentialLogin();
+
+  const health = await fetchApiHealthSnapshot(options.signal);
+  if (!health.ok) {
+    const msg =
+      health.database === 'error' || health.status === 'degraded'
+        ? 'Database not connected'
+        : 'API unreachable';
+    throw new ApiHttpError(msg, 503, '');
+  }
+
+  const maxAttempts = 2;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const pack = await executeCanonicalJsonTransport(AUTH_LOGIN_URL, {
+        method: 'POST',
+        headers: await buildAuthHeaders({}, { omitAuth: true }),
+        body: JSON.stringify({ email, password }),
+        signal: loginTransportSignal(options.signal),
+      });
+
+      if (DEBUG_API) {
+        console.log('[LOGIN]', AUTH_LOGIN_URL, attempt > 0 ? `(retry ${attempt + 1})` : '');
+      }
+
+      const finalized = finalizeLoginPack(pack);
+      persistAuthTokensFromResponse(finalized);
+      const user = buildAppUserFromAuthPayload(finalized.user, finalized.tenant);
+      if (!user) {
+        throw new LoginEmptySuccessBodyError();
+      }
+      return { ...finalized, user };
+    } catch (err) {
+      if (attempt < maxAttempts - 1 && isLoginRetryable(err)) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+      if (
+        isApiHttpError(err) ||
+        err instanceof LoginEmptySuccessBodyError ||
+        err instanceof LoginExpectedJsonBodyError
+      ) {
+        throw err;
+      }
+      rethrowSafeFetchFailure(err);
+    }
+  }
+  throw new ApiHttpError('Sign-in failed', 503, '');
+}
+
 export async function coreApiLogin(
   email: string,
-  password: string
+  password: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ user: AppUser; token: string; refreshToken?: string; tenant?: unknown }> {
-  let pack: JsonTransportResult<
-    { user: unknown; token: string; refreshToken?: string; tenant?: unknown } | { error?: string }
-  >;
+  if (loginInFlight) {
+    return loginInFlight;
+  }
+  const run = coreApiLoginAttempt(email, password, options);
+  loginInFlight = run;
   try {
-    pack = await executeCanonicalJsonTransport(AUTH_LOGIN_URL, {
-      method: 'POST',
-      headers: await buildAuthHeaders(),
-      body: JSON.stringify({ email, password }),
-    });
-  } catch (err) {
-    rethrowSafeFetchFailure(err);
+    return await run;
+  } finally {
+    if (loginInFlight === run) {
+      loginInFlight = null;
+    }
   }
-
-  if (DEBUG_API) {
-    console.log('[LOGIN]', AUTH_LOGIN_URL);
-  }
-
-  const finalized = finalizeLoginPack(pack);
-  persistAuthTokensFromResponse(finalized);
-  const user = buildAppUserFromAuthPayload(finalized.user, finalized.tenant);
-  if (!user) {
-    throw new LoginEmptySuccessBodyError();
-  }
-  return { ...finalized, user };
 }
 
 export async function coreApiAuthMe(): Promise<AppUser | null> {

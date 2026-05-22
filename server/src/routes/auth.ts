@@ -38,16 +38,31 @@ import {
 import { sanitizeDegree, sanitizeSpecialization, sanitizeTitle } from '../utils/professionalIdentity.js';
 import { writeAuditLog } from '../services/auditLogService.js';
 import { recordFailedLoginFraud } from '../services/fraudAlertService.js';
+import { tryQueuedWrite } from '../queue/routeWrite.js';
+import { WRITE_OPS } from '../queue/operations.js';
 import { logActivity } from '../services/clinicActivityLogService.js';
 import {
+  deviceLimitFromSubscription,
   effectivePlanName,
   mergePlanFeatures,
   resolveDeviceLimit,
   type SubscriptionWithPlan,
 } from '../services/planCatalog.js';
-import { resolveProductFeaturesForClinic } from '../services/productFeatures.js';
-import { assertDeviceCapacityForLogin, computeLoginDeviceId, recordDeviceSession } from '../services/deviceSessionService.js';
+import { computeEffectiveCapabilities, jwtCapabilityPayload } from '../security/capabilityEngine.js';
 import { resolveJwtCapabilitiesForUser } from '../services/capabilityJwtPayload.js';
+import {
+  resolveProductFeaturesForClinic,
+  resolveProductFeaturesFromClinicRow,
+  type ProductFeatureKey,
+} from '../services/productFeatures.js';
+import { checkDatabaseHealth, isDatabaseHealthy, markDatabaseUnhealthy } from '../db/dbHealthMonitor.js';
+import { withTransientDbRetry } from '../utils/dbRetry.js';
+import { respondDatabaseInfraError, sendDatabaseUnavailable } from '../utils/dbUnavailable.js';
+import { assertDeviceCapacityForLogin, computeLoginDeviceId, recordDeviceSession } from '../services/deviceSessionService.js';
+import { OperationTimeoutError, withOperationTimeout } from '../utils/operationTimeout.js';
+import { resetPrismaEngine, initPrisma } from '../db/prisma.js';
+
+const LOGIN_DB_TIMEOUT_MS = 8_000;
 
 // Centralized in config.ts
 
@@ -113,29 +128,61 @@ async function subscriptionTenantPayload(clinicId: string | null): Promise<Subsc
   };
 }
 
-/** Single subscription/clinic fetch for login — avoids duplicate `$transaction`/`findUnique` work on the hot path. */
-async function loadLoginSubscriptionContext(clinicId: string | null): Promise<{
+/** Single subscription/clinic fetch for login — tenant, features, capabilities, device cap in one round trip. */
+async function loadLoginSubscriptionContext(
+  clinicId: string | null,
+  role: string,
+): Promise<{
   subscription: SubscriptionWithPlan | null;
   planSnapshot: string | undefined;
   tenant: SubscriptionTenantPayload | null;
+  productFeatures: Record<ProductFeatureKey, boolean>;
+  deviceLimit: number;
+  capabilities: string[];
 }> {
   if (!clinicId) {
-    return { subscription: null, planSnapshot: undefined, tenant: null };
+    const productFeatures = resolveProductFeaturesFromClinicRow(null);
+    return {
+      subscription: null,
+      planSnapshot: undefined,
+      tenant: null,
+      productFeatures,
+      deviceLimit: 100,
+      capabilities: role === 'SUPER_ADMIN' ? ['*'] : [],
+    };
   }
-  const [sub, clinic] = await Promise.all([
-    prisma.subscription.findUnique({
-      where: { clinicId },
-      include: { planRef: true },
-    }),
-    prisma.clinic.findUnique({ where: { id: clinicId }, select: { plan: true, planTier: true } }),
-  ]);
-  const row = sub as SubscriptionWithPlan | null;
+  const clinic = await prismaBase.clinic.findUnique({
+    where: { id: clinicId },
+    select: {
+      plan: true,
+      planTier: true,
+      subscription: { include: { planRef: true } },
+      featureFlagRows: { select: { featureKey: true, enabled: true } },
+      capabilityOverrides: { select: { capabilityKey: true, grant: true } },
+    },
+  });
+  const row = (clinic?.subscription ?? null) as SubscriptionWithPlan | null;
   const planSnapshot = effectivePlanName(row, clinic?.plan ?? 'FREE');
   const merged = mergePlanFeatures(row?.planRef?.features, row?.features);
-  const deviceLimit = await resolveDeviceLimit(row);
-  const productFeaturesObj = await resolveProductFeaturesForClinic(clinicId);
+  const deviceLimit = deviceLimitFromSubscription(row);
+  const productFeaturesMap = resolveProductFeaturesFromClinicRow(
+    clinic
+      ? {
+          planTier: clinic.planTier,
+          subscription: clinic.subscription
+            ? {
+                features: clinic.subscription.features,
+                planRef: clinic.subscription.planRef
+                  ? { features: clinic.subscription.planRef.features }
+                  : null,
+              }
+            : null,
+          featureFlagRows: clinic.featureFlagRows,
+        }
+      : null
+  );
   const productFeatures: Record<string, boolean> = {};
-  for (const [k, v] of Object.entries(productFeaturesObj)) {
+  for (const [k, v] of Object.entries(productFeaturesMap)) {
     productFeatures[k] = v;
   }
   const tenant: SubscriptionTenantPayload = {
@@ -151,7 +198,21 @@ async function loadLoginSubscriptionContext(clinicId: string | null): Promise<{
     planTier: clinic?.planTier ?? 'STARTER',
     productFeatures,
   };
-  return { subscription: row, planSnapshot, tenant };
+  const capabilities =
+    role === 'SUPER_ADMIN'
+      ? ['*']
+      : jwtCapabilityPayload(
+          role,
+          computeEffectiveCapabilities(role, productFeaturesMap, clinic?.capabilityOverrides ?? []),
+        );
+  return {
+    subscription: row,
+    planSnapshot,
+    tenant,
+    productFeatures: productFeaturesMap,
+    deviceLimit,
+    capabilities,
+  };
 }
 
 function parseBearerAccessToken(req: { headers: { authorization?: string }; body?: { accessToken?: string } }): string | null {
@@ -557,6 +618,15 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
       throw new Error('AUTH_SYSTEM_JWT_SECRET_MISSING');
     }
 
+    if (!isDatabaseHealthy()) {
+      await checkDatabaseHealth();
+      if (!isDatabaseHealthy()) {
+        console.warn('[auth] login rejected — database health not ok');
+        sendDatabaseUnavailable(res);
+        return;
+      }
+    }
+
     const body = req.body as LoginBody;
     const { email: rawEmail, password } = body;
     const email = normalizeAuthEmail(String(rawEmail));
@@ -567,7 +637,15 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const user = await findUserByEmailInsensitive(email);
+    const user = await withOperationTimeout(
+      () =>
+        withTransientDbRetry(() => findUserByEmailInsensitive(email), {
+          label: 'auth.login.findUser',
+          attempts: 2,
+        }),
+      LOGIN_DB_TIMEOUT_MS,
+      'auth.login.findUser',
+    );
     if (!user) {
       logFailedLoginAttempt(req, email);
       res.status(401).json({ error: 'Invalid credentials' });
@@ -622,64 +700,59 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
       }
     }
 
-    let subscription: SubscriptionWithPlan | null = null;
-    let tenantBundled: SubscriptionTenantPayload | null = null;
-    let planSnapshotBundled: string | undefined;
-    try {
-      const b = await loadLoginSubscriptionContext(user.clinicId);
-      subscription = b.subscription;
-      planSnapshotBundled = b.planSnapshot;
-      tenantBundled = b.tenant;
-    } catch (e) {
-      if (isPrismaSchemaDriftError(e)) {
-        console.warn('[auth] login subscription bundle fallback due to schema drift', e);
-      } else {
-        throw e;
-      }
-    }
     const skipDevice = user.role === 'SUPER_ADMIN';
     const deviceId = computeLoginDeviceId(req);
-    let gate: { ok: true } | { ok: false; message: string } = { ok: true };
+    let subscription: SubscriptionWithPlan | null = null;
+    let tenantBundled: SubscriptionTenantPayload | null = null;
+    let planSnapshot: string | undefined;
+    let capabilities: string[] = [];
+    let refreshToken: string | undefined;
+
     try {
-      gate = await assertDeviceCapacityForLogin({
-        clinicId: user.clinicId,
-        userId: user.id,
-        deviceId,
-        subscription,
-        skipLimit: skipDevice,
-      });
-    } catch (e) {
-      if (isPrismaSchemaDriftError(e)) {
-        console.warn('[auth] login device capacity fallback due to schema drift', e);
-      } else {
-        throw e;
+      const postAuth = await withOperationTimeout(
+        () =>
+          withTransientDbRetry(
+            async () => {
+              const b = await loadLoginSubscriptionContext(user.clinicId, user.role);
+              const gate = await assertDeviceCapacityForLogin({
+                clinicId: user.clinicId,
+                userId: user.id,
+                deviceId,
+                subscription: b.subscription,
+                skipLimit: skipDevice,
+                deviceLimit: b.deviceLimit,
+              });
+              if (!gate.ok) {
+                return { gate, bundle: b, refreshToken: undefined as string | undefined };
+              }
+              await recordDeviceSession(user.id, user.clinicId, deviceId);
+              const rt = await issueRefreshToken(user.id);
+              return { gate: { ok: true as const }, bundle: b, refreshToken: rt };
+            },
+            { label: 'auth.login.postAuth', attempts: 2 },
+          ),
+        LOGIN_DB_TIMEOUT_MS,
+        'auth.login.postAuth',
+      );
+
+      if (!postAuth.gate.ok) {
+        res.status(403).json({ error: postAuth.gate.message });
+        return;
       }
-    }
-    if (!gate.ok) {
-      res.status(403).json({ error: gate.message });
-      return;
-    }
-    try {
-      await recordDeviceSession(user.id, user.clinicId, deviceId);
+
+      subscription = postAuth.bundle.subscription;
+      tenantBundled = postAuth.bundle.tenant;
+      planSnapshot = postAuth.bundle.planSnapshot;
+      capabilities = postAuth.bundle.capabilities;
+      refreshToken = postAuth.refreshToken;
     } catch (e) {
       if (isPrismaSchemaDriftError(e)) {
-        console.warn('[auth] login recordDevice fallback due to schema drift', e);
+        console.warn('[auth] login post-auth fallback due to schema drift', e);
       } else {
         throw e;
       }
     }
 
-    let planSnapshot = planSnapshotBundled;
-    let capabilities: string[] = [];
-    try {
-      capabilities = await resolveJwtCapabilitiesForUser({ role: user.role, clinicId: user.clinicId });
-    } catch (e) {
-      if (isPrismaSchemaDriftError(e)) {
-        console.warn('[auth] login capabilities fallback due to schema drift', e);
-      } else {
-        throw e;
-      }
-    }
     if (!planSnapshot && subscription?.plan) {
       planSnapshot = subscription.plan;
     }
@@ -703,17 +776,6 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
       },
       { planSnapshot, capabilities },
     );
-
-    let refreshToken: string | undefined;
-    try {
-      refreshToken = await issueRefreshToken(user.id);
-    } catch (e) {
-      if (isPrismaSchemaDriftError(e)) {
-        console.warn('[auth] login refresh-token fallback due to schema drift', e);
-      } else {
-        throw e;
-      }
-    }
 
     void logActivity({
       userId: user.id,
@@ -771,6 +833,17 @@ async function handleLogin(req: Request, res: Response): Promise<void> {
     });
   } catch (err) {
     console.error('[AUTH_SYSTEM_ERROR]', err);
+    if (err instanceof OperationTimeoutError) {
+      markDatabaseUnhealthy();
+      void resetPrismaEngine()
+        .then(() => initPrisma())
+        .catch((e) => console.warn('[auth] prisma reset after login timeout failed', e));
+      sendDatabaseUnavailable(res);
+      return;
+    }
+    if (respondDatabaseInfraError(res, err)) {
+      return;
+    }
     const safeMsg = err instanceof Error ? err.message : String(err);
     if (process.env.DEBUG_AUTH_ERRORS === '1' && process.env.NODE_ENV !== 'production') {
       res.status(500).json({ error: safeMsg, code: 'AUTH_INTERNAL_ERROR' });
@@ -931,6 +1004,18 @@ router.post(
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
+
+    const fakeReq = { user: { id: user.id }, businessClinicId: user.clinicId } as AuthRequest;
+    if (
+      await tryQueuedWrite(fakeReq, res, 'auth.syncPrismaPassword', {
+        body: { passwordHash: hashedPassword },
+        userId: user.id,
+        clinicId: user.clinicId ?? 'platform',
+      })
+    ) {
+      return;
+    }
+
     await prisma.user.update({
       where: { id: user.id },
       data: { password: hashedPassword, sessionVersion: { increment: 1 } },
@@ -1045,22 +1130,28 @@ router.put(
       return;
     }
 
+    const _userData = {
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.phone !== undefined ? { phone: body.phone } : {}),
+      ...(body.clinicName !== undefined ? { clinicName: body.clinicName } : {}),
+      ...(body.clinicAddress !== undefined ? { clinicAddress: body.clinicAddress } : {}),
+      ...(body.clinicPhone !== undefined ? { clinicPhone: body.clinicPhone } : {}),
+      ...(body.clinicEmail !== undefined
+        ? { clinicEmail: body.clinicEmail === '' ? null : body.clinicEmail }
+        : {}),
+      ...(body.title !== undefined ? { title: sanitizeTitle(body.title) } : {}),
+      ...(body.degree !== undefined ? { degree: sanitizeDegree(body.degree) } : {}),
+      ...(body.specialization !== undefined ? { specialization: sanitizeSpecialization(body.specialization) } : {}),
+      ...(body.licenseNo !== undefined ? { licenseNo: body.licenseNo } : {}),
+    };
+
+    if (await tryQueuedWrite(req, res, WRITE_OPS.auth.profileUpdate, { body: { _userData } })) {
+      return;
+    }
+
     const user = await prisma.user.update({
       where: { id: req.user!.id },
-      data: {
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.phone !== undefined ? { phone: body.phone } : {}),
-        ...(body.clinicName !== undefined ? { clinicName: body.clinicName } : {}),
-        ...(body.clinicAddress !== undefined ? { clinicAddress: body.clinicAddress } : {}),
-        ...(body.clinicPhone !== undefined ? { clinicPhone: body.clinicPhone } : {}),
-        ...(body.clinicEmail !== undefined
-          ? { clinicEmail: body.clinicEmail === '' ? null : body.clinicEmail }
-          : {}),
-        ...(body.title !== undefined ? { title: sanitizeTitle(body.title) } : {}),
-        ...(body.degree !== undefined ? { degree: sanitizeDegree(body.degree) } : {}),
-        ...(body.specialization !== undefined ? { specialization: sanitizeSpecialization(body.specialization) } : {}),
-        ...(body.licenseNo !== undefined ? { licenseNo: body.licenseNo } : {}),
-      },
+      data: _userData,
       select: {
         id: true,
         email: true,
@@ -1104,6 +1195,17 @@ router.put(
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    if (await tryQueuedWrite(req, res, WRITE_OPS.auth.passwordUpdate, { body: { passwordHash: hashedPassword } })) {
+      void syncSupabasePasswordForEmail(user.email, newPassword).then((r) => {
+        if (!r.synced && r.note && r.note !== 'supabase_not_configured') {
+          console.warn('[password] Supabase Auth sync:', r.note);
+        }
+      });
+      res.json({ message: 'Password updated successfully' });
+      return;
+    }
+
     await prisma.user.update({
       where: { id: req.user!.id },
       data: { password: hashedPassword, sessionVersion: { increment: 1 } },
