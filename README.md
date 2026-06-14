@@ -240,3 +240,7 @@ What Hostinger’s **default Vite + Git** deploy does: it runs something like `n
 ## License
 
 MIT
+
+## Author
+
+**Md Taibur Rahaman** — [GitHub](https://github.com/Taibur-Rahaman)
